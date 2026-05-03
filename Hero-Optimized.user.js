@@ -3,11 +3,13 @@
 // @version      64.6
 // @description  Automatyczne wykrywanie, inteligentny zasięg, natywny auto-atak, poprawne limity poziomowe, naprawiony scroll.
 // @author       Ty & Gemini
-// @match        https://*.margonem.pl/
+// @match        https://*.margonem.pl/*
+// @match        https://margonem.pl/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_deleteValue
+// @grant        unsafeWindow
 // @connect      localhost
 // @connect      127.0.0.1
 // @connect      moja-domena.pl
@@ -23,6 +25,46 @@
     const MARGONEURO_LICENSE_SCRIPT_VERSION = '64.6';
     const MARGONEURO_LICENSE_KEY_STORAGE = 'margo_license_key_margoneuro';
     const MARGONEURO_DEVICE_ID_STORAGE = 'margo_device_id_margoneuro';
+    let margoneuroBootStarted = false;
+    let margoneuroInitialized = false;
+    let margoneuroLastReadinessLog = '';
+    let margoneuroLastReadinessLogAt = 0;
+
+    console.log(`[Boot] Userscript załadowany, URL: ${location.href}`);
+
+    function margoneuroGetPageWindow() {
+        try {
+            if (typeof unsafeWindow !== 'undefined' && unsafeWindow) {
+                return unsafeWindow;
+            }
+        } catch (error) {
+            // Tampermonkey może odmówić dostępu w nietypowym kontekście; wtedy używamy bieżącego window.
+        }
+        return window;
+    }
+
+    function margoneuroGetEngine() {
+        const pageWindow = margoneuroGetPageWindow();
+        return pageWindow?.Engine || window.Engine || (typeof Engine !== 'undefined' ? Engine : undefined);
+    }
+
+    function margoneuroInstallEngineBridge() {
+        const pageWindow = margoneuroGetPageWindow();
+        if (!pageWindow || pageWindow === window) return;
+
+        try {
+            Object.defineProperty(window, 'Engine', {
+                configurable: true,
+                get() {
+                    return pageWindow.Engine;
+                }
+            });
+        } catch (error) {
+            console.warn('[Boot] Nie udało się podpiąć mostu Engine z unsafeWindow', error);
+        }
+    }
+
+    margoneuroInstallEngineBridge();
 
     function margoneuroReadStorage(key) {
         try {
@@ -123,33 +165,73 @@
         return margoneuroPromptLicenseKey();
     }
 
-    function isMargonemGameReady() {
-        return (
-            typeof window.Engine !== 'undefined' &&
-            window.Engine &&
-            window.Engine.map &&
-            window.Engine.map.d &&
-            window.Engine.map.d.id &&
-            window.Engine.hero &&
-            window.Engine.hero.d
+    function getMargonemGameReadiness() {
+        const engine = margoneuroGetEngine();
+        const hasEngine = !!engine;
+        const hasMap = !!(hasEngine && engine.map);
+        const hasHero = !!(hasEngine && engine.hero);
+        const hasGameDom = !!(
+            document.querySelector('#centerbox') ||
+            document.querySelector('.game-window') ||
+            document.querySelector('#ground') ||
+            document.querySelector('#hero') ||
+            document.querySelector('.battle') ||
+            document.querySelector('.interface')
         );
+
+        return {
+            ready: Boolean(hasEngine && (hasMap || hasHero || hasGameDom)),
+            hasEngine,
+            hasMap,
+            hasHero,
+            hasGameDom
+        };
     }
 
-    function waitForMargonemGameReady({ timeoutMs = 60000, intervalMs = 500 } = {}) {
+    function logMargonemGameReadiness(force = false) {
+        const state = getMargonemGameReadiness();
+        const signature = `${state.hasEngine}:${state.hasMap}:${state.hasHero}:${state.hasGameDom}`;
+        const now = Date.now();
+        if (force || signature !== margoneuroLastReadinessLog || now - margoneuroLastReadinessLogAt > 5000) {
+            console.log('[Boot] Sprawdzam gotowość gry...');
+            console.log(`[Boot] Engine istnieje: ${state.hasEngine}`);
+            console.log(`[Boot] Engine.map istnieje: ${state.hasMap}`);
+            console.log(`[Boot] Engine.hero istnieje: ${state.hasHero}`);
+            margoneuroLastReadinessLog = signature;
+            margoneuroLastReadinessLogAt = now;
+        }
+        return state;
+    }
+
+    function isMargonemGameReady() {
+        return getMargonemGameReadiness().ready;
+    }
+
+    function waitForMargonemGameReady({ timeoutMs = 120000, intervalMs = 500, passiveIntervalMs = 2000 } = {}) {
         return new Promise((resolve) => {
             const startedAt = Date.now();
-            const timer = setInterval(() => {
-                if (isMargonemGameReady()) {
-                    clearInterval(timer);
+            let passiveMode = false;
+            let timer = null;
+
+            const tick = () => {
+                const state = logMargonemGameReadiness(!margoneuroLastReadinessLog);
+                if (state.ready) {
+                    if (timer) clearInterval(timer);
+                    console.log('[Boot] Gra gotowa');
                     resolve(true);
                     return;
                 }
 
-                if (Date.now() - startedAt >= timeoutMs) {
-                    clearInterval(timer);
-                    resolve(false);
+                if (!passiveMode && Date.now() - startedAt >= timeoutMs) {
+                    passiveMode = true;
+                    if (timer) clearInterval(timer);
+                    console.log('[Boot] Gra nie jest jeszcze gotowa, przechodzę w pasywne czekanie...');
+                    timer = setInterval(tick, passiveIntervalMs);
                 }
-            }, intervalMs);
+            };
+
+            timer = setInterval(tick, intervalMs);
+            tick();
         });
     }
 
@@ -236,6 +318,7 @@
                     console.log('[Margoneuro License] Zapisany klucz aktywny');
                 }
                 console.log('[Margoneuro License] Licencja aktywna');
+                console.log('[Boot] Licencja OK, uruchamiam Margoneuro');
                 return true;
             }
 
@@ -2126,50 +2209,66 @@ function isMapKnownInGatewayBase(mapName) {
 
     // ==========================================
 
-   async function bootMargoneuroWhenGameReady() {
-        console.log('[Margoneuro Boot] Czekam na załadowanie gry...');
-        while (!(await waitForMargonemGameReady({ timeoutMs: 60000, intervalMs: 500 }))) {
-            // Na ekranie logowania, wyboru postaci i stronie głównej nie pokazujemy promptów licencji.
-            // Po minucie wracamy do pasywnego czekania bez blokowania strony.
+   function initializeMargoneuro() {
+        if (margoneuroInitialized) {
+            console.log('[Boot] Margoneuro już zainicjalizowane, pomijam drugi start');
+            return;
         }
 
-        console.log('[Margoneuro Boot] Gra gotowa, sprawdzam licencję');
+        margoneuroInitialized = true;
+        loadData();
+        cleanOldGateways();
+        initGUI();
+        setInterval(autoDetectEngineData, 1500);
+        setInterval(heroPositionTracker, 180);
+        setInterval(radarLoop, 700);
+        document.addEventListener('keydown', handleGlobalKeydown);
+        setupMapClickListener();
+
+        // --- AUTO-WZNAWIANIE BOTA PO REFRESHU (F5 / RELOAD) ---
+        window.addEventListener('beforeunload', () => {
+            // Zapisujemy, czy bot był włączony tuż przed zniknięciem strony
+            if (window.isExping) sessionStorage.setItem('hero_resume_exp', 'true');
+            else sessionStorage.removeItem('hero_resume_exp');
+
+            if (typeof isPatrolling !== 'undefined' && isPatrolling) sessionStorage.setItem('hero_resume_patrol', 'true');
+            else sessionStorage.removeItem('hero_resume_patrol');
+        });
+
+        setTimeout(() => {
+            if (sessionStorage.getItem('hero_resume_exp') === 'true') {
+                let btn = document.getElementById('btnStartExp');
+                if (btn && !window.isExping) btn.click();
+                if (window.logExp) window.logExp("🔄 Automatycznie wznowiono Expa po odświeżeniu gry!", "#4caf50");
+            } else if (sessionStorage.getItem('hero_resume_patrol') === 'true') {
+                let btn = document.getElementById('btnStartStop');
+                if (btn && typeof isPatrolling !== 'undefined' && !isPatrolling) btn.click();
+                if (window.logHero) window.logHero("🔄 Automatycznie wznowiono Patrol po odświeżeniu gry!", "#4caf50");
+            }
+        }, 1500); // 1.5 sekundy opóźnienia, żeby gra "odetchnęła" po wczytaniu
+
+        console.log('[Boot] Inicjalizacja UI zakończona');
+    }
+
+   async function bootMargoneuroWhenGameReady() {
+        if (margoneuroBootStarted) {
+            console.log('[Boot] Boot już działa, pomijam drugi start');
+            return;
+        }
+
+        margoneuroBootStarted = true;
+        await waitForMargonemGameReady({ timeoutMs: 120000, intervalMs: 500, passiveIntervalMs: 2000 });
+
+        if (margoneuroInitialized) {
+            return;
+        }
+
+        console.log('[Boot] Startuję weryfikację licencji');
         if (!(await margoneuroVerifyLicenseBeforeStart())) {
             return;
         }
 
-        console.log('[Margoneuro Boot] Uruchamiam UI bota');
-        console.log('[Margoneuro] Licencja OK, inicjalizuję UI');
-            loadData();
-            cleanOldGateways();
-            initGUI();
-            setInterval(autoDetectEngineData, 1500);
-            setInterval(heroPositionTracker, 180);
-            setInterval(radarLoop, 700);
-           document.addEventListener('keydown', handleGlobalKeydown);
-                setupMapClickListener();
-
-                // --- AUTO-WZNAWIANIE BOTA PO REFRESHU (F5 / RELOAD) ---
-                window.addEventListener('beforeunload', () => {
-                    // Zapisujemy, czy bot był włączony tuż przed zniknięciem strony
-                    if (window.isExping) sessionStorage.setItem('hero_resume_exp', 'true');
-                    else sessionStorage.removeItem('hero_resume_exp');
-
-                    if (typeof isPatrolling !== 'undefined' && isPatrolling) sessionStorage.setItem('hero_resume_patrol', 'true');
-                    else sessionStorage.removeItem('hero_resume_patrol');
-                });
-
-                setTimeout(() => {
-                    if (sessionStorage.getItem('hero_resume_exp') === 'true') {
-                        let btn = document.getElementById('btnStartExp');
-                        if (btn && !window.isExping) btn.click();
-                        if (window.logExp) window.logExp("🔄 Automatycznie wznowiono Expa po odświeżeniu gry!", "#4caf50");
-                    } else if (sessionStorage.getItem('hero_resume_patrol') === 'true') {
-                        let btn = document.getElementById('btnStartStop');
-                        if (btn && typeof isPatrolling !== 'undefined' && !isPatrolling) btn.click();
-                        if (window.logHero) window.logHero("🔄 Automatycznie wznowiono Patrol po odświeżeniu gry!", "#4caf50");
-                    }
-                }, 1500); // 1.5 sekundy opóźnienia, żeby gra "odetchnęła" po wczytaniu
+        initializeMargoneuro();
     }
 
     bootMargoneuroWhenGameReady();
