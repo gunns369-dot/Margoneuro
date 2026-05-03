@@ -1181,6 +1181,12 @@ setTimeout(() => window.DatabaseModule.initDatabases(), 3000);
 
     let heroMapOrder = {};
 
+    window.margoneuroTeleportInProgress = !!window.margoneuroTeleportInProgress;
+    window.margoneuroLastTeleportAt = window.margoneuroLastTeleportAt || 0;
+    window.__margoneuroGatewaysByMap = window.__margoneuroGatewaysByMap || {};
+    window.__lastBerserkSyncToggleAt = window.__lastBerserkSyncToggleAt || 0;
+    window.__lastBerserkDecisionKey = window.__lastBerserkDecisionKey || "";
+
 
 
     let bossSavedCoords = JSON.parse(localStorage.getItem('hero_boss_coords_v64') || localStorage.getItem('hero_e2_coords_v62') || '{}');
@@ -1579,6 +1585,22 @@ let opacityValue = 0.95;
         }
         return lastMapName;
     };
+
+    function normalizeMapName(name) {
+        return String(name || "")
+            .replace(/<br\s*\/?>/gi, "\n")
+            .replace(/<[^>]*>?/gm, "")
+            .replace(/[\u200B-\u200D\uFEFF]/g, "")
+            .replace(/\u00A0/g, " ")
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .replace(/ł/g, "l")
+            .replace(/Ł/g, "l")
+            .replace(/\s+/g, " ")
+            .trim()
+            .toLowerCase();
+    }
+    window.normalizeMapName = normalizeMapName;
 
 
 
@@ -2520,6 +2542,232 @@ function cleanOldGateways() {
         return changed;
     };
 
+    function logGatewayDecision(message, color = "#90caf9") {
+        console.log(`[Gateways] ${message}`);
+        if (window.logExp) window.logExp(`[Gateways] ${message}`, color);
+        if (window.logHero) window.logHero(`[Gateways] ${message}`, color);
+    }
+
+    function markMargoneuroTeleportInProgress(reason = 'teleport', holdMs = 9000) {
+        window.margoneuroTeleportInProgress = true;
+        window.margoneuroLastTeleportAt = Date.now();
+        window.__margoneuroLastTeleportReason = reason;
+        clearTimeout(window.__margoneuroTeleportClearTimer);
+        window.__margoneuroTeleportClearTimer = setTimeout(() => {
+            window.margoneuroTeleportInProgress = false;
+        }, holdMs);
+        logGatewayDecision(`Oznaczono teleport: ${reason}`, "#ba68c8");
+    }
+    window.markMargoneuroTeleportInProgress = markMargoneuroTeleportInProgress;
+
+    function getGatewayCoordList(gateway) {
+        const coords = [];
+        if (!gateway) return coords;
+        if (Array.isArray(gateway.allCoords)) {
+            gateway.allCoords.forEach(c => {
+                if (Array.isArray(c) && Number.isFinite(parseInt(c[0], 10)) && Number.isFinite(parseInt(c[1], 10))) {
+                    coords.push({ x: parseInt(c[0], 10), y: parseInt(c[1], 10) });
+                } else if (c && Number.isFinite(parseInt(c.x, 10)) && Number.isFinite(parseInt(c.y, 10))) {
+                    coords.push({ x: parseInt(c.x, 10), y: parseInt(c.y, 10) });
+                }
+            });
+        }
+        if (Number.isFinite(parseInt(gateway.x, 10)) && Number.isFinite(parseInt(gateway.y, 10))) {
+            const x = parseInt(gateway.x, 10);
+            const y = parseInt(gateway.y, 10);
+            if (!coords.some(c => c.x === x && c.y === y)) coords.push({ x, y });
+        }
+        return coords;
+    }
+
+    function rememberScannedGatewaysForMap(mapName, gateways = []) {
+        if (!mapName || !Array.isArray(gateways)) return;
+        window.__margoneuroGatewaysByMap = window.__margoneuroGatewaysByMap || {};
+        window.__margoneuroGatewaysByMap[mapName] = gateways
+            .filter(Boolean)
+            .map(g => ({
+                x: parseInt(g.x, 10),
+                y: parseInt(g.y, 10),
+                targetMap: g.targetMap || g.target || ""
+            }))
+            .filter(g => Number.isFinite(g.x) && Number.isFinite(g.y));
+    }
+
+    function getKnownGatewayCandidatesForMap(mapName) {
+        const candidates = [];
+        if (!mapName) return candidates;
+        const mapNorm = normMapName(mapName);
+
+        const cached = window.__margoneuroGatewaysByMap || {};
+        for (const cachedMap in cached) {
+            if (normMapName(cachedMap) !== mapNorm) continue;
+            (cached[cachedMap] || []).forEach(g => {
+                if (Number.isFinite(parseInt(g.x, 10)) && Number.isFinite(parseInt(g.y, 10))) {
+                    candidates.push({
+                        x: parseInt(g.x, 10),
+                        y: parseInt(g.y, 10),
+                        targetMap: g.targetMap || "",
+                        source: 'scan-cache'
+                    });
+                }
+            });
+        }
+
+        for (const sourceMap in (globalGateways || {})) {
+            if (normMapName(sourceMap) !== mapNorm) continue;
+            const edges = globalGateways[sourceMap] || {};
+            for (const targetMap in edges) {
+                getGatewayCoordList(edges[targetMap]).forEach(c => {
+                    candidates.push({
+                        x: c.x,
+                        y: c.y,
+                        targetMap,
+                        source: 'gateway-db'
+                    });
+                });
+            }
+        }
+
+        const seen = new Set();
+        return candidates.filter(g => {
+            const key = `${g.x}:${g.y}:${normMapName(g.targetMap)}:${g.source}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+    }
+
+    function getNearestKnownGatewayForMap(mapName, x, y, targetMap = null, maxDistance = 3) {
+        const hx = parseInt(x, 10);
+        const hy = parseInt(y, 10);
+        if (!Number.isFinite(hx) || !Number.isFinite(hy)) return null;
+        const targetNorm = targetMap ? normMapName(targetMap) : "";
+        let best = null;
+        for (const gw of getKnownGatewayCandidatesForMap(mapName)) {
+            const dist = Math.max(Math.abs(gw.x - hx), Math.abs(gw.y - hy));
+            if (dist > maxDistance) continue;
+            const targetMatches = !!(targetNorm && normMapName(gw.targetMap) === targetNorm);
+            if (!best || dist < best.distance || (dist === best.distance && targetMatches && !best.targetMatches)) {
+                best = { ...gw, distance: dist, targetMatches };
+            }
+        }
+        return best;
+    }
+
+    function shouldRecordMapTransition(prevState, nextState) {
+        const now = Date.now();
+        const prevMap = prevState?.map || "";
+        const nextMap = nextState?.map || "";
+        const pending = prevState?.pendingTransition || null;
+        const pendingMatches = !!(
+            pending &&
+            normMapName(pending.fromMap) === normMapName(prevMap) &&
+            normMapName(pending.toMap) === normMapName(nextMap) &&
+            now - (pending.issuedAt || 0) < 25000
+        );
+
+        if (!prevMap || !nextMap || normMapName(prevMap) === normMapName(nextMap)) {
+            return { record: false, reason: 'unknown_transition' };
+        }
+
+        if (window.margoneuroTeleportInProgress || now - (window.margoneuroLastTeleportAt || 0) < 9000) {
+            return { record: false, reason: 'teleport_in_progress' };
+        }
+
+        if (window.__lastEqTeleportAt && now - window.__lastEqTeleportAt < 9000) {
+            return { record: false, reason: 'item_teleport_detected' };
+        }
+
+        if (pendingMatches) {
+            return { record: true, reason: 'ok_gateway_transition', gateway: { x: pending.fromX, y: pending.fromY, targetMap: pending.toMap, source: pending.source || 'pending' } };
+        }
+
+        if (!Number.isFinite(parseInt(prevState?.x, 10)) || !Number.isFinite(parseInt(prevState?.y, 10))) {
+            return { record: false, reason: 'unknown_transition' };
+        }
+
+        const nearest = getNearestKnownGatewayForMap(prevMap, prevState.x, prevState.y, nextMap, 3);
+        if (!nearest) {
+            return { record: false, reason: 'not_near_gateway' };
+        }
+
+        if (!nearest.targetMatches) {
+            return { record: false, reason: 'no_gateway_match', gateway: nearest };
+        }
+
+        return { record: true, reason: 'ok_gateway_transition', gateway: nearest };
+    }
+    window.shouldRecordMapTransition = shouldRecordMapTransition;
+
+    function removeCurrentMapFromGatewayBase() {
+        const currentMap = getCurrentMapName();
+        if (!currentMap) return heroAlert("Nie wykryto aktualnej mapy.");
+        heroConfirm("Czy na pewno usunąć przejścia dla aktualnej mapy z bazy?", (res) => {
+            if (!res) return;
+            const sourceKey = Object.keys(globalGateways || {}).find(k => normMapName(k) === normMapName(currentMap));
+            if (sourceKey && globalGateways[sourceKey]) {
+                logGatewayDecision(`Usuwam mapę z bazy: ${sourceKey}`, "#ffb74d");
+                delete globalGateways[sourceKey];
+                saveGateways();
+                if (typeof window.renderInternalMapGraph === 'function') window.renderInternalMapGraph();
+                updateUI();
+                logGatewayDecision("Usunięto przejścia dla mapy", "#81c784");
+            } else {
+                logGatewayDecision("Nie znaleziono mapy w bazie", "#ffb74d");
+            }
+        });
+    }
+    window.removeCurrentMapFromGatewayBase = removeCurrentMapFromGatewayBase;
+
+    function cleanSuspiciousGatewayTransitionsForCurrentMap() {
+        const currentMap = getCurrentMapName();
+        const sourceKey = Object.keys(globalGateways || {}).find(k => normMapName(k) === normMapName(currentMap));
+        if (!currentMap || !sourceKey || !globalGateways?.[sourceKey]) {
+            logGatewayDecision("Nie znaleziono przejść dla aktualnej mapy", "#ffb74d");
+            return 0;
+        }
+        const liveGateways = (typeof HeroScannerModule !== 'undefined' && HeroScannerModule.scanCurrentMap)
+            ? (HeroScannerModule.scanCurrentMap(currentMap, typeof ZAKONNICY !== 'undefined' ? ZAKONNICY : null) || [])
+            : [];
+        rememberScannedGatewaysForMap(currentMap, liveGateways);
+        if (!liveGateways.length) {
+            logGatewayDecision("Nie czyszczę: skaner nie zwrócił przejść dla aktualnej mapy", "#ffb74d");
+            return 0;
+        }
+        const liveGatewayCoords = liveGateways
+            .map(g => ({ x: parseInt(g.x, 10), y: parseInt(g.y, 10) }))
+            .filter(g => Number.isFinite(g.x) && Number.isFinite(g.y));
+        const isNearLiveGateway = (coord) => liveGatewayCoords.some(g => Math.max(Math.abs(g.x - coord.x), Math.abs(g.y - coord.y)) <= 1);
+
+        let removed = 0;
+        const edges = globalGateways[sourceKey] || {};
+        for (const targetMap of Object.keys(edges)) {
+            const entry = edges[targetMap];
+            const coords = getGatewayCoordList(entry);
+            const saneCoords = coords.filter(isNearLiveGateway);
+
+            if (saneCoords.length === 0) {
+                delete edges[targetMap];
+                removed++;
+                continue;
+            }
+
+            entry.x = saneCoords[0].x;
+            entry.y = saneCoords[0].y;
+            entry.allCoords = saneCoords.map(c => [c.x, c.y]);
+        }
+
+        if (Object.keys(edges).length === 0) delete globalGateways[sourceKey];
+        if (removed > 0) {
+            saveGateways();
+            updateUI();
+            if (typeof window.renderInternalMapGraph === 'function') window.renderInternalMapGraph();
+        }
+        logGatewayDecision(`Usunięto podejrzane przejścia: ${removed}`, removed ? "#81c784" : "#a99a75");
+        return removed;
+    }
+    window.cleanSuspiciousGatewayTransitionsForCurrentMap = cleanSuspiciousGatewayTransitionsForCurrentMap;
+
 
 
     function getLastKnownPositionForMap(mapName) {
@@ -2557,6 +2805,39 @@ function cleanOldGateways() {
         const toX = Engine?.hero?.d?.x;
         const toY = Engine?.hero?.d?.y;
 
+        console.log("[Gateways] Zmiana mapy wykryta");
+        const transitionDecision = shouldRecordMapTransition({
+            map: previousMap,
+            x: fromX,
+            y: fromY,
+            pendingTransition: pending
+        }, {
+            map: currentMap,
+            x: toX,
+            y: toY
+        });
+        logGatewayDecision(`transition record=${transitionDecision.record} reason=${transitionDecision.reason}`, transitionDecision.record ? "#81c784" : "#ffb74d");
+        if (!transitionDecision.record) {
+            if (transitionDecision.reason === 'teleport_in_progress' || transitionDecision.reason === 'item_teleport_detected') {
+                logGatewayDecision("Pomijam zapis przejścia po teleportacji", "#ffb74d");
+            }
+            if (pendingMatches) window.__pendingGatewayTransition = null;
+            window.expTransitionHistory = Array.isArray(window.expTransitionHistory) ? window.expTransitionHistory : [];
+            window.expTransitionHistory.push({
+                fromMap: previousMap,
+                toMap: currentMap,
+                fromX: Number.isFinite(parseInt(fromX, 10)) ? parseInt(fromX, 10) : null,
+                fromY: Number.isFinite(parseInt(fromY, 10)) ? parseInt(fromY, 10) : null,
+                toX: Number.isFinite(parseInt(toX, 10)) ? parseInt(toX, 10) : null,
+                toY: Number.isFinite(parseInt(toY, 10)) ? parseInt(toY, 10) : null,
+                reason: `${reason}:${transitionDecision.reason}`,
+                recorded: false,
+                ts: now
+            });
+            if (window.expTransitionHistory.length > 40) window.expTransitionHistory.shift();
+            return false;
+        }
+
         const changed = window.rememberMapTransition(previousMap, currentMap, fromX, fromY, toX, toY, reason);
         window.expTransitionHistory = Array.isArray(window.expTransitionHistory) ? window.expTransitionHistory : [];
         const record = {
@@ -2566,7 +2847,8 @@ function cleanOldGateways() {
             fromY: Number.isFinite(parseInt(fromY, 10)) ? parseInt(fromY, 10) : null,
             toX: Number.isFinite(parseInt(toX, 10)) ? parseInt(toX, 10) : null,
             toY: Number.isFinite(parseInt(toY, 10)) ? parseInt(toY, 10) : null,
-            reason,
+            reason: `${reason}:${transitionDecision.reason}`,
+            recorded: true,
             ts: now
         };
         const prevRecord = window.expTransitionHistory[window.expTransitionHistory.length - 1];
@@ -2590,6 +2872,7 @@ function cleanOldGateways() {
         const now = Date.now();
         for (let i = window.expTransitionHistory.length - 1; i >= 0; i--) {
             const rec = window.expTransitionHistory[i];
+            if (rec?.recorded === false) continue;
             if (!rec || normMapName(rec.toMap) !== currNorm) continue;
             if (!rec.fromMap || normMapName(rec.fromMap) === currNorm) continue;
             if (now - (rec.ts || 0) > 20 * 60 * 1000) continue;
@@ -3178,6 +3461,7 @@ let attackInterval = null;
     if (!currMap) return;
 
     let gatewaysFound = HeroScannerModule.scanCurrentMap(currMap, ZAKONNICY) || [];
+    rememberScannedGatewaysForMap(currMap, gatewaysFound);
     let addedOrUpdated = false;
 
     if (!globalGateways[currMap]) globalGateways[currMap] = {};
@@ -3287,6 +3571,13 @@ function autoDetectEngineData() {
         }
         positionHistory = [];
         lastMapName = currentName;
+        if (typeof syncBerserkState === 'function') syncBerserkState('map_change');
+        if (window.margoneuroTeleportInProgress && Date.now() - (window.margoneuroLastTeleportAt || 0) > 1200) {
+            clearTimeout(window.__margoneuroTeleportClearTimer);
+            window.__margoneuroTeleportClearTimer = setTimeout(() => {
+                window.margoneuroTeleportInProgress = false;
+            }, 3500);
+        }
         heroFoundAlerted = false;
 
         if (typeof autoLearnGateways === 'function') autoLearnGateways();
@@ -3511,6 +3802,12 @@ function autoDetectEngineData() {
                 itemObj = Object.values(itemsList).find(i => (i?.d || i)?.id == itemId) || null;
             }
 
+            const rawItem = itemObj?.d || itemObj || null;
+            const rawStats = String(rawItem?.stat || rawItem?._cachedStats?.stat || "");
+            if (rawStats.includes("teleport=") && typeof markMargoneuroTeleportInProgress === 'function') {
+                markMargoneuroTeleportInProgress('eq_item');
+            }
+
             if (itemObj && typeof Engine !== 'undefined' && Engine.heroEquipment && typeof Engine.heroEquipment.sendUseRequest === 'function') {
                 Engine.heroEquipment.sendUseRequest(itemObj);
             } else if (typeof Engine !== 'undefined' && Engine.items && typeof Engine.items.useItem === 'function') {
@@ -3550,6 +3847,7 @@ window.executeRushStep = function() {
             window.isRushing = false;
             window._lastRushNextMap = null;
             window._lastRushTargetLog = null;
+            if (typeof syncBerserkState === 'function') syncBerserkState('rush_target_reached');
             let btn = document.getElementById('btnStartStop');
             if (btn) { btn.innerHTML = '<span class="btn-icon">▶</span><span>START</span>'; btn.style.color = "#4caf50"; btn.style.borderColor = "#4caf50"; }
 
@@ -3631,6 +3929,10 @@ window.executeRushStep = function() {
             }
             clearTimeout(rushInterval);
             window.__lastEqTeleportAt = Date.now();
+            if (typeof markMargoneuroTeleportInProgress === 'function') {
+                markMargoneuroTeleportInProgress('eq_item');
+            }
+            if (typeof syncBerserkState === 'function') syncBerserkState('eq_teleport');
             window.expMapHistory = [];
             window.useItemById(bestTp.id);
             rushInterval = setTimeout(window.executeRushStep, 2500);
@@ -4354,6 +4656,10 @@ window.handleTeleportNPC = function(targetMap) {
             return;
         }
 
+        if (typeof markMargoneuroTeleportInProgress === 'function') {
+            markMargoneuroTeleportInProgress('npc_teleport');
+        }
+        if (typeof syncBerserkState === 'function') syncBerserkState('npc_teleport');
         HeroTeleportModule.processDialog(
             targetMap,
             () => {
@@ -5235,7 +5541,12 @@ function initGUI() {
         const gatewaysGui = document.createElement('div'); gatewaysGui.id = 'heroGatewaysGUI'; gatewaysGui.className = 'hero-window'; gatewaysGui.style.display = 'none';
         gatewaysGui.innerHTML = `
             <div class="gui-header">🗃️ Baza Przejść <button class="btn-close" onclick="document.getElementById('heroGatewaysGUI').style.display='none'">✖</button></div>
-            <div class="gui-content"><button id="btnScanGateways" class="btn btn-sepia" style="margin-bottom:5px;">🔍 SKANUJ OBECNĄ MAPĘ</button><div id="gatewaysListContainer"></div></div>
+            <div class="gui-content">
+                <button id="btnScanGateways" class="btn btn-sepia" style="margin-bottom:5px;">🔍 SKANUJ OBECNĄ MAPĘ</button>
+                <button id="btnRemoveCurrentGatewayMap" class="btn btn-sepia" style="margin-bottom:5px; color:#ffb74d;">Usuń aktualną mapę</button>
+                <button id="btnCleanSuspiciousGateways" class="btn btn-sepia" style="margin-bottom:5px; color:#81c784;">Wyczyść podejrzane przejścia</button>
+                <div id="gatewaysListContainer"></div>
+            </div>
         `;
         document.body.appendChild(gatewaysGui);
 
@@ -5575,6 +5886,7 @@ expEmptyScans = 0;
                 saveSettings();
                 if (window.RouteCombatFSM) window.RouteCombatFSM.syncFromSettings();
                 if (window.BerserkController) window.BerserkController.onBotStart('route_start');
+                if (typeof syncBerserkState === 'function') syncBerserkState('route_start');
             }
         } else {
             if (!window.__stoppingForCaptcha) window.margoneuroStoppedManually = true;
@@ -5591,6 +5903,7 @@ expEmptyScans = 0;
             HeroLogger.emit('INFO', 'ROUTE_STOP', 'STOP ekspienia/trasy', "#f44336", { category: 'ROUTE' });
 
             if (window.BerserkController) window.BerserkController.onBotStop('route_stop');
+            if (typeof syncBerserkState === 'function') syncBerserkState('route_stop');
         }
     });
 }
@@ -5861,6 +6174,7 @@ bindChange('useTeleportsEq', (e) => { botSettings.exp.useTeleportsEq = e.target.
                 window.RouteCombatFSM.update({ berserkCheckbox: !!e.target.checked }, 'checkbox_change');
                 window.RouteCombatFSM.syncRuntimeContext('checkbox_runtime_sync');
             }
+            if (typeof syncBerserkState === 'function') syncBerserkState('checkbox_change');
         });
         bindChange('berserkCommon', (e) => { botSettings.berserk.common = e.target.checked; saveSettings(); if (typeof window.updateServerBerserk === 'function') window.updateServerBerserk(); });
         bindChange('berserkE1', (e) => { botSettings.berserk.e1 = e.target.checked; saveSettings(); if (typeof window.updateServerBerserk === 'function') window.updateServerBerserk(); });
@@ -5995,6 +6309,12 @@ selHero.addEventListener('change', (e) => {
 
 
         document.getElementById('btnScanGateways').addEventListener('click', scanCurrentMapForGateways);
+        document.getElementById('btnRemoveCurrentGatewayMap')?.addEventListener('click', removeCurrentMapFromGatewayBase);
+        document.getElementById('btnCleanSuspiciousGateways')?.addEventListener('click', () => {
+            heroConfirm("Wyczyścić podejrzane przejścia dla aktualnej mapy?", (res) => {
+                if (res) cleanSuspiciousGatewayTransitionsForCurrentMap();
+            });
+        });
 
 
 
@@ -6291,7 +6611,23 @@ selHero.addEventListener('change', (e) => {
 
     };
 
-        window.deleteGateway = function(sourceMap, targetMapName) { if (globalGateways[sourceMap] && globalGateways[sourceMap][targetMapName]) { heroConfirm(`Usunąć zapisane przejście z [${sourceMap}] do [${targetMapName}]?`, (res) => { if (res) { delete globalGateways[sourceMap][targetMapName]; saveGateways(); updateUI(); } }); } };
+        window.deleteGateway = function(sourceMap, targetMapName) {
+            if (globalGateways[sourceMap] && globalGateways[sourceMap][targetMapName]) {
+                heroConfirm(`Usunąć zapisane przejście z [${sourceMap}] do [${targetMapName}]?`, (res) => {
+                    if (res) {
+                        logGatewayDecision(`Usuwam przejście z bazy: ${sourceMap} -> ${targetMapName}`, "#ffb74d");
+                        delete globalGateways[sourceMap][targetMapName];
+                        if (Object.keys(globalGateways[sourceMap]).length === 0) delete globalGateways[sourceMap];
+                        saveGateways();
+                        if (typeof window.renderInternalMapGraph === 'function') window.renderInternalMapGraph();
+                        updateUI();
+                        logGatewayDecision("Usunięto przejście z bazy", "#81c784");
+                    }
+                });
+            } else {
+                logGatewayDecision("Nie znaleziono przejścia w bazie", "#ffb74d");
+            }
+        };
 
         window.goSinglePoint = function(x, y, requiredMap) { let currentMap = lastMapName; if (requiredMap && requiredMap !== currentMap) { return heroAlert(`Błąd wejścia!\n\nTo przejście znajduje się fizycznie na mapie:\n[${requiredMap}]\n\nObecnie stoisz na:\n[${currentMap}]`); } if(isPatrolling || isRushing) stopPatrol(false); safeGoTo(x, y, false); };
 
@@ -6752,6 +7088,7 @@ function scanCurrentMapForGateways() {
         let currentMap = Engine.map.d.name;
 
         let gatewaysFound = HeroScannerModule.scanCurrentMap(currentMap, ZAKONNICY);
+        rememberScannedGatewaysForMap(currentMap, gatewaysFound);
         let container = document.getElementById('gatewaysListContainer');
         if (!container) return;
 
@@ -7248,6 +7585,7 @@ const RouteCombatFSM = {
         this.evaluate(reason);
     },
     shouldBerserkBeOn(ctx = this.state) {
+        if (typeof shouldBerserkBeActive === 'function') return !!shouldBerserkBeActive().active;
         return !!(ctx.running && ctx.currentTask === 'EXP' && ctx.inRouteMap && ctx.berserkCheckbox);
     },
     evaluate(reason = 'sync') {
@@ -7339,6 +7677,13 @@ const BerserkController = {
     setBotBerserkState(nextState, reason = 'fsm') {
         const active = !!(Engine?.settings?.d?.fight_auto_solo || botSettings?.berserk?.enabled);
         if (!!nextState === active) return false;
+        if (nextState && typeof shouldBerserkBeActive === 'function') {
+            const decision = shouldBerserkBeActive();
+            if (!decision.active) {
+                HeroLogger.emit('DEBUG', 'BERSERK_BLOCKED', `Nie włączam berserka reason=${decision.reason}`, "#ffb74d", { category: 'BERSERK', dedupeMs: 1600 });
+                return false;
+            }
+        }
         const action = nextState ? 'BERSERK_ON' : 'BERSERK_OFF';
         return ActionExecutor.runWithRetry('TOGGLE_BERSERK', { state: !!nextState }, () => {
             botSettings.berserk.enabled = !!nextState;
@@ -7369,9 +7714,115 @@ const BerserkController = {
     }
 };
 window.BerserkController = BerserkController;
+
+function logBerserkDecision(message, color = "#ffcc80") {
+    console.log(`[Berserk] ${message}`);
+    if (window.logExp) window.logExp(`[Berserk] ${message}`, color);
+}
+
+function getExpRouteMapsNormalized() {
+    const maps = (typeof getCurrentExpHuntMaps === 'function')
+        ? getCurrentExpHuntMaps()
+        : (botSettings?.exp?.mapOrder || []);
+    return Array.isArray(maps) ? maps.map(m => normalizeMapName(m)).filter(Boolean) : [];
+}
+
+function isCurrentMapInExpRoute() {
+    const currentMap = getCurrentMapName();
+    const current = normalizeMapName(currentMap);
+    if (!current) return false;
+    const expRouteMapsNormalized = getExpRouteMapsNormalized();
+    if (expRouteMapsNormalized.includes(current)) return true;
+    if (typeof isMapInSelectedExpowisko === 'function' && isMapInSelectedExpowisko(currentMap)) return true;
+    return false;
+}
+window.isCurrentMapInExpRoute = isCurrentMapInExpRoute;
+
+function shouldBerserkBeActive() {
+    const now = Date.now();
+    const botRunning = !!window.isExping;
+    if (!botRunning) return { active: false, reason: 'bot_not_running' };
+    if (!botSettings?.berserk?.userEnabled) return { active: false, reason: 'berserk_disabled_by_user' };
+
+    const currentTask = window.autoSellState?.active ? 'SELL' : (window.autoPotState?.active ? 'SHOP' : 'EXP');
+    if (currentTask !== 'EXP') return { active: false, reason: 'not_exp_mode' };
+
+    const mapInRoute = isCurrentMapInExpRoute();
+    if (!mapInRoute) return { active: false, reason: 'map_not_in_exp_route' };
+
+    const rushing = !!(window.isRushing || (typeof isRushing !== 'undefined' && isRushing) || window.rushNextMap);
+    if (rushing) return { active: false, reason: 'transit_mode' };
+    if (window.isRushingToShop || window.autoPotState?.active) return { active: false, reason: 'shop_mode' };
+    if (window.autoSellState?.active) return { active: false, reason: 'sell_mode' };
+    if (window.margoneuroTeleportInProgress || now - (window.margoneuroLastTeleportAt || 0) < 9000 || now - (window.__lastEqTeleportAt || 0) < 9000) {
+        return { active: false, reason: 'teleporting' };
+    }
+    if (window.margoneuroPausedByQuiz || window.__trapBotPausedByCaptcha || (window.__captchaPhase && window.__captchaPhase !== 'none')) {
+        return { active: false, reason: 'quiz_active' };
+    }
+    if (window.__pvpEscapeActive || window.__pvpFleeActive || window.pvpEscapeActive) {
+        return { active: false, reason: 'pvp_escape' };
+    }
+    if (typeof expMapTransitionCooldown !== 'undefined' && expMapTransitionCooldown > now) {
+        return { active: false, reason: 'map_transition' };
+    }
+    return { active: true, reason: 'ok_exp_map' };
+}
+window.shouldBerserkBeActive = shouldBerserkBeActive;
+
+function getCurrentBerserkActive() {
+    return !!(botSettings?.berserk?.enabled || Engine?.settings?.d?.fight_auto_solo);
+}
+
+function logBerserkNoChange() {
+    const now = Date.now();
+    if (now - (window.__lastBerserkNoChangeLogAt || 0) < 12000) return;
+    window.__lastBerserkNoChangeLogAt = now;
+    logBerserkDecision("Bez zmian, stan poprawny", "#a99a75");
+}
+
+function ensureBerserkEnabled(reason = 'sync') {
+    if (getCurrentBerserkActive()) {
+        logBerserkNoChange();
+        return false;
+    }
+    const now = Date.now();
+    if (now - (window.__lastBerserkSyncToggleAt || 0) < 2200) return false;
+    window.__lastBerserkSyncToggleAt = now;
+    logBerserkDecision("Włączam berserka", "#81c784");
+    return window.BerserkController?.setBotBerserkState?.(true, reason);
+}
+
+function ensureBerserkDisabled(reason = 'sync') {
+    if (!getCurrentBerserkActive()) {
+        logBerserkNoChange();
+        return false;
+    }
+    const now = Date.now();
+    if (now - (window.__lastBerserkSyncToggleAt || 0) < 1800) return false;
+    window.__lastBerserkSyncToggleAt = now;
+    logBerserkDecision(`Wyłączam berserka reason=${reason}`, "#ffb74d");
+    return window.BerserkController?.setBotBerserkState?.(false, reason);
+}
+
+function syncBerserkState(reason = 'sync') {
+    const decision = shouldBerserkBeActive();
+    const key = `${decision.active}:${decision.reason}:${getCurrentBerserkActive() ? 1 : 0}`;
+    if (window.__lastBerserkDecisionKey !== key || reason !== 'poll') {
+        logBerserkDecision(`decision active=${decision.active} reason=${decision.reason}`, decision.active ? "#81c784" : "#ffb74d");
+        window.__lastBerserkDecisionKey = key;
+    }
+    if (decision.active) return ensureBerserkEnabled(decision.reason);
+    return ensureBerserkDisabled(decision.reason);
+}
+window.syncBerserkState = syncBerserkState;
+
 setInterval(() => {
     if (window.BerserkController?.syncObservedState) window.BerserkController.syncObservedState('poll');
 }, 900);
+setInterval(() => {
+    if (typeof syncBerserkState === 'function') syncBerserkState('safety_check');
+}, 3500);
 
 const MonsterMemory = {
     items: new Map(),
@@ -7960,18 +8411,7 @@ function isMapInSelectedExpowisko(mapName) {
 }
 
 function normMapName(s) {
-    return String(s || "")
-        .replace(/<br\s*\/?>/gi, "\n")
-        .replace(/<[^>]*>?/gm, "")
-        .replace(/[\u200B-\u200D\uFEFF]/g, "")
-        .replace(/\u00A0/g, " ")
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .replace(/ł/g, "l")
-        .replace(/Ł/g, "l")
-        .replace(/\s+/g, " ")
-        .trim()
-        .toLowerCase();
+    return normalizeMapName(s);
 }
 
 function findMatchingExpMapName(mapName, mapsPool = null) {
@@ -7983,6 +8423,7 @@ function findMatchingExpMapName(mapName, mapsPool = null) {
 function setExpBerserkState(shouldEnable) {
     if (!botSettings?.berserk || !window.RouteCombatFSM) return;
     window.RouteCombatFSM.update({ inRouteMap: !!shouldEnable }, shouldEnable ? 'exp_map_enter' : 'exp_map_leave');
+    if (typeof syncBerserkState === 'function') syncBerserkState(shouldEnable ? 'exp_map_enter' : 'exp_map_leave');
 }
 
     function getClosestExpMapPath(currMap, mapsPool = null) {
@@ -8491,6 +8932,7 @@ function requestGatewayRefresh(reason = 'loop', forceNow = false) {
     let scanned = [];
     try {
         scanned = HeroScannerModule.scanCurrentMap(currentMap, typeof ZAKONNICY !== 'undefined' ? ZAKONNICY : null) || [];
+        rememberScannedGatewaysForMap(currentMap, scanned);
     } catch (e) {
         scanned = [];
     }
@@ -8552,6 +8994,7 @@ function stopRushBecauseExpMapReached(currMap, reason = 'exp_route_reached') {
             inRouteMap: true
         }, reason);
     }
+    if (typeof syncBerserkState === 'function') syncBerserkState(reason);
     return true;
 }
 
@@ -12585,8 +13028,8 @@ window.openShopAsync = async (namePart) => {
                 resumed = resumePatrolAfterTrapSnapshot(snap) || resumed;
             }
 
-            if (snap.berserk && window.BerserkController?.setBotBerserkState) {
-                window.BerserkController.setBotBerserkState(true, 'captcha_resume');
+            if (snap.berserk && typeof syncBerserkState === 'function') {
+                syncBerserkState('captcha_resume');
             }
 
             return resumed;
@@ -13013,6 +13456,7 @@ window.openShopAsync = async (namePart) => {
             } else {
                 players.forEach(p => { window.__playerThreatMemory[p.id] = { dist: Math.max(Math.abs(Engine.hero.d.x - p.x), Math.abs(Engine.hero.d.y - p.y)), ts: nowTs, x: p.x, y: p.y }; });
             }
+            if (!shouldFlee) window.__pvpEscapeActive = false;
 
             if (newPlayers.length > 0) {
                 let msgTitle = newPlayers.length === 1 ? `👁️ Wykryto Gracza!` : `👁️ Wykryto Graczy (${newPlayers.length})!`;
@@ -13020,6 +13464,8 @@ window.openShopAsync = async (namePart) => {
                 let logBody = newPlayers.map(p => `${p.nick} (${p.lvl} lvl)`).join('<br> &nbsp;&nbsp;&nbsp; ↳ ');
 
                 if (shouldFlee) {
+                    window.__pvpEscapeActive = true;
+                    if (typeof syncBerserkState === 'function') syncBerserkState('pvp_escape');
                     const chased = threatPlayers.some(t => t.chase);
                     if (window.logExp) window.logExp(`🚨 UWAGA! Wróg ${nearestThreatDist <= 7 ? "≤7" : "≤8"} kratek${chased ? " i goni" : ""} na mapie PvP! Ewakuacja!`, "#ff5252");
 
@@ -13066,6 +13512,8 @@ window.openShopAsync = async (namePart) => {
                 }
             }
             if (shouldFlee && newPlayers.length === 0) {
+                window.__pvpEscapeActive = true;
+                if (typeof syncBerserkState === 'function') syncBerserkState('pvp_escape');
                 const chased = threatPlayers.some(t => t.chase);
                 if (window.logExp) window.logExp(`🚨 Pościg na PvP (${nearestThreatDist} kr.). Kontynuuję ewakuację${chased ? " (gracz się zbliża)" : ""}.`, "#ff7043");
                 let banTime = Date.now() + 10 * 60 * 1000;
@@ -13088,6 +13536,7 @@ window.openShopAsync = async (namePart) => {
                 }
             }
         } else if (!isBotActive) {
+            window.__pvpEscapeActive = false;
             window.alertedPlayersList.clear();
             window.__playerThreatMemory = {};
         }
