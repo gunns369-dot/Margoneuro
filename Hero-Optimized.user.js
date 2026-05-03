@@ -12,7 +12,7 @@
 // @grant        unsafeWindow
 // @connect      localhost
 // @connect      127.0.0.1
-// @connect      moja-domena.pl
+// @connect      margoneuro.pl
 // @updateURL    https://raw.githubusercontent.com/gunns369-dot/Hero-Margonem/main/Hero-Optimized.user.js
 // @downloadURL  https://raw.githubusercontent.com/gunns369-dot/Hero-Margonem/main/Hero-Optimized.user.js
 // ==/UserScript==
@@ -20,7 +20,7 @@
 (async function() {
     'use strict';
 
-    const MARGONEURO_LICENSE_API_BASE_URL = 'http://localhost:3000';
+    const MARGONEURO_LICENSE_API_BASE_URL = 'https://margoneuro.pl/api/license/verify';
     const MARGONEURO_LICENSE_PRODUCT_SLUG = 'margoneuro';
     const MARGONEURO_LICENSE_SCRIPT_VERSION = '64.6';
     const MARGONEURO_LICENSE_KEY_STORAGE = 'margo_license_key_margoneuro';
