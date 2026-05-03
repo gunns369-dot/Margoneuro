@@ -1,11 +1,13 @@
-
 // ==UserScript==
 // @name         MargoNeuro - Optimized Edition
 // @version      64.6
-// @description  Automatyczne wykrywanie, inteligentny zasiÄ™g, natywny auto-atak, poprawne limity poziomowe, naprawiony scroll.
+// @description  Automatyczne wykrywanie, inteligentny zasięg, natywny auto-atak, poprawne limity poziomowe, naprawiony scroll.
 // @author       Ty & Gemini
 // @match        https://*.margonem.pl/
 // @grant        GM_xmlhttpRequest
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @grant        GM_deleteValue
 // @connect      localhost
 // @connect      127.0.0.1
 // @connect      moja-domena.pl
@@ -22,9 +24,66 @@
     const MARGONEURO_LICENSE_KEY_STORAGE = 'margo_license_key_margoneuro';
     const MARGONEURO_DEVICE_ID_STORAGE = 'margo_device_id_margoneuro';
 
+    function margoneuroReadStorage(key) {
+        try {
+            if (typeof GM_getValue === 'function') {
+                const gmValue = GM_getValue(key, '');
+                if (typeof gmValue === 'string' && gmValue.trim()) {
+                    return gmValue.trim();
+                }
+            }
+        } catch (error) {
+            console.warn('[License] Nie udało się odczytać GM storage', error);
+        }
+
+        try {
+            const localValue = localStorage.getItem(key);
+            if (typeof localValue === 'string' && localValue.trim()) {
+                return localValue.trim();
+            }
+        } catch (error) {
+            console.warn('[License] Nie udało się odczytać localStorage', error);
+        }
+
+        return '';
+    }
+
+    function margoneuroWriteStorage(key, value) {
+        try {
+            if (typeof GM_setValue === 'function') {
+                GM_setValue(key, value);
+            }
+        } catch (error) {
+            console.warn('[License] Nie udało się zapisać GM storage', error);
+        }
+
+        try {
+            localStorage.setItem(key, value);
+        } catch (error) {
+            console.warn('[License] Nie udało się zapisać localStorage', error);
+        }
+    }
+
+    function margoneuroDeleteStorage(key) {
+        try {
+            if (typeof GM_deleteValue === 'function') {
+                GM_deleteValue(key);
+            }
+        } catch (error) {
+            console.warn('[License] Nie udało się usunąć GM storage', error);
+        }
+
+        try {
+            localStorage.removeItem(key);
+        } catch (error) {
+            console.warn('[License] Nie udało się usunąć localStorage', error);
+        }
+    }
+
     function margoneuroGetOrCreateDeviceId() {
-        let deviceId = localStorage.getItem(MARGONEURO_DEVICE_ID_STORAGE);
+        let deviceId = margoneuroReadStorage(MARGONEURO_DEVICE_ID_STORAGE);
         if (deviceId && deviceId.length >= 8) {
+            console.log(`[License] Używam device_id: ${deviceId}`);
             return deviceId;
         }
 
@@ -38,7 +97,8 @@
             deviceId = `${deviceId}_device`;
         }
 
-        localStorage.setItem(MARGONEURO_DEVICE_ID_STORAGE, deviceId);
+        margoneuroWriteStorage(MARGONEURO_DEVICE_ID_STORAGE, deviceId);
+        console.log(`[License] Używam device_id: ${deviceId}`);
         return deviceId;
     }
 
@@ -49,13 +109,14 @@
         }
 
         const cleanKey = enteredKey.trim();
-        localStorage.setItem(MARGONEURO_LICENSE_KEY_STORAGE, cleanKey);
         return cleanKey;
     }
 
     function margoneuroGetLicenseKey() {
-        const savedKey = localStorage.getItem(MARGONEURO_LICENSE_KEY_STORAGE);
+        console.log('[License] Wczytuję zapisany klucz');
+        const savedKey = margoneuroReadStorage(MARGONEURO_LICENSE_KEY_STORAGE);
         if (savedKey && savedKey.trim()) {
+            console.log('[License] Znaleziono zapisany klucz, sprawdzam aktywność');
             return savedKey.trim();
         }
 
@@ -128,12 +189,15 @@
             const result = await margoneuroVerifySingleLicenseKey(licenseKey);
 
             if (result.ok && result.data && result.data.active === true) {
+                margoneuroWriteStorage(MARGONEURO_LICENSE_KEY_STORAGE, licenseKey.trim());
+                console.log('[License] Klucz aktywny, zapisuję i uruchamiam Margoneuro');
                 console.log('[Margoneuro License] Licencja aktywna');
                 return true;
             }
 
+            console.log('[License] Klucz odrzucony, proszę o nowy');
             console.warn('[Margoneuro License] Licencja odrzucona', result.data);
-            localStorage.removeItem(MARGONEURO_LICENSE_KEY_STORAGE);
+            margoneuroDeleteStorage(MARGONEURO_LICENSE_KEY_STORAGE);
 
             const status = result.data?.status || 'invalid';
             const apiMessage = result.data?.message || 'Licencja jest nieważna, wygasła albo cofnięta.';
@@ -161,35 +225,35 @@
     console.log('[Margoneuro] Licencja OK, inicjalizuję UI');
     const HERO_LOG = {
         info(message, details) {
-            if (details !== undefined) console.log(`â„ąď¸Ź [HERO] ${message}`, details);
-            else console.log(`â„ąď¸Ź [HERO] ${message}`);
+            if (details !== undefined) console.log(`ℹ️ [HERO] ${message}`, details);
+            else console.log(`ℹ️ [HERO] ${message}`);
         },
         success(message, details) {
-            if (details !== undefined) console.log(`âś… [HERO] ${message}`, details);
-            else console.log(`âś… [HERO] ${message}`);
+            if (details !== undefined) console.log(`✅ [HERO] ${message}`, details);
+            else console.log(`✅ [HERO] ${message}`);
         },
         warn(message, details) {
-            if (details !== undefined) console.warn(`âš ď¸Ź [HERO] ${message}`, details);
-            else console.warn(`âš ď¸Ź [HERO] ${message}`);
+            if (details !== undefined) console.warn(`⚠️ [HERO] ${message}`, details);
+            else console.warn(`⚠️ [HERO] ${message}`);
         },
         error(message, details) {
-            if (details !== undefined) console.error(`âťŚ [HERO] ${message}`, details);
-            else console.error(`âťŚ [HERO] ${message}`);
+            if (details !== undefined) console.error(`❌ [HERO] ${message}`, details);
+            else console.error(`❌ [HERO] ${message}`);
         }
     };
 
  // ==========================================
-        // SILNIK ANTI-THROTTLE V3 (NIESKOĹCZONOĹšÄ†) - Omijanie uĹ›pienia kart
+        // SILNIK ANTI-THROTTLE V3 (NIESKOŃCZONOŚĆ) - Omijanie uśpienia kart
         // ==========================================
         if (!window.__antiThrottleInstalled) {
     window.__antiThrottleInstalled = true;
 
-            // 1. OSZUKIWANIE PRZEGLÄ„DARKI (GĹ‚Ăłwny powĂłd zamraĹĽania Margonem)
-            // Wycinamy grze moĹĽliwoĹ›Ä‡ sprawdzenia, czy karta jest zminimalizowana
+            // 1. OSZUKIWANIE PRZEGLĄDARKI (Główny powód zamrażania Margonem)
+            // Wycinamy grze możliwość sprawdzenia, czy karta jest zminimalizowana
             Object.defineProperty(document, 'hidden', { get: () => false });
             Object.defineProperty(document, 'visibilityState', { get: () => 'visible' });
 
-            // Blokujemy eventy usypiajÄ…ce - gra nigdy nie dostanie sygnaĹ‚u "straciĹ‚em focus"
+            // Blokujemy eventy usypiające - gra nigdy nie dostanie sygnału "straciłem focus"
             const blockEvent = (e) => e.stopImmediatePropagation();
             document.addEventListener('visibilitychange', blockEvent, true);
             window.addEventListener('visibilitychange', blockEvent, true);
@@ -249,8 +313,8 @@
 
             window.requestAnimationFrame = function(cb) {
                 let id = ++rafCounter;
-                // Rzucamy wĹ‚asne, niezabijalne (dziÄ™ki Workerowi) klatki animacji co 16ms (~60 FPS)
-                // UĹĽywamy performance.now(), bo silnik Margonem uĹĽywa tego do obliczania pĹ‚ynnoĹ›ci chodu
+                // Rzucamy własne, niezabijalne (dzięki Workerowi) klatki animacji co 16ms (~60 FPS)
+                // Używamy performance.now(), bo silnik Margonem używa tego do obliczania płynności chodu
                 let timeoutId = window.setTimeout(() => {
                     rafMap.delete(id);
                     cb(performance.now());
@@ -267,16 +331,16 @@
                 }
             };
 
-            HERO_LOG.success("Anti-Throttle V3 aktywny. Karta nie bÄ™dzie usypiana.");
+            HERO_LOG.success("Anti-Throttle V3 aktywny. Karta nie będzie usypiana.");
         }
         // ==========================================
-   // WBUDOWANY SKANER PRZEJĹšÄ† (Agresywny Skaner Multi-Engine - z TwojÄ… metodÄ… NI)
+   // WBUDOWANY SKANER PRZEJŚĆ (Agresywny Skaner Multi-Engine - z Twoją metodą NI)
     const HeroScannerModule = {
         scanCurrentMap: function(currentMapName, zakkonicyData) {
             let foundGateways = [];
             let processedCoords = new Set();
 
-            // 1. GĹĂ“WNA METODA DLA NOWEGO INTERFEJSU (Zbudowana na Twoim kodzie)
+            // 1. GŁÓWNA METODA DLA NOWEGO INTERFEJSU (Zbudowana na Twoim kodzie)
             if (typeof Engine !== 'undefined' && Engine.map && typeof Engine.map.getGateways === 'function') {
                 try {
                     let list = Engine.map.getGateways().getList();
@@ -288,7 +352,7 @@
 
                         if (px === undefined || py === undefined) return;
 
-                        // Ignorowanie ZakonnikĂłw
+                        // Ignorowanie Zakonników
                         let tp = zakkonicyData ? zakkonicyData[currentMapName] : null;
                         if (tp && Math.abs(px - tp.x) <= 2 && Math.abs(py - tp.y) <= 2) return;
 
@@ -296,13 +360,13 @@
                         if (processedCoords.has(coordKey)) return;
                         processedCoords.add(coordKey);
 
-                       // WyciÄ…ganie nazwy - ZAAWANSOWANE CZYSZCZENIE (Odcina poziomy i nowe linie)
+                       // Wyciąganie nazwy - ZAAWANSOWANE CZYSZCZENIE (Odcina poziomy i nowe linie)
                         let rawName = (g.tip && g.tip[0]) ? g.tip[0] : (g.d.name || g.d.targetName || "");
                         let cleanName = rawName.toString().replace(/<br\s*[\/]?>/gi, '\n').replace(/<[^>]*>?/gm, '').split('\n')[0];
-                        cleanName = cleanName.replace("PrzejĹ›cie do:", "").replace("PrzejĹ›cie do ", "").split(" .")[0].split("PrzejĹ›cie dostÄ™pne")[0].trim();
+                        cleanName = cleanName.replace("Przejście do:", "").replace("Przejście do ", "").split(" .")[0].split("Przejście dostępne")[0].trim();
 
-                        if (!cleanName || cleanName.length < 2 || cleanName === "WyjĹ›cie") {
-                            cleanName = `WejĹ›cie [${px}, ${py}]`;
+                        if (!cleanName || cleanName.length < 2 || cleanName === "Wyjście") {
+                            cleanName = `Wejście [${px}, ${py}]`;
                         }
 
                         if (normMapName(cleanName) !== normMapName(currentMapName) && !cleanName.includes("Brak")) {
@@ -310,10 +374,10 @@
                         }
                     });
 
-                    // JeĹ›li znaleĹşliĹ›my przejĹ›cia TwojÄ… metodÄ…, natychmiast je zwracamy
+                    // Jeśli znaleźliśmy przejścia Twoją metodą, natychmiast je zwracamy
                     if (foundGateways.length > 0) return foundGateways;
                 } catch(e) {
-                    HERO_LOG.warn("Skaner NI zawiĂłdĹ‚ â€” przeĹ‚Ä…czam na tryb zapasowy.");
+                    HERO_LOG.warn("Skaner NI zawiódł — przełączam na tryb zapasowy.");
                 }
             }
 
@@ -349,10 +413,10 @@
 
               let rawName = data.name || data.targetName || data.title || data.tooltip || "";
                 let cleanName = rawName.toString().replace(/<br\s*[\/]?>/gi, '\n').replace(/<[^>]*>?/gm, '').split('\n')[0];
-                cleanName = cleanName.replace("PrzejĹ›cie do:", "").replace("PrzejĹ›cie do ", "").split(" .")[0].split("PrzejĹ›cie dostÄ™pne")[0].trim();
+                cleanName = cleanName.replace("Przejście do:", "").replace("Przejście do ", "").split(" .")[0].split("Przejście dostępne")[0].trim();
 
-                if (!cleanName || cleanName.length < 2 || cleanName === "WyjĹ›cie") {
-                    cleanName = `WejĹ›cie [${px}, ${py}]`;
+                if (!cleanName || cleanName.length < 2 || cleanName === "Wyjście") {
+                    cleanName = `Wejście [${px}, ${py}]`;
                 }
 
                 if (normMapName(cleanName) !== normMapName(currentMapName) && !cleanName.includes("Brak")) {
@@ -364,7 +428,7 @@
         }
     };
 
-    // WBUDOWANY MODUĹ TELEPORTACJI (ZĹ‚oty Ĺ›rodek: Niezawodny, LUDZKI - Anty-Captcha i Anty-Blokada NI)
+    // WBUDOWANY MODUŁ TELEPORTACJI (Złoty środek: Niezawodny, LUDZKI - Anty-Captcha i Anty-Blokada NI)
     function getCurrentNpcEntries() {
         const raw = (typeof Engine !== 'undefined' && Engine.npcs)
             ? (typeof Engine.npcs.check === 'function' ? Engine.npcs.check() : Engine.npcs.d)
@@ -505,7 +569,7 @@
         if (safeText(destOpt).includes("brak zezwolenia")) {
             let closeOpt = options.find(el =>
                 safeText(el).includes("nigdzie") ||
-                safeText(el).includes("zakoĹ„cz") ||
+                safeText(el).includes("zakończ") ||
                 safeText(el).includes("niczego")
             );
             if (closeOpt) humanClick(closeOpt, stopCallback);
@@ -521,7 +585,7 @@
         ? pickBestTeleportDialogOption(options, targetMap)
         : null;
     if (bestAltTeleport && bestAltTeleport.el) {
-        if (window.logExp) window.logExp(`đźš€ Zakonnik: wybieram najlepszy dostÄ™pny teleport poĹ›redni [${bestAltTeleport.mapName}] do celu [${targetMap}].`, "#9c27b0");
+        if (window.logExp) window.logExp(`🚀 Zakonnik: wybieram najlepszy dostępny teleport pośredni [${bestAltTeleport.mapName}] do celu [${targetMap}].`, "#9c27b0");
         humanClick(bestAltTeleport.el, continueCallback);
         return;
     }
@@ -529,7 +593,7 @@
     let moreOpt = options.find(el =>
         safeText(el).includes("inne") ||
         safeText(el).includes("dalej") ||
-        safeText(el).includes("wiÄ™cej")
+        safeText(el).includes("więcej")
     );
 
     if (moreOpt) {
@@ -542,7 +606,7 @@
     };
 
 // ==========================================
-    // MODUĹ ZEWNÄTRZNYCH BAZ DANYCH (MargoWorld)
+    // MODUŁ ZEWNĘTRZNYCH BAZ DANYCH (MargoWorld)
     // ==========================================
     window.DatabaseModule = {
         kupcy: [],
@@ -554,16 +618,16 @@
                 let urlShops = 'https://raw.githubusercontent.com/gunns369-dot/Hero-Margonem/main/margoworld_shops_full_database.json';
                 let urlTooltips = 'https://raw.githubusercontent.com/gunns369-dot/Hero-Margonem/main/margoworld_tooltip_cache_full.json';
 
-                HERO_LOG.info("RozpoczÄ™to pobieranie zewnÄ™trznych baz danych.");
+                HERO_LOG.info("Rozpoczęto pobieranie zewnętrznych baz danych.");
                 let [resShops, resEq] = await Promise.all([fetch(urlShops), fetch(urlTooltips)]);
                 let rawShops = await resShops.json();
                 let rawEq = await resEq.json();
 
                 this.parseShops(rawShops);
                 this.parseEq(rawEq);
-                HERO_LOG.success(`ZaĹ‚adowano bazy: ${this.kupcy.length} kupcĂłw i ${this.ekwipunek.length} przedmiotĂłw.`);
+                HERO_LOG.success(`Załadowano bazy: ${this.kupcy.length} kupców i ${this.ekwipunek.length} przedmiotów.`);
             } catch (e) {
-                HERO_LOG.error("BĹ‚Ä…d pobierania plikĂłw JSON. SprawdĹş linki.", e);
+                HERO_LOG.error("Błąd pobierania plików JSON. Sprawdź linki.", e);
             }
         },
     parseShops: function(rawShops) {
@@ -618,9 +682,9 @@ parseEq: function(rawEq) {
                     // --- INTELIGENTNE ODCZYTYWANIE TYPU Z OPISU (TOOLTIPA) ---
                     let detectedType = itemData.slot_type || "Nieznany";
 
-                    let typeMatch = fullStats.match(/Typ:\s*([A-Za-zĹĽĹşÄ‡Ĺ„ĂłĹ‚Ä™Ä…Ĺ›Ĺ»ĹąÄ†ĹĂ“ĹÄÄ„Ĺš]+(?:\s[A-Za-zĹĽĹşÄ‡Ĺ„ĂłĹ‚Ä™Ä…Ĺ›Ĺ»ĹąÄ†ĹĂ“ĹÄÄ„Ĺš]+)?)/i);
+                    let typeMatch = fullStats.match(/Typ:\s*([A-Za-zżźćńółęąśŻŹĆŃÓŁĘĄŚ]+(?:\s[A-Za-zżźćńółęąśŻŹĆŃÓŁĘĄŚ]+)?)/i);
                     if (typeMatch && typeMatch[1]) {
-                        // Ucinamy wszystkie formy rzadkoĹ›ci (Unikat, Unikatowy itp.)
+                        // Ucinamy wszystkie formy rzadkości (Unikat, Unikatowy itp.)
                         detectedType = typeMatch[1].replace(/\s*(Pospolity|Unikatowy|Unikat|Heroiczny|Heroik|Legendarny)/gi, '').trim();
                     }
 
@@ -643,11 +707,11 @@ getRecommendedEq: function() {
             let myLvl = Engine.hero.d.lvl;
             let myProfLetter = Engine.hero.d.prof;
 
-            const profMap = { "w": "wojownik", "m": "mag", "t": "tropiciel", "p": "paladyn", "b": "tancerz ostrzy", "h": "Ĺ‚owca" };
+            const profMap = { "w": "wojownik", "m": "mag", "t": "tropiciel", "p": "paladyn", "b": "tancerz ostrzy", "h": "łowca" };
             let fullProf = profMap[myProfLetter];
 
             return this.ekwipunek.filter(item => {
-                // TUTA ZMIANA: Pokazuje tylko przedmioty od (TwĂłj lvl - 5) do Twojego aktualnego poziomu!
+                // TUTA ZMIANA: Pokazuje tylko przedmioty od (Twój lvl - 5) do Twojego aktualnego poziomu!
                 let isLevelOk = (item.level >= myLvl - 5) && (item.level <= myLvl);
 
                 let profArray = item.prof.map(p => p.toLowerCase());
@@ -661,78 +725,78 @@ getRecommendedEq: function() {
               return isLevelOk && isProfOk;
         }).sort((a, b) => a.level - b.level);
     }
-}; // <--- TEGO ZNAKU BRAKOWAĹO (ZamkniÄ™cie caĹ‚ego obiektu DatabaseModule)
+}; // <--- TEGO ZNAKU BRAKOWAŁO (Zamknięcie całego obiektu DatabaseModule)
 
-// Automatyczne zaĹ‚adowanie bazy 3 sekundy po wĹ‚Ä…czeniu gry
+// Automatyczne załadowanie bazy 3 sekundy po włączeniu gry
 setTimeout(() => window.DatabaseModule.initDatabases(), 3000);
     // ==========================================
-    // BAZA DANYCH HEROSĂ“W
+    // BAZA DANYCH HEROSÓW
     // ==========================================
     const heroData = {
 
-        "Domina Ecclesiae": {"Stare Ruiny": [[56,53],[57,48],[58,25],[66,22],[72,17]], "PrzeklÄ™ty Zamek - wejĹ›cie poĹ‚udniowe": [[9,8],[16,7]], "PrzeklÄ™ty Zamek - wejĹ›cie pĂłĹ‚nocne": [[6,9],[18,7]], "PrzeklÄ™ty Zamek - wejĹ›cie wschodnie": [[8,8],[12,7]], "PrzeklÄ™ty Zamek - podziemia poĹ‚udniowe": [[8,27],[11,8],[19,27],[21,8]], "PrzeklÄ™ty Zamek - kanaĹ‚y": [[8,8],[20,28]], "PrzeklÄ™ty Zamek - sala zgromadzeĹ„": [[4,8],[10,10],[30,9],[42,29]], "PrzeklÄ™ty Zamek p.1": [[8,13],[13,4]], "PrzeklÄ™ty Zamek p.2": [[2,11],[21,6]], "Orla GraĹ„": [[44,9],[46,24],[52,10],[54,12],[56,22]], "PrzeklÄ™ta StraĹĽnica": [[4,10],[6,13],[8,9],[13,12],[17,8]], "PrzeklÄ™ta StraĹĽnica p.1": [[3,10],[4,17],[5,8],[12,8],[15,16],[17,14]], "PrzeklÄ™ta StraĹĽnica p.2": [[5,14],[8,4],[9,14],[13,12],[15,6]], "PrzeklÄ™ta StraĹĽnica - podziemia p.1 s.1": [[5,36],[7,35],[9,9],[15,27],[22,33],[24,6],[26,34],[27,20],[30,8],[31,21],[31,35]], "PrzeklÄ™ta StraĹĽnica - podziemia p.1 s.2": [[5,9],[5,35],[12,17],[17,4],[17,34],[21,22],[22,4],[27,24]], "PrzeklÄ™ta StraĹĽnica - podziemia p.2 s.2": [[2,5],[7,11],[8,5],[12,6],[12,18]]},
+        "Domina Ecclesiae": {"Stare Ruiny": [[56,53],[57,48],[58,25],[66,22],[72,17]], "Przeklęty Zamek - wejście południowe": [[9,8],[16,7]], "Przeklęty Zamek - wejście północne": [[6,9],[18,7]], "Przeklęty Zamek - wejście wschodnie": [[8,8],[12,7]], "Przeklęty Zamek - podziemia południowe": [[8,27],[11,8],[19,27],[21,8]], "Przeklęty Zamek - kanały": [[8,8],[20,28]], "Przeklęty Zamek - sala zgromadzeń": [[4,8],[10,10],[30,9],[42,29]], "Przeklęty Zamek p.1": [[8,13],[13,4]], "Przeklęty Zamek p.2": [[2,11],[21,6]], "Orla Grań": [[44,9],[46,24],[52,10],[54,12],[56,22]], "Przeklęta Strażnica": [[4,10],[6,13],[8,9],[13,12],[17,8]], "Przeklęta Strażnica p.1": [[3,10],[4,17],[5,8],[12,8],[15,16],[17,14]], "Przeklęta Strażnica p.2": [[5,14],[8,4],[9,14],[13,12],[15,6]], "Przeklęta Strażnica - podziemia p.1 s.1": [[5,36],[7,35],[9,9],[15,27],[22,33],[24,6],[26,34],[27,20],[30,8],[31,21],[31,35]], "Przeklęta Strażnica - podziemia p.1 s.2": [[5,9],[5,35],[12,17],[17,4],[17,34],[21,22],[22,4],[27,24]], "Przeklęta Strażnica - podziemia p.2 s.2": [[2,5],[7,11],[8,5],[12,6],[12,18]]},
 
-        "Mroczny Patryk": {"Orla GraĹ„": [[7,87],[28,92],[33,89],[10,84]], "PrzeĹ‚Ä™cz ĹotrzykĂłw": [[6,84],[11,62],[14,22],[14,51],[27,14],[36,81],[40,29],[42,11],[44,75],[45,40],[46,49],[46,83],[51,62],[53,38],[55,78]], "PagĂłrki ĹupieĹĽcĂłw": [[8,25],[8,55],[10,65],[15,17],[26,73],[29,47],[37,6],[45,30],[56,4],[58,86]], "SkĹ‚ad GrabieĹĽcĂłw": [[7,17],[9,5],[24,13],[27,17]], "Dolina RozbĂłjnikĂłw": [[8,44],[12,57],[14,70],[15,82],[17,49],[20,36],[21,29],[22,5],[23,91],[28,23],[29,40],[33,68],[37,24],[39,19],[41,11],[41,57],[41,76],[45,66],[47,19],[54,42],[56,51],[57,41]], "Kamienna KryjĂłwka": [[4,15],[13,9],[16,6],[28,12]], "Ghuli Mogilnik": [[6,54],[7,39],[16,11],[32,35]], "Polana ĹšcierwojadĂłw": [[10,30],[22,14],[23,34],[43,7]], "MokradĹ‚a": [[4,46],[8,43],[8,53],[9,50],[19,11],[34,44],[40,4],[44,46],[47,54],[54,8],[54,58]], "Las GoblinĂłw": [[4,87],[6,80],[7,37],[8,18],[17,35],[20,9],[22,81],[32,87],[33,78],[36,45],[37,27],[46,38],[51,46],[52,21],[55,10]], "Morwowe PrzejĹ›cie": [[4,51],[8,62],[9,6],[16,35],[32,23],[46,19],[52,40],[55,8]], "PodmokĹ‚a Dolina": [[4,37],[15,33],[42,4],[54,56]]},
+        "Mroczny Patryk": {"Orla Grań": [[7,87],[28,92],[33,89],[10,84]], "Przełęcz Łotrzyków": [[6,84],[11,62],[14,22],[14,51],[27,14],[36,81],[40,29],[42,11],[44,75],[45,40],[46,49],[46,83],[51,62],[53,38],[55,78]], "Pagórki Łupieżców": [[8,25],[8,55],[10,65],[15,17],[26,73],[29,47],[37,6],[45,30],[56,4],[58,86]], "Skład Grabieżców": [[7,17],[9,5],[24,13],[27,17]], "Dolina Rozbójników": [[8,44],[12,57],[14,70],[15,82],[17,49],[20,36],[21,29],[22,5],[23,91],[28,23],[29,40],[33,68],[37,24],[39,19],[41,11],[41,57],[41,76],[45,66],[47,19],[54,42],[56,51],[57,41]], "Kamienna Kryjówka": [[4,15],[13,9],[16,6],[28,12]], "Ghuli Mogilnik": [[6,54],[7,39],[16,11],[32,35]], "Polana Ścierwojadów": [[10,30],[22,14],[23,34],[43,7]], "Mokradła": [[4,46],[8,43],[8,53],[9,50],[19,11],[34,44],[40,4],[44,46],[47,54],[54,8],[54,58]], "Las Goblinów": [[4,87],[6,80],[7,37],[8,18],[17,35],[20,9],[22,81],[32,87],[33,78],[36,45],[37,27],[46,38],[51,46],[52,21],[55,10]], "Morwowe Przejście": [[4,51],[8,62],[9,6],[16,35],[32,23],[46,19],[52,40],[55,8]], "Podmokła Dolina": [[4,37],[15,33],[42,4],[54,56]]},
 
-        "Karmazynowy MĹ›ciciel": {"Pieczara Niepogody p.1": [[9,26],[16,23]], "Pieczara Niepogody p.2 - sala 1": [[20,6],[41,15]], "Pieczara Niepogody p.2 - sala 2": [[21,37],[22,13]], "Pieczara Niepogody p.3": [[26,12],[28,36],[51,38]], "Pieczara Niepogody p.4": [[4,21],[34,10]], "Pieczara Niepogody p.5": [[12,20],[32,22],[40,11]], "WarczÄ…ce Osuwiska": [[15,19],[16,50],[60,48]], "Wilcza Nora p.2": [[18,5]], "Legowisko Wilczej Hordy": [[32,25],[38,2],[45,56],[58,34]], "Krasowa Pieczara p.2": [[6,25],[32,35]], "Krasowa Pieczara p.3": [[13,9]], "Wilcza Skarpa": [[4,40],[33,39],[35,8],[48,34],[60,31],[60,68]], "Skarpiska TollokĂłw": [[4,61],[36,32],[37,15],[52,25]], "Skalne Turnie": [[30,36],[31,3],[42,57],[61,39]]},
+        "Karmazynowy Mściciel": {"Pieczara Niepogody p.1": [[9,26],[16,23]], "Pieczara Niepogody p.2 - sala 1": [[20,6],[41,15]], "Pieczara Niepogody p.2 - sala 2": [[21,37],[22,13]], "Pieczara Niepogody p.3": [[26,12],[28,36],[51,38]], "Pieczara Niepogody p.4": [[4,21],[34,10]], "Pieczara Niepogody p.5": [[12,20],[32,22],[40,11]], "Warczące Osuwiska": [[15,19],[16,50],[60,48]], "Wilcza Nora p.2": [[18,5]], "Legowisko Wilczej Hordy": [[32,25],[38,2],[45,56],[58,34]], "Krasowa Pieczara p.2": [[6,25],[32,35]], "Krasowa Pieczara p.3": [[13,9]], "Wilcza Skarpa": [[4,40],[33,39],[35,8],[48,34],[60,31],[60,68]], "Skarpiska Tolloków": [[4,61],[36,32],[37,15],[52,25]], "Skalne Turnie": [[30,36],[31,3],[42,57],[61,39]]},
 
-        "ZĹ‚odziej": {"Dom Erniego": [[6,7]], "Dom Erniego p.1": [[6,5]], "Dom Artenii i Tafina": [[5,5]], "Dom Artenii i Tafina - piwnica": [[11,12]], "Dom Etrefana - pracownia": [[6,12]], "Dom Etrefana p.2": [[5,6]], "Dom Mrocznego Zgrzyta": [[10,5]], "Dom Mikliniosa p.1": [[9,5]], "Dom Mikliniosa - przyziemie": [[8,10]], "Pracownia Bonifacego p.1": [[5,6]], "Siedziba KultystĂłw": [[11,11]], "Fort Eder": [[59,60]], "Fortyfikacja": [[7,17]], "Fortyfikacja p.2": [[10,4]], "Fortyfikacja p.4": [[11,14]], "Fortyfikacja p.5": [[10,10]], "Ciemnica SzubrawcĂłw p.1 - sala 1": [[8,14]], "Ciemnica SzubrawcĂłw p.1 - sala 2": [[13,5]], "Ciemnica SzubrawcĂłw p.1 - sala 3": [[45,12],[51,53]], "Stary Kupiecki Trakt": [[8,8],[51,12],[55,44],[55,92]], "Stukot Widmowych KĂłĹ‚": [[5,5],[20,28],[23,61],[48,72]], "Wertepy RzezimieszkĂłw": [[12,55],[53,12],[53,51]], "Chata szabrownikĂłw": [[6,4]]},
+        "Złodziej": {"Dom Erniego": [[6,7]], "Dom Erniego p.1": [[6,5]], "Dom Artenii i Tafina": [[5,5]], "Dom Artenii i Tafina - piwnica": [[11,12]], "Dom Etrefana - pracownia": [[6,12]], "Dom Etrefana p.2": [[5,6]], "Dom Mrocznego Zgrzyta": [[10,5]], "Dom Mikliniosa p.1": [[9,5]], "Dom Mikliniosa - przyziemie": [[8,10]], "Pracownia Bonifacego p.1": [[5,6]], "Siedziba Kultystów": [[11,11]], "Fort Eder": [[59,60]], "Fortyfikacja": [[7,17]], "Fortyfikacja p.2": [[10,4]], "Fortyfikacja p.4": [[11,14]], "Fortyfikacja p.5": [[10,10]], "Ciemnica Szubrawców p.1 - sala 1": [[8,14]], "Ciemnica Szubrawców p.1 - sala 2": [[13,5]], "Ciemnica Szubrawców p.1 - sala 3": [[45,12],[51,53]], "Stary Kupiecki Trakt": [[8,8],[51,12],[55,44],[55,92]], "Stukot Widmowych Kół": [[5,5],[20,28],[23,61],[48,72]], "Wertepy Rzezimieszków": [[12,55],[53,12],[53,51]], "Chata szabrowników": [[6,4]]},
 
-        "ZĹ‚y Przewodnik": {"Zniszczone Opactwo": [[6,46]], "Uroczysko": [[13,26],[22,53],[80,33],[90,9],[92,50]], "Lazurytowa Grota p.1": [[13,16]], "Lazurytowa Grota p.2": [[25,20],[35,9],[55,17]], "Lazurytowa Grota p.3 - sala 1": [[10,16],[22,41],[34,16]], "Lazurytowa Grota p.3 - sala 2": [[9,18]], "Zapomniany Szlak": [[6,34],[17,15],[25,24],[26,49],[38,34],[41,5],[47,13],[48,60],[55,50],[58,41],[64,34],[66,48],[79,22],[86,36],[89,51]], "Mokra Grota p.1": [[20,52],[37,41],[58,13]], "Mokra Grota p.1 - boczny korytarz": [[17,40],[25,35],[44,56]], "Mokra Grota p.2 - korytarz": [[13,44],[23,18],[36,33]], "Grota Bezszelestnych KrokĂłw - sala 1": [[18,12],[19,16]], "Grota Bezszelestnych KrokĂłw - sala 2": [[12,19],[33,10],[51,17],[52,43]], "Grota Bezszelestnych KrokĂłw - sala 3": [[5,15],[28,42],[34,13],[34,29],[45,49]], "Mroczny Przesmyk": [[15,51],[18,7],[30,24],[30,59],[42,2],[42,16],[42,34],[49,50],[56,24],[59,54]]},
+        "Zły Przewodnik": {"Zniszczone Opactwo": [[6,46]], "Uroczysko": [[13,26],[22,53],[80,33],[90,9],[92,50]], "Lazurytowa Grota p.1": [[13,16]], "Lazurytowa Grota p.2": [[25,20],[35,9],[55,17]], "Lazurytowa Grota p.3 - sala 1": [[10,16],[22,41],[34,16]], "Lazurytowa Grota p.3 - sala 2": [[9,18]], "Zapomniany Szlak": [[6,34],[17,15],[25,24],[26,49],[38,34],[41,5],[47,13],[48,60],[55,50],[58,41],[64,34],[66,48],[79,22],[86,36],[89,51]], "Mokra Grota p.1": [[20,52],[37,41],[58,13]], "Mokra Grota p.1 - boczny korytarz": [[17,40],[25,35],[44,56]], "Mokra Grota p.2 - korytarz": [[13,44],[23,18],[36,33]], "Grota Bezszelestnych Kroków - sala 1": [[18,12],[19,16]], "Grota Bezszelestnych Kroków - sala 2": [[12,19],[33,10],[51,17],[52,43]], "Grota Bezszelestnych Kroków - sala 3": [[5,15],[28,42],[34,13],[34,29],[45,49]], "Mroczny Przesmyk": [[15,51],[18,7],[30,24],[30,59],[42,2],[42,16],[42,34],[49,50],[56,24],[59,54]]},
 
-        "OpÄ™tany Paladyn": {"SkaĹ‚y MroĹşnych ĹšpiewĂłw": [[8,48],[28,60],[43,21],[44,39]], "Cmentarzysko SzerpĂłw": [[43,20],[46,60],[63,47],[75,55]], "Andarum Ilami": [[17,40],[23,55],[26,18],[37,20]], "ĹšwiÄ…tynia Andarum": [[12,10],[16,26],[34,10]], "ĹšwiÄ…tynia Andarum - zejĹ›cie lewe": [[15,16]], "ĹšwiÄ…tynia Andarum - zejĹ›cie prawe": [[7,26]], "ĹšwiÄ…tynia Andarum - podziemia": [[4,33],[11,9],[24,21],[29,9],[41,19],[47,7]], "ĹšwiÄ…tynia Andarum - biblioteka": [[12,29],[16,47],[51,7],[59,52],[61,35]], "ĹšwiÄ…tynia Andarum - lokum mnichĂłw": [[10,17],[12,44],[31,13],[49,20],[51,52]], "Krypty Dusz Ĺšniegu p.1": [[13,35],[15,18],[30,31],[37,18]], "Krypty Dusz Ĺšniegu p.2": [[9,12],[12,43],[27,14],[42,29]], "Krypty Dusz Ĺšniegu p.3": [[5,41],[8,19],[30,29]]},
+        "Opętany Paladyn": {"Skały Mroźnych Śpiewów": [[8,48],[28,60],[43,21],[44,39]], "Cmentarzysko Szerpów": [[43,20],[46,60],[63,47],[75,55]], "Andarum Ilami": [[17,40],[23,55],[26,18],[37,20]], "Świątynia Andarum": [[12,10],[16,26],[34,10]], "Świątynia Andarum - zejście lewe": [[15,16]], "Świątynia Andarum - zejście prawe": [[7,26]], "Świątynia Andarum - podziemia": [[4,33],[11,9],[24,21],[29,9],[41,19],[47,7]], "Świątynia Andarum - biblioteka": [[12,29],[16,47],[51,7],[59,52],[61,35]], "Świątynia Andarum - lokum mnichów": [[10,17],[12,44],[31,13],[49,20],[51,52]], "Krypty Dusz Śniegu p.1": [[13,35],[15,18],[30,31],[37,18]], "Krypty Dusz Śniegu p.2": [[9,12],[12,43],[27,14],[42,29]], "Krypty Dusz Śniegu p.3": [[5,41],[8,19],[30,29]]},
 
-        "Piekielny KoĹ›ciej": {"Zdradzieckie PrzejĹ›cie p.1": [[8,85],[9,42]], "Zdradzieckie PrzejĹ›cie p.2": [[9,28],[19,6],[51,45]], "WylÄ™garnia ChoukkerĂłw p.1": [[23,14],[26,59]], "WylÄ™garnia ChoukkerĂłw p.2": [[11,20],[36,24],[54,47]], "WylÄ™garnia ChoukkerĂłw p.3": [[19,50],[52,42]], "Labirynt Margorii": [[6,35],[29,22],[62,42],[86,26],[87,44]], "Kopalnia Margorii": [[8,40],[30,92],[58,71]], "Margoria": [[10,47],[30,39],[51,39],[55,15]], "Szyb ZdrajcĂłw": [[11,34],[32,13],[49,47]], "Ĺšlepe Wyrobisko": [[23,56],[28,24],[35,8],[54,28]]},
+        "Piekielny Kościej": {"Zdradzieckie Przejście p.1": [[8,85],[9,42]], "Zdradzieckie Przejście p.2": [[9,28],[19,6],[51,45]], "Wylęgarnia Choukkerów p.1": [[23,14],[26,59]], "Wylęgarnia Choukkerów p.2": [[11,20],[36,24],[54,47]], "Wylęgarnia Choukkerów p.3": [[19,50],[52,42]], "Labirynt Margorii": [[6,35],[29,22],[62,42],[86,26],[87,44]], "Kopalnia Margorii": [[8,40],[30,92],[58,71]], "Margoria": [[10,47],[30,39],[51,39],[55,15]], "Szyb Zdrajców": [[11,34],[32,13],[49,47]], "Ślepe Wyrobisko": [[23,56],[28,24],[35,8],[54,28]]},
 
-        "Koziec MÄ…ciciel ĹšcieĹĽek": {"LiĹ›ciaste Rozstaje": [[12,68],[47,11],[51,77]], "Sosnowe Odludzie": [[4,15],[24,21],[31,85],[40,41],[41,65],[56,23]], "KsiÄ™ĹĽycowe Wzniesienie": [[10,25],[15,75],[44,61],[60,13]], "Zapomniany ĹšwiÄ™ty Gaj p.1 - sala 1": [[14,8]], "Trupia PrzeĹ‚Ä™cz": [[16,42],[25,2],[57,5],[58,78]], "Zapomniany ĹšwiÄ™ty Gaj p.2": [[16,27],[30,25]], "Mglista Polana Vesy": [[25,52],[44,75],[56,48]], "WzgĂłrze PĹ‚aczek": [[15,49],[67,20],[77,31]], "PĹ‚aczÄ…ca Grota p.1 - sala 1": [[20,21]], "PĹ‚aczÄ…ca Grota p.1 - sala 2": [[11,15],[36,42]], "PĹ‚aczÄ…ca Grota p.2": [[19,34],[39,32],[41,8],[52,50]], "PĹ‚aczÄ…ca Grota p.3": [[19,34],[20,24]]},
+        "Koziec Mąciciel Ścieżek": {"Liściaste Rozstaje": [[12,68],[47,11],[51,77]], "Sosnowe Odludzie": [[4,15],[24,21],[31,85],[40,41],[41,65],[56,23]], "Księżycowe Wzniesienie": [[10,25],[15,75],[44,61],[60,13]], "Zapomniany Święty Gaj p.1 - sala 1": [[14,8]], "Trupia Przełęcz": [[16,42],[25,2],[57,5],[58,78]], "Zapomniany Święty Gaj p.2": [[16,27],[30,25]], "Mglista Polana Vesy": [[25,52],[44,75],[56,48]], "Wzgórze Płaczek": [[15,49],[67,20],[77,31]], "Płacząca Grota p.1 - sala 1": [[20,21]], "Płacząca Grota p.1 - sala 2": [[11,15],[36,42]], "Płacząca Grota p.2": [[19,34],[39,32],[41,8],[52,50]], "Płacząca Grota p.3": [[19,34],[20,24]]},
 
-        "Kochanka Nocy": {"BĹ‚Ä™dny Szlak": [[8,44],[22,5],[40,42],[75,23]], "ZawiĹ‚y BĂłr": [[14,43],[47,39],[48,5],[87,8]], "Iglaste ĹšcieĹĽki": [[23,10],[29,56],[68,47],[83,9],[88,40]], "Selva Oscura": [[23,35],[24,19],[72,37],[76,12]], "Gadzia Kotlina": [[10,32],[38,43],[50,26],[60,49],[72,14]], "Mglista Polana Vesy": [[7,12],[44,11]], "Dolina CentaurĂłw": [[11,54],[56,44],[69,16],[84,46]], "ZĹ‚owrogie Bagna": [[10,10],[23,39],[52,20],[53,41]], "ZagrzybiaĹ‚e ĹšcieĹĽki p.1 - sala 1": [[5,12],[18,35],[33,21]], "ZagrzybiaĹ‚e ĹšcieĹĽki p.1 - sala 2": [[17,6],[36,17]], "ZagrzybiaĹ‚e ĹšcieĹĽki p.1 - sala 3": [[7,7],[28,28],[38,11]], "ZagrzybiaĹ‚e ĹšcieĹĽki p.2": [[29,14],[30,43]]},
+        "Kochanka Nocy": {"Błędny Szlak": [[8,44],[22,5],[40,42],[75,23]], "Zawiły Bór": [[14,43],[47,39],[48,5],[87,8]], "Iglaste Ścieżki": [[23,10],[29,56],[68,47],[83,9],[88,40]], "Selva Oscura": [[23,35],[24,19],[72,37],[76,12]], "Gadzia Kotlina": [[10,32],[38,43],[50,26],[60,49],[72,14]], "Mglista Polana Vesy": [[7,12],[44,11]], "Dolina Centaurów": [[11,54],[56,44],[69,16],[84,46]], "Złowrogie Bagna": [[10,10],[23,39],[52,20],[53,41]], "Zagrzybiałe Ścieżki p.1 - sala 1": [[5,12],[18,35],[33,21]], "Zagrzybiałe Ścieżki p.1 - sala 2": [[17,6],[36,17]], "Zagrzybiałe Ścieżki p.1 - sala 3": [[7,7],[28,28],[38,11]], "Zagrzybiałe Ścieżki p.2": [[29,14],[30,43]]},
 
-        "KsiÄ…ĹĽÄ™ Kasim": {"Stare SioĹ‚o": [[84,44],[91,7]], "Sucha Dolina": [[28,34],[31,77],[44,23]], "Wioska Rybacka": [[23,15],[85,5],[88,43]], "PĹ‚askowyĹĽ Arpan": [[37,32],[71,15],[73,50]], "Skalne Cmentarzysko p.1": [[5,17]], "Skalne Cmentarzysko p.2": [[8,40],[40,20]], "Skalne Cmentarzysko p.3": [[19,44],[35,39],[55,10]], "Oaza Siedmiu WichrĂłw": [[22,67],[32,42],[48,35],[49,72]], "ZĹ‚ote Piaski": [[11,60],[13,29],[18,69],[44,7],[44,55]], "Piramida Pustynnego WĹ‚adcy p.1": [[9,11],[41,35]], "Piramida Pustynnego WĹ‚adcy p.2": [[19,24]], "Ruiny Pustynnych Burz": [[22,23],[23,83],[44,70]], "Ciche Rumowiska": [[19,55],[22,3],[26,27],[64,48],[80,47],[85,11]], "Dolina Suchych Ĺez": [[34,52],[56,12],[61,61],[79,35],[80,16]]},
+        "Książę Kasim": {"Stare Sioło": [[84,44],[91,7]], "Sucha Dolina": [[28,34],[31,77],[44,23]], "Wioska Rybacka": [[23,15],[85,5],[88,43]], "Płaskowyż Arpan": [[37,32],[71,15],[73,50]], "Skalne Cmentarzysko p.1": [[5,17]], "Skalne Cmentarzysko p.2": [[8,40],[40,20]], "Skalne Cmentarzysko p.3": [[19,44],[35,39],[55,10]], "Oaza Siedmiu Wichrów": [[22,67],[32,42],[48,35],[49,72]], "Złote Piaski": [[11,60],[13,29],[18,69],[44,7],[44,55]], "Piramida Pustynnego Władcy p.1": [[9,11],[41,35]], "Piramida Pustynnego Władcy p.2": [[19,24]], "Ruiny Pustynnych Burz": [[22,23],[23,83],[44,70]], "Ciche Rumowiska": [[19,55],[22,3],[26,27],[64,48],[80,47],[85,11]], "Dolina Suchych Łez": [[34,52],[56,12],[61,61],[79,35],[80,16]]},
 
-        "ĹšwiÄ™ty Braciszek": {"Agia Triada": [[10,32],[23,72],[46,22],[58,35],[77,44]], "Klasztor RĂłĹĽanitĂłw - Ĺ›wiÄ…tynia": [[11,15],[38,15]], "Klasztor RĂłĹĽanitĂłw - wirydarz": [[8,14]], "Klasztor RĂłĹĽanitĂłw - cela opata": [[11,5]], "Klasztor RĂłĹĽanitĂłw - wieĹĽa pĹ‚n.-wsch. p.1": [[6,5]], "Klasztor RĂłĹĽanitĂłw - strych p.1": [[19,20]], "Klasztor RĂłĹĽanitĂłw - strych p.2": [[20,19],[36,20]], "Klasztor RĂłĹĽanitĂłw - kapitularz": [[12,15]], "Klasztor RĂłĹĽanitĂłw - fraternia": [[13,16]], "Klasztor RĂłĹĽanitĂłw - refektarz": [[9,13]], "Klasztor RĂłĹĽanitĂłw - dormitoria": [[3,16]], "Klasztor RĂłĹĽanitĂłw - pomieszczenia gospodarcze": [[11,13]], "Klasztor RĂłĹĽanitĂłw - klasztorny browar": [[11,7]], "Klasztor RĂłĹĽanitĂłw - dzwonnica": [[12,12]], "Archipelag Bremus An": [[10,15],[30,28],[48,35],[75,41]], "Wyspa Rem": [[9,22],[22,55],[25,30],[39,46],[57,8],[82,29]], "Wyspa Caneum": [[23,35],[42,8],[45,54],[57,88],[81,27]], "Wyspa Magradit": [[12,36],[15,78],[60,52],[80,81],[82,36]], "Wyspa WrakĂłw": [[5,89],[15,67],[16,15],[38,32]]},
+        "Święty Braciszek": {"Agia Triada": [[10,32],[23,72],[46,22],[58,35],[77,44]], "Klasztor Różanitów - świątynia": [[11,15],[38,15]], "Klasztor Różanitów - wirydarz": [[8,14]], "Klasztor Różanitów - cela opata": [[11,5]], "Klasztor Różanitów - wieża płn.-wsch. p.1": [[6,5]], "Klasztor Różanitów - strych p.1": [[19,20]], "Klasztor Różanitów - strych p.2": [[20,19],[36,20]], "Klasztor Różanitów - kapitularz": [[12,15]], "Klasztor Różanitów - fraternia": [[13,16]], "Klasztor Różanitów - refektarz": [[9,13]], "Klasztor Różanitów - dormitoria": [[3,16]], "Klasztor Różanitów - pomieszczenia gospodarcze": [[11,13]], "Klasztor Różanitów - klasztorny browar": [[11,7]], "Klasztor Różanitów - dzwonnica": [[12,12]], "Archipelag Bremus An": [[10,15],[30,28],[48,35],[75,41]], "Wyspa Rem": [[9,22],[22,55],[25,30],[39,46],[57,8],[82,29]], "Wyspa Caneum": [[23,35],[42,8],[45,54],[57,88],[81,27]], "Wyspa Magradit": [[12,36],[15,78],[60,52],[80,81],[82,36]], "Wyspa Wraków": [[5,89],[15,67],[16,15],[38,32]]},
 
-        "ZĹ‚oty Roger": {"Latarniane WybrzeĹĽe": [[6,59],[18,31],[21,4],[47,20],[79,55],[87,58]], "Korsarska Nora - sala 1": [[9,15],[23,21]], "Korsarska Nora - sala 2": [[10,25],[20,13],[25,20]], "Korsarska Nora - sala 3": [[13,25],[14,7]], "Korsarska Nora - sala 4": [[15,26],[21,16]], "Korsarska Nora - sala 5": [[23,37],[29,11]], "Korsarska Nora - sala 6": [[12,26],[28,12]], "Ukryta Grota Morskich DiabĹ‚Ăłw - korytarz": [[21,14]], "Ukryta Grota Morskich DiabĹ‚Ăłw - arsenaĹ‚": [[18,10],[19,21]], "Ukryta Grota Morskich DiabĹ‚Ăłw": [[20,18],[29,38],[46,22]], "Dolina Pustynnych KrÄ™gĂłw": [[3,61],[7,11],[8,29],[28,76],[38,35],[55,11],[58,82]], "Piachy Zniewolonych": [[7,18],[25,42],[47,52],[54,12],[59,28],[90,16]], "Piaszczysta Grota p.1 - sala 1": [[16,42],[27,6],[37,23]], "Ruchome Piaski": [[4,26],[4,59],[8,6],[28,44],[43,16],[80,24],[84,61],[90,3]]},
+        "Złoty Roger": {"Latarniane Wybrzeże": [[6,59],[18,31],[21,4],[47,20],[79,55],[87,58]], "Korsarska Nora - sala 1": [[9,15],[23,21]], "Korsarska Nora - sala 2": [[10,25],[20,13],[25,20]], "Korsarska Nora - sala 3": [[13,25],[14,7]], "Korsarska Nora - sala 4": [[15,26],[21,16]], "Korsarska Nora - sala 5": [[23,37],[29,11]], "Korsarska Nora - sala 6": [[12,26],[28,12]], "Ukryta Grota Morskich Diabłów - korytarz": [[21,14]], "Ukryta Grota Morskich Diabłów - arsenał": [[18,10],[19,21]], "Ukryta Grota Morskich Diabłów": [[20,18],[29,38],[46,22]], "Dolina Pustynnych Kręgów": [[3,61],[7,11],[8,29],[28,76],[38,35],[55,11],[58,82]], "Piachy Zniewolonych": [[7,18],[25,42],[47,52],[54,12],[59,28],[90,16]], "Piaszczysta Grota p.1 - sala 1": [[16,42],[27,6],[37,23]], "Ruchome Piaski": [[4,26],[4,59],[8,6],[28,44],[43,16],[80,24],[84,61],[90,3]]},
 
-        "Baca bez Ĺowiec": {"WyjÄ…cy WÄ…wĂłz": [[3,36],[5,62],[20,84],[26,80],[27,33],[30,66],[42,38],[46,67],[52,19]], "WyjÄ…ca Jaskinia": [[8,53],[29,37],[45,26],[49,15],[54,57]], "Babi WzgĂłrek": [[8,8],[8,27],[12,55],[28,17],[37,83],[55,74],[56,3],[57,41]], "GĂłralska Pieczara p.1": [[11,13],[32,38],[39,26]], "GĂłralska Pieczara p.2": [[22,38],[23,15],[23,28],[32,14]], "GĂłralska Pieczara p.3": [[15,32],[21,14],[30,52],[36,28],[50,22],[51,59]], "GĂłralskie PrzejĹ›cie": [[2,5],[3,45],[17,86],[22,37],[41,90],[45,13],[52,62]]},
+        "Baca bez Łowiec": {"Wyjący Wąwóz": [[3,36],[5,62],[20,84],[26,80],[27,33],[30,66],[42,38],[46,67],[52,19]], "Wyjąca Jaskinia": [[8,53],[29,37],[45,26],[49,15],[54,57]], "Babi Wzgórek": [[8,8],[8,27],[12,55],[28,17],[37,83],[55,74],[56,3],[57,41]], "Góralska Pieczara p.1": [[11,13],[32,38],[39,26]], "Góralska Pieczara p.2": [[22,38],[23,15],[23,28],[32,14]], "Góralska Pieczara p.3": [[15,32],[21,14],[30,52],[36,28],[50,22],[51,59]], "Góralskie Przejście": [[2,5],[3,45],[17,86],[22,37],[41,90],[45,13],[52,62]]},
 
-        "CzarujÄ…ca Atalia": {"WiedĹşmie KotĹ‚owisko": [[7,45],[12,9],[52,22],[79,12],[91,44]], "Upiorna Droga": [[25,6],[26,39],[65,55],[66,7],[89,22]], "Sabatowe GĂłry": [[18,55],[32,18],[36,52],[42,14],[52,41]], "Tristam": [[3,56],[14,13],[34,27],[46,11],[59,57],[64,17],[89,35]], "SplÄ…drowana kaplica": [[12,7]], "Ograbiona Ĺ›wiÄ…tynia": [[7,9],[19,6]], "Splugawiona kaplica": [[6,5]], "Dom Atalii": [[6,9]], "Opuszczone wiÄ™zienie": [[10,5]], "Dom Amry": [[5,6],[11,8]], "Dom nawiedzonej wiedĹşmy": [[4,9],[11,5]], "Dom Adariel": [[11,7]], "Dom starej czarownicy": [[16,14],[17,8]], "Dom czarnej magii": [[8,6]], "Magazyn mioteĹ‚": [[11,6]], "Lochy Tristam": [[13,48],[30,59],[39,28],[52,48]]},
+        "Czarująca Atalia": {"Wiedźmie Kotłowisko": [[7,45],[12,9],[52,22],[79,12],[91,44]], "Upiorna Droga": [[25,6],[26,39],[65,55],[66,7],[89,22]], "Sabatowe Góry": [[18,55],[32,18],[36,52],[42,14],[52,41]], "Tristam": [[3,56],[14,13],[34,27],[46,11],[59,57],[64,17],[89,35]], "Splądrowana kaplica": [[12,7]], "Ograbiona świątynia": [[7,9],[19,6]], "Splugawiona kaplica": [[6,5]], "Dom Atalii": [[6,9]], "Opuszczone więzienie": [[10,5]], "Dom Amry": [[5,6],[11,8]], "Dom nawiedzonej wiedźmy": [[4,9],[11,5]], "Dom Adariel": [[11,7]], "Dom starej czarownicy": [[16,14],[17,8]], "Dom czarnej magii": [[8,6]], "Magazyn mioteł": [[11,6]], "Lochy Tristam": [[13,48],[30,59],[39,28],[52,48]]},
 
-        "ObĹ‚Ä…kany Ĺowca OrkĂłw": {"Orcza WyĹĽyna": [[4,21],[16,9],[25,40],[35,3],[68,17]], "Grota Orczych SzamanĂłw p.1 s.1": [[14,28],[18,13]], "Grota Orczych SzamanĂłw p.1 s.2": [[9,18],[21,10],[28,16]], "Grota Orczych SzamanĂłw p.2 s.1": [[6,16],[10,23],[12,7]], "Grota Orczych SzamanĂłw p.2 s.2": [[16,8],[18,17],[22,35]], "Osada Czerwonych OrkĂłw": [[3,13],[18,40],[21,3],[22,27],[32,45],[42,6],[42,25],[49,37],[52,17],[62,5],[63,12]], "Grota Orczej Hordy p.1 s.1": [[7,7],[16,19],[25,19],[33,28]], "Grota Orczej Hordy p.1 s.2": [[10,12],[21,23],[34,35]], "Grota Orczej Hordy p.2 s.1": [[14,32],[17,9],[39,14]], "Grota Orczej Hordy p.2 s.2": [[15,26],[27,16],[33,39],[34,20]], "Kurhany ZwyciÄ™ĹĽonych": [[26,53],[63,56],[74,38],[77,14],[83,54]], "WĹ‚oĹ›ci rodu Kruzo": [[15,8],[25,36],[29,3]]},
+        "Obłąkany Łowca Orków": {"Orcza Wyżyna": [[4,21],[16,9],[25,40],[35,3],[68,17]], "Grota Orczych Szamanów p.1 s.1": [[14,28],[18,13]], "Grota Orczych Szamanów p.1 s.2": [[9,18],[21,10],[28,16]], "Grota Orczych Szamanów p.2 s.1": [[6,16],[10,23],[12,7]], "Grota Orczych Szamanów p.2 s.2": [[16,8],[18,17],[22,35]], "Osada Czerwonych Orków": [[3,13],[18,40],[21,3],[22,27],[32,45],[42,6],[42,25],[49,37],[52,17],[62,5],[63,12]], "Grota Orczej Hordy p.1 s.1": [[7,7],[16,19],[25,19],[33,28]], "Grota Orczej Hordy p.1 s.2": [[10,12],[21,23],[34,35]], "Grota Orczej Hordy p.2 s.1": [[14,32],[17,9],[39,14]], "Grota Orczej Hordy p.2 s.2": [[15,26],[27,16],[33,39],[34,20]], "Kurhany Zwyciężonych": [[26,53],[63,56],[74,38],[77,14],[83,54]], "Włości rodu Kruzo": [[15,8],[25,36],[29,3]]},
 
-        "Lichwiarz Grauhaz": {"KrysztaĹ‚owa Grota p.1": [[12,11],[33,46],[35,28],[55,6]], "KrysztaĹ‚owa Grota p.2 - sala 1": [[5,25],[27,9],[35,57],[36,40]], "KrysztaĹ‚owa Grota p.2 - sala 2": [[8,36],[33,19],[43,13],[52,40]], "KrysztaĹ‚owa Grota - Sala Smutku": [[13,12],[15,34],[18,23],[32,20]], "KrysztaĹ‚owa Grota p.3 - sala 1": [[10,11],[10,40],[30,33],[50,44]], "KrysztaĹ‚owa Grota p.3 - sala 2": [[9,45],[17,12],[38,40]], "KrysztaĹ‚owa Grota p.4": [[19,54],[38,9],[51,32],[52,56]], "KrysztaĹ‚owa Grota p.5": [[18,32],[19,45],[55,34]], "KrysztaĹ‚owa Grota p.6": [[14,49],[42,50],[46,15]]},
+        "Lichwiarz Grauhaz": {"Kryształowa Grota p.1": [[12,11],[33,46],[35,28],[55,6]], "Kryształowa Grota p.2 - sala 1": [[5,25],[27,9],[35,57],[36,40]], "Kryształowa Grota p.2 - sala 2": [[8,36],[33,19],[43,13],[52,40]], "Kryształowa Grota - Sala Smutku": [[13,12],[15,34],[18,23],[32,20]], "Kryształowa Grota p.3 - sala 1": [[10,11],[10,40],[30,33],[50,44]], "Kryształowa Grota p.3 - sala 2": [[9,45],[17,12],[38,40]], "Kryształowa Grota p.4": [[19,54],[38,9],[51,32],[52,56]], "Kryształowa Grota p.5": [[18,32],[19,45],[55,34]], "Kryształowa Grota p.6": [[14,49],[42,50],[46,15]]},
 
-        "Viviana Nandin": {"GraĹ„ Gawronich PiĂłr": [[56,31],[87,17],[87,53]], "Ruiny Tass Zhil": [[7,22],[17,49],[20,12],[23,58],[25,25],[29,10],[41,25],[60,37],[63,10],[68,35],[71,20],[73,23],[78,44],[88,9]], "BĹ‚ota Sham Al": [[9,8],[16,54],[21,17],[41,56],[42,4],[48,14],[56,5]], "GĹ‚usza Ĺšwistu": [[7,12],[13,12],[24,93],[32,73],[41,11],[50,62],[57,91],[58,20],[59,9],[60,78]], "Las PorywĂłw Wiatru": [[6,13],[29,52],[35,15],[41,37],[49,61]], "Kwieciste Kresy": [[29,55],[51,50],[66,8],[75,11],[76,25],[80,54]]},
+        "Viviana Nandin": {"Grań Gawronich Piór": [[56,31],[87,17],[87,53]], "Ruiny Tass Zhil": [[7,22],[17,49],[20,12],[23,58],[25,25],[29,10],[41,25],[60,37],[63,10],[68,35],[71,20],[73,23],[78,44],[88,9]], "Błota Sham Al": [[9,8],[16,54],[21,17],[41,56],[42,4],[48,14],[56,5]], "Głusza Świstu": [[7,12],[13,12],[24,93],[32,73],[41,11],[50,62],[57,91],[58,20],[59,9],[60,78]], "Las Porywów Wiatru": [[6,13],[29,52],[35,15],[41,37],[49,61]], "Kwieciste Kresy": [[29,55],[51,50],[66,8],[75,11],[76,25],[80,54]]},
 
-        "Przeraza": {"ZĹ‚udny Trakt": [[22,47],[53,37],[76,13],[7,11]], "BĂłr Zagubionych": [[9,9],[58,12],[58,53],[24,76],[31,38]], "Martwy Las": [[3,5],[26,39],[93,54],[74,21],[45,24]], "Ziemia SzepczÄ…cych Cierni": [[19,35],[51,54],[78,51],[62,18],[90,11]], "Zbocze Starych BogĂłw": [[47,62],[2,79],[36,28],[51,33],[5,24]], "Bezgwiezdna GÄ™stwina": [[32,81],[41,7],[22,59],[58,27],[50,62]], "Grota SkamieniaĹ‚ej Kory p.1 - sala 1": [[24,18],[10,35]], "Grota SkamieniaĹ‚ej Kory p.1 - sala 2": [[41,29],[6,17],[19,28]], "Grota SkamieniaĹ‚ej Kory p.2": [[17,13],[9,37],[36,36]]},
+        "Przeraza": {"Złudny Trakt": [[22,47],[53,37],[76,13],[7,11]], "Bór Zagubionych": [[9,9],[58,12],[58,53],[24,76],[31,38]], "Martwy Las": [[3,5],[26,39],[93,54],[74,21],[45,24]], "Ziemia Szepczących Cierni": [[19,35],[51,54],[78,51],[62,18],[90,11]], "Zbocze Starych Bogów": [[47,62],[2,79],[36,28],[51,33],[5,24]], "Bezgwiezdna Gęstwina": [[32,81],[41,7],[22,59],[58,27],[50,62]], "Grota Skamieniałej Kory p.1 - sala 1": [[24,18],[10,35]], "Grota Skamieniałej Kory p.1 - sala 2": [[41,29],[6,17],[19,28]], "Grota Skamieniałej Kory p.2": [[17,13],[9,37],[36,36]]},
 
-        "Demonis Pan NicoĹ›ci": {"Przedsionek Kultu": [[9,9],[26,26]], "Mroczne Komnaty": [[42,26],[52,9]], "PrzeraĹĽajÄ…ce Sypialnie": [[10,36],[58,20],[59,51]], "Tajemnicza Siedziba": [[9,15],[48,45]], "Sala Spowiedzi KonajÄ…cych": [[7,10],[9,51],[54,51],[57,10]], "Sala TysiÄ…ca Ĺšwiec": [[9,7],[17,27],[47,30],[72,26],[89,21]], "Lochy Kultu": [[22,31],[45,51],[52,9]], "Sale Rozdzierania": [[11,13],[13,60]], "Korytarz Ostatnich Nadziei": [[24,15],[70,15]]},
+        "Demonis Pan Nicości": {"Przedsionek Kultu": [[9,9],[26,26]], "Mroczne Komnaty": [[42,26],[52,9]], "Przerażające Sypialnie": [[10,36],[58,20],[59,51]], "Tajemnicza Siedziba": [[9,15],[48,45]], "Sala Spowiedzi Konających": [[7,10],[9,51],[54,51],[57,10]], "Sala Tysiąca Świec": [[9,7],[17,27],[47,30],[72,26],[89,21]], "Lochy Kultu": [[22,31],[45,51],[52,9]], "Sale Rozdzierania": [[11,13],[13,60]], "Korytarz Ostatnich Nadziei": [[24,15],[70,15]]},
 
-        "Mulher Ma": {"Gildia TeologĂłw": [[5,4]], "Zapomniane Sztolnie": [[14,17],[31,34],[29,16]], "ZamierzchĹ‚e Arterie p.2 - sala 1": [[31,56],[56,51],[53,35],[31,13]], "ZamierzchĹ‚e Arterie p.2 - sala 2": [[10,53],[34,45],[34,20],[52,43]], "ZamierzchĹ‚e Arterie p.3": [[10,41],[32,37],[28,18]], "Dawny PrzeĹ‚az": [[17,19]], "Szczerba SamobĂłjcĂłw": [[56,14]], "Zakazana Grota": [[17,8]], "Porzucone Noiridum p.2": [[45,15],[10,23]], "Porzucone Noiridum p.3 - sala 1": [[19,17],[11,13]], "Porzucone Noiridum p.3 - sala 2": [[33,20],[35,40]], "Porzucone Noiridum p.3 - sala 3": [[40,52],[37,17],[52,13]]},
+        "Mulher Ma": {"Gildia Teologów": [[5,4]], "Zapomniane Sztolnie": [[14,17],[31,34],[29,16]], "Zamierzchłe Arterie p.2 - sala 1": [[31,56],[56,51],[53,35],[31,13]], "Zamierzchłe Arterie p.2 - sala 2": [[10,53],[34,45],[34,20],[52,43]], "Zamierzchłe Arterie p.3": [[10,41],[32,37],[28,18]], "Dawny Przełaz": [[17,19]], "Szczerba Samobójców": [[56,14]], "Zakazana Grota": [[17,8]], "Porzucone Noiridum p.2": [[45,15],[10,23]], "Porzucone Noiridum p.3 - sala 1": [[19,17],[11,13]], "Porzucone Noiridum p.3 - sala 2": [[33,20],[35,40]], "Porzucone Noiridum p.3 - sala 3": [[40,52],[37,17],[52,13]]},
 
-        "Vapor Veneno": {"ZawodzÄ…ce Kaskady": [[88,6],[59,42],[51,29],[16,24]], "GĹ‚uchy Las": [[15,92]], "Strumienie SzemrzÄ…cych WĂłd": [[74,40],[7,9],[39,43]], "Skryty Azyl": [[17,77],[7,11],[42,37],[50,18]], "ZĹ‚ota DÄ…browa": [[12,55],[46,29],[27,23]], "Dolina Potoku Ĺšmierci": [[7,45],[53,37],[64,72],[43,13]], "Bagna UmarĹ‚ych": [[25,79],[14,46],[46,79],[54,25]], "GnijÄ…ce Topielisko": [[42,88],[60,36],[20,10]], "Urwisko Vapora": [[14,25],[67,4]], "Dolina PeĹ‚znÄ…cego Krzyku": [[27,37],[53,4],[11,16]], "Zatrute Torfowiska": [[26,32],[40,49],[53,38],[11,49]], "GrzÄ…ska Ziemia": [[9,17],[87,9],[52,16],[20,53],[75,49]], "Mglisty Las": [[58,53],[12,40],[44,41],[80,21]]},
+        "Vapor Veneno": {"Zawodzące Kaskady": [[88,6],[59,42],[51,29],[16,24]], "Głuchy Las": [[15,92]], "Strumienie Szemrzących Wód": [[74,40],[7,9],[39,43]], "Skryty Azyl": [[17,77],[7,11],[42,37],[50,18]], "Złota Dąbrowa": [[12,55],[46,29],[27,23]], "Dolina Potoku Śmierci": [[7,45],[53,37],[64,72],[43,13]], "Bagna Umarłych": [[25,79],[14,46],[46,79],[54,25]], "Gnijące Topielisko": [[42,88],[60,36],[20,10]], "Urwisko Vapora": [[14,25],[67,4]], "Dolina Pełznącego Krzyku": [[27,37],[53,4],[11,16]], "Zatrute Torfowiska": [[26,32],[40,49],[53,38],[11,49]], "Grząska Ziemia": [[9,17],[87,9],[52,16],[20,53],[75,49]], "Mglisty Las": [[58,53],[12,40],[44,41],[80,21]]},
 
-        "DÄ™boroĹĽec": {"Urwisko ZdrewniaĹ‚ych": [[11,21],[41,46],[68,14],[80,50]], "WÄ…wĂłz Zakorzenionych Dusz": [[85,50],[60,33],[38,13]], "Krzaczasta Grota p.1 - sala 1": [[8,13]], "Krzaczasta Grota p.1 - sala 2": [[11,10]], "Krzaczasta Grota p.1 - sala 3": [[36,22],[19,10]], "Krzaczasta Grota p.2 - sala 1": [[25,13]], "Krzaczasta Grota p.2 - sala 2": [[12,19]], "Krzaczasta Grota p.2 - sala 3": [[24,43],[22,15]], "Regiel ZabĹ‚Ä…kanych": [[16,32],[5,60],[71,39]], "ĹąrĂłdĹ‚o Zakorzenionego Ludu": [[26,31],[25,76],[71,20]], "Jaskinia Korzennego Czaru p.1 - sala 1": [[52,45],[11,49],[39,11]], "Jaskinia Korzennego Czaru p.1 - sala 2": [[30,9],[23,18]], "Jaskinia Korzennego Czaru p.1 - sala 3": [[17,17],[6,24]], "Jaskinia Korzennego Czaru p.1 - sala 4": [[17,17],[52,22],[41,40]], "Jaskinia Korzennego Czaru p.2 - sala 1": [[11,15],[17,8]], "Jaskinia Korzennego Czaru p.2 - sala 2": [[13,11],[17,17]], "Piaskowa GÄ™stwina": [[34,11],[7,47],[33,33]]},
+        "Dęborożec": {"Urwisko Zdrewniałych": [[11,21],[41,46],[68,14],[80,50]], "Wąwóz Zakorzenionych Dusz": [[85,50],[60,33],[38,13]], "Krzaczasta Grota p.1 - sala 1": [[8,13]], "Krzaczasta Grota p.1 - sala 2": [[11,10]], "Krzaczasta Grota p.1 - sala 3": [[36,22],[19,10]], "Krzaczasta Grota p.2 - sala 1": [[25,13]], "Krzaczasta Grota p.2 - sala 2": [[12,19]], "Krzaczasta Grota p.2 - sala 3": [[24,43],[22,15]], "Regiel Zabłąkanych": [[16,32],[5,60],[71,39]], "Źródło Zakorzenionego Ludu": [[26,31],[25,76],[71,20]], "Jaskinia Korzennego Czaru p.1 - sala 1": [[52,45],[11,49],[39,11]], "Jaskinia Korzennego Czaru p.1 - sala 2": [[30,9],[23,18]], "Jaskinia Korzennego Czaru p.1 - sala 3": [[17,17],[6,24]], "Jaskinia Korzennego Czaru p.1 - sala 4": [[17,17],[52,22],[41,40]], "Jaskinia Korzennego Czaru p.2 - sala 1": [[11,15],[17,8]], "Jaskinia Korzennego Czaru p.2 - sala 2": [[13,11],[17,17]], "Piaskowa Gęstwina": [[34,11],[7,47],[33,33]]},
 
         "Tepeyollotl": {"Altepetl Mahoptekan": [[45,31],[7,71],[54,5]], "Zachodni Mictlan p.2": [[5,15]], "Zachodni Mictlan p.3": [[3,11],[29,18]], "Zachodni Mictlan p.4": [[20,22],[12,16]], "Zachodni Mictlan p.5": [[7,11]], "Zachodni Mictlan p.6": [[28,17],[4,23]], "Zachodni Mictlan p.7": [[4,6],[28,17]], "Zachodni Mictlan p.8": [[10,15],[24,16]], "Wschodni Mictlan p.2": [[19,8]], "Wschodni Mictlan p.3": [[28,18],[9,17]], "Wschodni Mictlan p.4": [[28,26],[20,15]], "Wschodni Mictlan p.5": [[14,11]], "Wschodni Mictlan p.6": [[10,15],[29,24]], "Wschodni Mictlan p.7": [[29,29],[3,11]], "Wschodni Mictlan p.8": [[23,8],[3,20]], "Topan p.2": [[16,18]], "Topan p.3": [[11,14]], "Topan p.4": [[7,17]], "Topan p.5": [[6,6]], "Topan p.6": [[3,17],[28,17]], "Topan p.7": [[23,26],[9,11]], "Topan p.8": [[12,8]], "Topan p.9": [[3,12],[22,12]], "Niecka Xiuh Atl": [[41,35],[39,5],[39,64]], "Oztotl Tzacua p.1 - sala 2": [[19,17]], "Oztotl Tzacua p.2 - sala 1": [[24,50],[25,11]], "Oztotl Tzacua p.2 - sala 2": [[24,26],[25,57]], "Oztotl Tzacua p.3 - sala 1": [[49,41],[14,20]], "Oztotl Tzacua p.3 - sala 2": [[42,21],[52,40]], "Oztotl Tzacua p.4 - sala 1": [[17,14]], "Oztotl Tzacua p.4 - sala 2": [[12,10]], "Oztotl Tzacua p.5": [[22,10]]},
 
-        "Widmo Triady": {"PotÄ™pione Zamczysko": [[6,10],[6,46],[50,60],[53,7],[23,77]], "PotÄ™pione Zamczysko - korytarz wejĹ›ciowy": [[13,11]], "PotÄ™pione Zamczysko - lochy zachodnie p.1": [[10,14],[21,30]], "PotÄ™pione Zamczysko - lochy wschodnie p.1": [[19,13],[9,30]], "PotÄ™pione Zamczysko - sala ofiarna": [[25,24]], "PotÄ™pione Zamczysko - korytarz zachodni": [[16,17],[5,13]], "PotÄ™pione Zamczysko - korytarz wschodni": [[15,18],[26,13]], "PotÄ™pione Zamczysko - zachodnia komnata": [[10,15],[17,7]], "PotÄ™pione Zamczysko - wschodnia komnata": [[9,19],[14,13]], "PotÄ™pione Zamczysko - lochy zachodnie p.2": [[22,17],[17,39]], "PotÄ™pione Zamczysko - lochy wschodnie p.2": [[25,22],[32,7],[7,31]], "PotÄ™pione Zamczysko - gĹ‚Ä™bokie lochy": [[13,24]], "PotÄ™pione Zamczysko - pĂłĹ‚nocna komnata": [[17,14],[15,25]], "PotÄ™pione Zamczysko - Ĺ‚Ä…cznik wschodni": [[22,22],[42,40]], "PotÄ™pione Zamczysko - Ĺ‚Ä…cznik zachodni": [[11,23],[33,26],[16,43]], "Zachodnie Zbocze": [[6,42],[58,47],[47,11]], "Plugawe Pustkowie": [[5,53],[45,57],[28,24],[26,77]], "JÄ™czywÄ…wĂłz": [[60,75],[41,29],[16,68],[10,10]], "Pogranicze WisielcĂłw": [[1,62],[19,14],[47,48]], "Skalisty Styk": [[48,41],[10,22],[75,35],[61,11],[7,56]], "Zacisze Zimnych WiatrĂłw": [[14,8],[82,32],[39,51]]},
+        "Widmo Triady": {"Potępione Zamczysko": [[6,10],[6,46],[50,60],[53,7],[23,77]], "Potępione Zamczysko - korytarz wejściowy": [[13,11]], "Potępione Zamczysko - lochy zachodnie p.1": [[10,14],[21,30]], "Potępione Zamczysko - lochy wschodnie p.1": [[19,13],[9,30]], "Potępione Zamczysko - sala ofiarna": [[25,24]], "Potępione Zamczysko - korytarz zachodni": [[16,17],[5,13]], "Potępione Zamczysko - korytarz wschodni": [[15,18],[26,13]], "Potępione Zamczysko - zachodnia komnata": [[10,15],[17,7]], "Potępione Zamczysko - wschodnia komnata": [[9,19],[14,13]], "Potępione Zamczysko - lochy zachodnie p.2": [[22,17],[17,39]], "Potępione Zamczysko - lochy wschodnie p.2": [[25,22],[32,7],[7,31]], "Potępione Zamczysko - głębokie lochy": [[13,24]], "Potępione Zamczysko - północna komnata": [[17,14],[15,25]], "Potępione Zamczysko - łącznik wschodni": [[22,22],[42,40]], "Potępione Zamczysko - łącznik zachodni": [[11,23],[33,26],[16,43]], "Zachodnie Zbocze": [[6,42],[58,47],[47,11]], "Plugawe Pustkowie": [[5,53],[45,57],[28,24],[26,77]], "Jęczywąwóz": [[60,75],[41,29],[16,68],[10,10]], "Pogranicze Wisielców": [[1,62],[19,14],[47,48]], "Skalisty Styk": [[48,41],[10,22],[75,35],[61,11],[7,56]], "Zacisze Zimnych Wiatrów": [[14,8],[82,32],[39,51]]},
 
-        "Negthotep Czarny KapĹ‚an": {"Pustynne Katakumby": [[13,7]], "Pustynne Katakumby - sala 1": [[7,23],[10,17]], "Pustynne Katakumby - sala 2": [[8,13],[11,22]], "Komnaty Bezdusznych - sala 1": [[19,35],[23,40],[49,24],[52,14],[71,14]], "Komnaty Bezdusznych - sala 2": [[11,40],[50,29],[69,40],[78,25]], "Katakumby GwaĹ‚townej Ĺšmierci": [[30,31],[46,34]], "Korytarz Porzuconych MarzeĹ„": [[15,13],[16,15]], "Katakumby OpÄ™tanych Dusz": [[15,40],[16,20]], "Katakumby Odnalezionych SkrytobĂłjcĂłw": [[7,15],[19,20]], "Korytarz Porzuconych Nadziei": [[12,11]], "Wschodni Tunel JaĹşni": [[18,13],[26,48],[61,42],[73,20]], "Katakumby Krwawych Wypraw": [[29,26],[38,13]], "Zachodni Tunel JaĹşni": [[11,16],[20,37],[35,8],[39,45],[52,10]], "Katakumby PolegĹ‚ych LegionistĂłw": [[21,33],[23,6]], "Grobowiec Seta": [[26,38]]},
+        "Negthotep Czarny Kapłan": {"Pustynne Katakumby": [[13,7]], "Pustynne Katakumby - sala 1": [[7,23],[10,17]], "Pustynne Katakumby - sala 2": [[8,13],[11,22]], "Komnaty Bezdusznych - sala 1": [[19,35],[23,40],[49,24],[52,14],[71,14]], "Komnaty Bezdusznych - sala 2": [[11,40],[50,29],[69,40],[78,25]], "Katakumby Gwałtownej Śmierci": [[30,31],[46,34]], "Korytarz Porzuconych Marzeń": [[15,13],[16,15]], "Katakumby Opętanych Dusz": [[15,40],[16,20]], "Katakumby Odnalezionych Skrytobójców": [[7,15],[19,20]], "Korytarz Porzuconych Nadziei": [[12,11]], "Wschodni Tunel Jaźni": [[18,13],[26,48],[61,42],[73,20]], "Katakumby Krwawych Wypraw": [[29,26],[38,13]], "Zachodni Tunel Jaźni": [[11,16],[20,37],[35,8],[39,45],[52,10]], "Katakumby Poległych Legionistów": [[21,33],[23,6]], "Grobowiec Seta": [[26,38]]},
 
-        "MĹ‚ody Smok": {"Pustynia Shaiharrud - zachĂłd": [[4,19],[26,8],[30,90],[52,38],[55,6]], "SÄ™piarnia": [[7,5]], "Jaskinia SzczÄ™k": [[23,5]], "Jaskinia Piaskowej Burzy s.1": [[16,8]], "Jaskinia Piaskowej Burzy s.2": [[5,20]], "Pustynia Shaiharrud - wschĂłd": [[5,2],[21,76],[24,61],[47,24],[55,62]], "Jurta Nomadzka": [[4,7]], "Jaskinia Odwagi": [[27,11]], "Grota PoĹ›wiÄ™cenia": [[4,21]], "ĹšwiÄ…tynia Hebrehotha - przedsionek": [[26,12]], "Smocze Skalisko": [[52,50],[67,23]], "Jaskinia SÄ™pa s.1": [[29,11],[29,41]], "Jaskinia SÄ™pa s.2": [[14,19]], "Urwisko Vapora": [[20,58],[29,46],[64,37]], "SkaĹ‚y UmarĹ‚ych": [[30,31],[31,87],[54,70],[60,30]]}
+        "Młody Smok": {"Pustynia Shaiharrud - zachód": [[4,19],[26,8],[30,90],[52,38],[55,6]], "Sępiarnia": [[7,5]], "Jaskinia Szczęk": [[23,5]], "Jaskinia Piaskowej Burzy s.1": [[16,8]], "Jaskinia Piaskowej Burzy s.2": [[5,20]], "Pustynia Shaiharrud - wschód": [[5,2],[21,76],[24,61],[47,24],[55,62]], "Jurta Nomadzka": [[4,7]], "Jaskinia Odwagi": [[27,11]], "Grota Poświęcenia": [[4,21]], "Świątynia Hebrehotha - przedsionek": [[26,12]], "Smocze Skalisko": [[52,50],[67,23]], "Jaskinia Sępa s.1": [[29,11],[29,41]], "Jaskinia Sępa s.2": [[14,19]], "Urwisko Vapora": [[20,58],[29,46],[64,37]], "Skały Umarłych": [[30,31],[31,87],[54,70],[60,30]]}
 
     };
 
 
 
-    const heroLevels = { "Domina Ecclesiae": "23", "Mietek Ĺ»ul": "32", "Mroczny Patryk": "35", "Karmazynowy MĹ›ciciel": "47", "ZĹ‚odziej": "50", "ZĹ‚y Przewodnik": "63", "Piekielny KoĹ›ciej": "74", "OpÄ™tany Paladyn": "85", "Koziec MÄ…ciciel ĹšcieĹĽek": "95", "Kochanka Nocy": "105", "KsiÄ…ĹĽÄ™ Kasim": "116", "ĹšwiÄ™ty Braciszek": "127", "ZĹ‚oty Roger": "135", "CzarujÄ…ca Atalia": "150", "ObĹ‚Ä…kany Ĺowca OrkĂłw": "160", "Baca bez Ĺowiec": "174", "Lichwiarz Grauhaz": "187", "Viviana Nandin": "195", "Przeraza": "200", "Demonis Pan NicoĹ›ci": "210", "Mulher Ma": "226", "Vapor Veneno": "237", "DÄ™boroĹĽec": "247", "Tepeyollotl": "260", "Widmo Triady": "275", "Negthotep Czarny KapĹ‚an": "288", "MĹ‚ody Smok": "300" };
+    const heroLevels = { "Domina Ecclesiae": "23", "Mietek Żul": "32", "Mroczny Patryk": "35", "Karmazynowy Mściciel": "47", "Złodziej": "50", "Zły Przewodnik": "63", "Piekielny Kościej": "74", "Opętany Paladyn": "85", "Koziec Mąciciel Ścieżek": "95", "Kochanka Nocy": "105", "Książę Kasim": "116", "Święty Braciszek": "127", "Złoty Roger": "135", "Czarująca Atalia": "150", "Obłąkany Łowca Orków": "160", "Baca bez Łowiec": "174", "Lichwiarz Grauhaz": "187", "Viviana Nandin": "195", "Przeraza": "200", "Demonis Pan Nicości": "210", "Mulher Ma": "226", "Vapor Veneno": "237", "Dęborożec": "247", "Tepeyollotl": "260", "Widmo Triady": "275", "Negthotep Czarny Kapłan": "288", "Młody Smok": "300" };
 
 
 
-    // Upewnij siÄ™, ĹĽe dla E2/KolosĂłw masz w bazie wĹ‚aĹ›ciwoĹ›Ä‡ "resp", a nie "coords"!
+    // Upewnij się, że dla E2/Kolosów masz w bazie właściwość "resp", a nie "coords"!
 
-    // PrzykĹ‚ad: {"name": "Mushita", "level": 23, "prof": "Wojownik", "limit": 999, "pvp": "za zgodÄ…", "path": ["Torneg", "LeĹ›na PrzeĹ‚Ä™cz", "KryjĂłwka Dzikich KotĂłw", "Grota Dzikiego Kota"], "resp": {"Grota Dzikiego Kota": [[23, 11]]}}
+    // Przykład: {"name": "Mushita", "level": 23, "prof": "Wojownik", "limit": 999, "pvp": "za zgodą", "path": ["Torneg", "Leśna Przełęcz", "Kryjówka Dzikich Kotów", "Grota Dzikiego Kota"], "resp": {"Grota Dzikiego Kota": [[23, 11]]}}
 
     // ==========================================
 
@@ -742,209 +806,209 @@ setTimeout(() => window.DatabaseModule.initDatabases(), 3000);
 
     const elityIIData = [
 
-        {"name": "Mushita", "level": 23, "prof": "Wojownik", "limit": 999, "pvp": "za zgodÄ…", "path": ["Torneg", "LeĹ›na PrzeĹ‚Ä™cz", "KryjĂłwka Dzikich KotĂłw", "Grota Dzikiego Kota"], "resp": {"Grota Dzikiego Kota": [[23, 11]]}},
+        {"name": "Mushita", "level": 23, "prof": "Wojownik", "limit": 999, "pvp": "za zgodą", "path": ["Torneg", "Leśna Przełęcz", "Kryjówka Dzikich Kotów", "Grota Dzikiego Kota"], "resp": {"Grota Dzikiego Kota": [[23, 11]]}},
 
-        {"name": "KotoĹ‚ak Tropiciel", "level": 27, "prof": "Tropiciel", "limit": 999, "pvp": "za zgodÄ…", "path": ["Torneg", "Stare Ruiny", "Dziewicza Knieja", "Las Tropicieli"], "resp": {"Las Tropicieli": [[51, 75]]}},
+        {"name": "Kotołak Tropiciel", "level": 27, "prof": "Tropiciel", "limit": 999, "pvp": "za zgodą", "path": ["Torneg", "Stare Ruiny", "Dziewicza Knieja", "Las Tropicieli"], "resp": {"Las Tropicieli": [[51, 75]]}},
 
-        {"name": "Shae Phu", "level": 30, "prof": "Mag", "limit": 43, "pvp": "wĹ‚Ä…czone", "path": ["Torneg", "Orla GraĹ„", "PrzeklÄ™ta StraĹĽnica", "PrzeklÄ™ta StraĹĽnica - podziemia p.1 s.2", "PrzeklÄ™ta StraĹĽnica - podziemia p.2 s.2", "PrzeklÄ™ta StraĹĽnica - podziemia p.2 s.3"], "resp": {"PrzeklÄ™ta StraĹĽnica - podziemia p.2 s.1": [[25, 24]], "PrzeklÄ™ta StraĹĽnica - podziemia p.2 s.3": [[29, 19]]}},
+        {"name": "Shae Phu", "level": 30, "prof": "Mag", "limit": 43, "pvp": "włączone", "path": ["Torneg", "Orla Grań", "Przeklęta Strażnica", "Przeklęta Strażnica - podziemia p.1 s.2", "Przeklęta Strażnica - podziemia p.2 s.2", "Przeklęta Strażnica - podziemia p.2 s.3"], "resp": {"Przeklęta Strażnica - podziemia p.2 s.1": [[25, 24]], "Przeklęta Strażnica - podziemia p.2 s.3": [[29, 19]]}},
 
-        {"name": "Zorg Jednooki Baron", "level": 33, "prof": "Ĺowca", "limit": 999, "pvp": "za zgodÄ…", "path": ["Eder", "Fort Eder", "MokradĹ‚a", "Dolina RozbĂłjnikĂłw", "PrzeĹ‚Ä™cz ĹotrzykĂłw", "PagĂłrki ĹupieĹĽcĂłw", "Schowek na Ĺ‚upy"], "resp": {"Schowek na Ĺ‚upy": [[17, 57]]}},
+        {"name": "Zorg Jednooki Baron", "level": 33, "prof": "Łowca", "limit": 999, "pvp": "za zgodą", "path": ["Eder", "Fort Eder", "Mokradła", "Dolina Rozbójników", "Przełęcz Łotrzyków", "Pagórki Łupieżców", "Schowek na łupy"], "resp": {"Schowek na łupy": [[17, 57]]}},
 
-        {"name": "WĹ‚adca rzek", "level": 37, "prof": "Mag", "limit": 999, "pvp": "za zgodÄ…", "path": ["Eder", "Fort Eder", "Las GoblinĂłw", "PodmokĹ‚a Dolina"], "resp": {"PodmokĹ‚a Dolina": [[9, 11]]}},
+        {"name": "Władca rzek", "level": 37, "prof": "Mag", "limit": 999, "pvp": "za zgodą", "path": ["Eder", "Fort Eder", "Las Goblinów", "Podmokła Dolina"], "resp": {"Podmokła Dolina": [[9, 11]]}},
 
-        {"name": "Gobbos", "level": 40, "prof": "Tancerz Ostrzy", "limit": 53, "pvp": "wĹ‚Ä…czone", "path": ["Eder", "Fort Eder", "Las GoblinĂłw", "Morwowe PrzejĹ›cie", "PodmokĹ‚a Dolina", "Jaskinia Pogardy"], "resp": {"Jaskinia Pogardy": [[10, 7]]}},
+        {"name": "Gobbos", "level": 40, "prof": "Tancerz Ostrzy", "limit": 53, "pvp": "włączone", "path": ["Eder", "Fort Eder", "Las Goblinów", "Morwowe Przejście", "Podmokła Dolina", "Jaskinia Pogardy"], "resp": {"Jaskinia Pogardy": [[10, 7]]}},
 
-        {"name": "Tyrtajos", "level": 42, "prof": "Wojownik", "limit": 55, "pvp": "za zgodÄ…", "path": ["Eder", "GoĹ›ciniec BardĂłw", "Racicowy Matecznik", "Pieczara Kwiku - sala 1", "Pieczara Kwiku - sala 2"], "resp": {"Pieczara Kwiku - sala 2": [[13, 13]]}},
+        {"name": "Tyrtajos", "level": 42, "prof": "Wojownik", "limit": 55, "pvp": "za zgodą", "path": ["Eder", "Gościniec Bardów", "Racicowy Matecznik", "Pieczara Kwiku - sala 1", "Pieczara Kwiku - sala 2"], "resp": {"Pieczara Kwiku - sala 2": [[13, 13]]}},
 
-        {"name": "SzczÄ™t alias GĹ‚adki", "level": 47, "prof": "Paladyn", "limit": 999, "pvp": "za zgodÄ…", "path": ["Eder", "Fort Eder", "Ciemnica SzubrawcĂłw p.1 - sala 1", "Ciemnica SzubrawcĂłw p.1 - sala 2", "Ciemnica SzubrawcĂłw p.1 - sala 3", "Stary Kupiecki Trakt"], "resp": {"Stary Kupiecki Trakt": [[12, 75]]}},
+        {"name": "Szczęt alias Gładki", "level": 47, "prof": "Paladyn", "limit": 999, "pvp": "za zgodą", "path": ["Eder", "Fort Eder", "Ciemnica Szubrawców p.1 - sala 1", "Ciemnica Szubrawców p.1 - sala 2", "Ciemnica Szubrawców p.1 - sala 3", "Stary Kupiecki Trakt"], "resp": {"Stary Kupiecki Trakt": [[12, 75]]}},
 
-        {"name": "Tollok Shimger", "level": 47, "prof": "Ĺowca", "limit": 999, "pvp": "za zgodÄ…", "path": ["Eder", "Fort Eder", "MokradĹ‚a", "Skarpiska TollokĂłw", "Skalne Turnie"], "resp": {"Skalne Turnie": [[48, 5]]}},
+        {"name": "Tollok Shimger", "level": 47, "prof": "Łowca", "limit": 999, "pvp": "za zgodą", "path": ["Eder", "Fort Eder", "Mokradła", "Skarpiska Tolloków", "Skalne Turnie"], "resp": {"Skalne Turnie": [[48, 5]]}},
 
-        {"name": "Razuglag Oklash", "level": 51, "prof": "Mag", "limit": 999, "pvp": "za zgodÄ…", "path": ["Ithan", "Zniszczone Opactwo", "Zburzona Twierdza", "Nawiedzony Jar", "Stare Wyrobisko p.4", "Stare Wyrobisko p.3"], "resp": {"Stare Wyrobisko p.3": [[5, 6]]}},
+        {"name": "Razuglag Oklash", "level": 51, "prof": "Mag", "limit": 999, "pvp": "za zgodą", "path": ["Ithan", "Zniszczone Opactwo", "Zburzona Twierdza", "Nawiedzony Jar", "Stare Wyrobisko p.4", "Stare Wyrobisko p.3"], "resp": {"Stare Wyrobisko p.3": [[5, 6]]}},
 
-        {"name": "Agar", "level": 51, "prof": "Paladyn", "limit": 64, "pvp": "wĹ‚Ä…czone", "path": ["Ithan", "Zniszczone Opactwo", "Uroczysko", "Zapomniany Szlak", "Mokra Grota", "Mokra Grota p.2"], "resp": {"Mokra Grota p.2": [[18, 38]]}},
+        {"name": "Agar", "level": 51, "prof": "Paladyn", "limit": 64, "pvp": "włączone", "path": ["Ithan", "Zniszczone Opactwo", "Uroczysko", "Zapomniany Szlak", "Mokra Grota", "Mokra Grota p.2"], "resp": {"Mokra Grota p.2": [[18, 38]]}},
 
-        {"name": "Foverk Turrim", "level": 57, "prof": "Tancerz Ostrzy", "limit": 70, "pvp": "wĹ‚Ä…czone", "path": ["Ithan", "Zniszczone Opactwo", "Uroczysko", "Lazurytowa Grota p.1", "Lazurytowa Grota p.2", "Lazurytowa Grota p.3", "Lazurytowa Grota p.4"], "resp": {"Lazurytowa Grota p.4": [[19, 21]]}},
+        {"name": "Foverk Turrim", "level": 57, "prof": "Tancerz Ostrzy", "limit": 70, "pvp": "włączone", "path": ["Ithan", "Zniszczone Opactwo", "Uroczysko", "Lazurytowa Grota p.1", "Lazurytowa Grota p.2", "Lazurytowa Grota p.3", "Lazurytowa Grota p.4"], "resp": {"Lazurytowa Grota p.4": [[19, 21]]}},
 
-        {"name": "Owadzia Matka", "level": 58, "prof": "Tropiciel", "limit": 71, "pvp": "za zgodÄ…", "path": ["Ithan", "Porzucone Pasieki", "Kopalnia KapiÄ…cego Miodu p.1", "Kopalnia KapiÄ…cego Miodu p.2 - sala 1", "Kopalnia KapiÄ…cego Miodu p.2 - sala Owadziej Matki"], "resp": {"Kopalnia KapiÄ…cego Miodu p.2 - sala Owadziej Matki": [[33, 15]]}},
+        {"name": "Owadzia Matka", "level": 58, "prof": "Tropiciel", "limit": 71, "pvp": "za zgodą", "path": ["Ithan", "Porzucone Pasieki", "Kopalnia Kapiącego Miodu p.1", "Kopalnia Kapiącego Miodu p.2 - sala 1", "Kopalnia Kapiącego Miodu p.2 - sala Owadziej Matki"], "resp": {"Kopalnia Kapiącego Miodu p.2 - sala Owadziej Matki": [[33, 15]]}},
 
-        {"name": "Vari Kruger", "level": 66, "prof": "Mag", "limit": 79, "pvp": "za zgodÄ…", "path": ["Ithan", "Porzucone Pasieki", "Wioska Pszczelarzy", "Dom Jofusa", "Piwnica Jofusa", "Zakurzone PrzejĹ›cie", "Radosna Polana", "Wioska Gnolli", "Namiot Vari Krugera"], "resp": {"Namiot Vari Krugera": [[4, 4]]}},
+        {"name": "Vari Kruger", "level": 66, "prof": "Mag", "limit": 79, "pvp": "za zgodą", "path": ["Ithan", "Porzucone Pasieki", "Wioska Pszczelarzy", "Dom Jofusa", "Piwnica Jofusa", "Zakurzone Przejście", "Radosna Polana", "Wioska Gnolli", "Namiot Vari Krugera"], "resp": {"Namiot Vari Krugera": [[4, 4]]}},
 
-        {"name": "Furruk Kozug", "level": 66, "prof": "Mag", "limit": 79, "pvp": "wĹ‚Ä…czone", "path": ["Ithan", "Jaskinia ĹowcĂłw p.1", "Jaskinia ĹowcĂłw p.2", "Wioska Gnolli", "Jaskinia Gnollich SzamanĂłw p.2", "Jaskinia Gnollich SzamanĂłw p.3", "Jaskinia Gnollich SzamanĂłw - komnata Kozuga"], "resp": {"Jaskinia Gnollich SzamanĂłw - komnata Kozuga": [[42, 14]]}},
+        {"name": "Furruk Kozug", "level": 66, "prof": "Mag", "limit": 79, "pvp": "włączone", "path": ["Ithan", "Jaskinia Łowców p.1", "Jaskinia Łowców p.2", "Wioska Gnolli", "Jaskinia Gnollich Szamanów p.2", "Jaskinia Gnollich Szamanów p.3", "Jaskinia Gnollich Szamanów - komnata Kozuga"], "resp": {"Jaskinia Gnollich Szamanów - komnata Kozuga": [[42, 14]]}},
 
-        {"name": "Jotun", "level": 70, "prof": "Wojownik", "limit": 83, "pvp": "wĹ‚Ä…czone", "path": ["Ithan", "Zniszczone Opactwo", "Uroczysko", "Zapomniany Szlak", "Kamienna Jaskinia - sala 1", "Kamienna Jaskinia - sala 3"], "resp": {"Kamienna Jaskinia - sala 3": [[11, 22]]}},
+        {"name": "Jotun", "level": 70, "prof": "Wojownik", "limit": 83, "pvp": "włączone", "path": ["Ithan", "Zniszczone Opactwo", "Uroczysko", "Zapomniany Szlak", "Kamienna Jaskinia - sala 1", "Kamienna Jaskinia - sala 3"], "resp": {"Kamienna Jaskinia - sala 3": [[11, 22]]}},
 
-        {"name": "Tollok Atamatu", "level": 73, "prof": "Ĺowca", "limit": 999, "pvp": "za zgodÄ…", "path": ["Ithan", "Zniszczone Opactwo", "Uroczysko", "Zapomniany Szlak", "Kamienna Jaskinia", "Andarum Ilami", "Zdradzieckie PrzejĹ›cie p.1", "GĹ‚Ä™bokie SkaĹ‚ki p.1", "GĹ‚Ä™bokie SkaĹ‚ki p.2", "GĹ‚Ä™bokie SkaĹ‚ki p.3"], "resp": {"GĹ‚Ä™bokie SkaĹ‚ki p.3": [[13, 20]]}},
+        {"name": "Tollok Atamatu", "level": 73, "prof": "Łowca", "limit": 999, "pvp": "za zgodą", "path": ["Ithan", "Zniszczone Opactwo", "Uroczysko", "Zapomniany Szlak", "Kamienna Jaskinia", "Andarum Ilami", "Zdradzieckie Przejście p.1", "Głębokie Skałki p.1", "Głębokie Skałki p.2", "Głębokie Skałki p.3"], "resp": {"Głębokie Skałki p.3": [[13, 20]]}},
 
-        {"name": "Tollok Utumutu", "level": 73, "prof": "Ĺowca", "limit": 86, "pvp": "wĹ‚Ä…czone", "path": ["Ithan", "Zniszczone Opactwo", "Uroczysko", "Zapomniany Szlak", "Kamienna Jaskinia", "Andarum Ilami", "Zdradzieckie PrzejĹ›cie p.1", "GĹ‚Ä™bokie SkaĹ‚ki p.1", "GĹ‚Ä™bokie SkaĹ‚ki p.2", "GĹ‚Ä™bokie SkaĹ‚ki p.3", "GĹ‚Ä™bokie SkaĹ‚ki p.4"], "resp": {"GĹ‚Ä™bokie SkaĹ‚ki p.4": [[7, 18]]}},
+        {"name": "Tollok Utumutu", "level": 73, "prof": "Łowca", "limit": 86, "pvp": "włączone", "path": ["Ithan", "Zniszczone Opactwo", "Uroczysko", "Zapomniany Szlak", "Kamienna Jaskinia", "Andarum Ilami", "Zdradzieckie Przejście p.1", "Głębokie Skałki p.1", "Głębokie Skałki p.2", "Głębokie Skałki p.3", "Głębokie Skałki p.4"], "resp": {"Głębokie Skałki p.4": [[7, 18]]}},
 
-        {"name": "Lisz", "level": 75, "prof": "Mag", "limit": 88, "pvp": "wĹ‚Ä…czone", "path": ["Ithan", "Zniszczone Opactwo", "Uroczysko", "Zapomniany Szlak", "Kamienna Jaskinia", "Andarum Ilami", "SkaĹ‚y MroĹşnych ĹšpiewĂłw", "Cmentarzysko SzerpĂłw", "Krypty Dusz Ĺšniegu p.1", "Krypty Dusz Ĺšniegu p.2", "Krypty Dusz Ĺšniegu p.3 - komnata Lisza"], "resp": {"Krypty Dusz Ĺšniegu p.3 - komnata Lisza": [[16, 18]]}},
+        {"name": "Lisz", "level": 75, "prof": "Mag", "limit": 88, "pvp": "włączone", "path": ["Ithan", "Zniszczone Opactwo", "Uroczysko", "Zapomniany Szlak", "Kamienna Jaskinia", "Andarum Ilami", "Skały Mroźnych Śpiewów", "Cmentarzysko Szerpów", "Krypty Dusz Śniegu p.1", "Krypty Dusz Śniegu p.2", "Krypty Dusz Śniegu p.3 - komnata Lisza"], "resp": {"Krypty Dusz Śniegu p.3 - komnata Lisza": [[16, 18]]}},
 
-        {"name": "Grabarz Ĺ›wiÄ…tynny", "level": 80, "prof": "Paladyn", "limit": 93, "pvp": "wĹ‚Ä…czone", "path": ["Ithan", "Zniszczone Opactwo", "Uroczysko", "Zapomniany Szlak", "Kamienna Jaskinia", "Andarum Ilami", "SkaĹ‚y MroĹşnych ĹšpiewĂłw", "Erem Czarnego SĹ‚oĹ„ca p.1 - pĂłĹ‚noc", "Erem Czarnego SĹ‚oĹ„ca p.2", "Erem Czarnego SĹ‚oĹ„ca p.3", "Erem Czarnego SĹ‚oĹ„ca p.4 - sala 1", "Erem Czarnego SĹ‚oĹ„ca p.5"], "resp": {"Erem Czarnego SĹ‚oĹ„ca p.5": [[28, 14]]}},
+        {"name": "Grabarz świątynny", "level": 80, "prof": "Paladyn", "limit": 93, "pvp": "włączone", "path": ["Ithan", "Zniszczone Opactwo", "Uroczysko", "Zapomniany Szlak", "Kamienna Jaskinia", "Andarum Ilami", "Skały Mroźnych Śpiewów", "Erem Czarnego Słońca p.1 - północ", "Erem Czarnego Słońca p.2", "Erem Czarnego Słońca p.3", "Erem Czarnego Słońca p.4 - sala 1", "Erem Czarnego Słońca p.5"], "resp": {"Erem Czarnego Słońca p.5": [[28, 14]]}},
 
-        {"name": "PodĹ‚y zbrojmistrz", "level": 82, "prof": "Wojownik", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Ithan", "Zniszczone Opactwo", "Uroczysko", "Zapomniany Szlak", "Kamienna Jaskinia", "Andarum Ilami", "ĹšwiÄ…tynia Andarum", "ĹšwiÄ…tynia Andarum - podziemia", "ĹšwiÄ…tynia Andarum - magazyn p.1", "ĹšwiÄ…tynia Andarum - magazyn p.2", "ĹšwiÄ…tynia Andarum - zbrojownia"], "resp": {"ĹšwiÄ…tynia Andarum - zbrojownia": [[25, 5]]}},
+        {"name": "Podły zbrojmistrz", "level": 82, "prof": "Wojownik", "limit": 999, "pvp": "włączone", "path": ["Ithan", "Zniszczone Opactwo", "Uroczysko", "Zapomniany Szlak", "Kamienna Jaskinia", "Andarum Ilami", "Świątynia Andarum", "Świątynia Andarum - podziemia", "Świątynia Andarum - magazyn p.1", "Świątynia Andarum - magazyn p.2", "Świątynia Andarum - zbrojownia"], "resp": {"Świątynia Andarum - zbrojownia": [[25, 5]]}},
 
-        {"name": "Wielka Stopa", "level": 82, "prof": "Mag", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Ithan", "Zniszczone Opactwo", "Uroczysko", "Zapomniany Szlak", "Kamienna Jaskinia", "Andarum Ilami", "SkaĹ‚y MroĹşnych ĹšpiewĂłw", "Firnowa Grota p.2", "Firnowa Grota p.2 s.1"], "resp": {"Firnowa Grota p.2 s.1": [[13, 8]]}},
+        {"name": "Wielka Stopa", "level": 82, "prof": "Mag", "limit": 999, "pvp": "włączone", "path": ["Ithan", "Zniszczone Opactwo", "Uroczysko", "Zapomniany Szlak", "Kamienna Jaskinia", "Andarum Ilami", "Skały Mroźnych Śpiewów", "Firnowa Grota p.2", "Firnowa Grota p.2 s.1"], "resp": {"Firnowa Grota p.2 s.1": [[13, 8]]}},
 
-        {"name": "Choukker", "level": 84, "prof": "Paladyn", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Ithan", "Zniszczone Opactwo", "Zburzona Twierdza", "Nawiedzony Jar", "Mroczny Przesmyk", "Zapomniany Szlak", "Kamienna Jaskinia", "Andarum Ilami", "Zdradzieckie PrzejĹ›cie p.1", "WylÄ™garnia ChoukkerĂłw p.1", "WylÄ™garnia ChoukkerĂłw p.2", "WylÄ™garnia ChoukkerĂłw p.3"], "resp": {"WylÄ™garnia ChoukkerĂłw p.1": [[40, 19]], "WylÄ™garnia ChoukkerĂłw p.3": [[21, 19]]}},
+        {"name": "Choukker", "level": 84, "prof": "Paladyn", "limit": 999, "pvp": "włączone", "path": ["Ithan", "Zniszczone Opactwo", "Zburzona Twierdza", "Nawiedzony Jar", "Mroczny Przesmyk", "Zapomniany Szlak", "Kamienna Jaskinia", "Andarum Ilami", "Zdradzieckie Przejście p.1", "Wylęgarnia Choukkerów p.1", "Wylęgarnia Choukkerów p.2", "Wylęgarnia Choukkerów p.3"], "resp": {"Wylęgarnia Choukkerów p.1": [[40, 19]], "Wylęgarnia Choukkerów p.3": [[21, 19]]}},
 
-        {"name": "Nadzorczyni krasnoludĂłw", "level": 88, "prof": "Wojownik", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Ithan", "Zniszczone Opactwo", "Uroczysko", "Zapomniany Szlak", "Kamienna Jaskinia", "Andarum Ilami", "Zdradzieckie PrzejĹ›cie p.1", "Zdradzieckie PrzejĹ›cie p.2", "Labirynt Margorii", "Kopalnia Margorii"], "resp": {"Kopalnia Margorii": [[28, 54]]}},
+        {"name": "Nadzorczyni krasnoludów", "level": 88, "prof": "Wojownik", "limit": 999, "pvp": "włączone", "path": ["Ithan", "Zniszczone Opactwo", "Uroczysko", "Zapomniany Szlak", "Kamienna Jaskinia", "Andarum Ilami", "Zdradzieckie Przejście p.1", "Zdradzieckie Przejście p.2", "Labirynt Margorii", "Kopalnia Margorii"], "resp": {"Kopalnia Margorii": [[28, 54]]}},
 
-        {"name": "Morthen", "level": 89, "prof": "Wojownik", "limit": 102, "pvp": "wĹ‚Ä…czone", "path": ["Ithan", "Zniszczone Opactwo", "Uroczysko", "Zapomniany Szlak", "Kamienna Jaskinia", "Andarum Ilami", "Zdradzieckie PrzejĹ›cie p.1", "Zdradzieckie PrzejĹ›cie p.2", "Labirynt Margorii", "Margoria", "Margoria - Sala KrĂłlewska"], "resp": {"Margoria - Sala KrĂłlewska": [[21, 11]]}},
+        {"name": "Morthen", "level": 89, "prof": "Wojownik", "limit": 102, "pvp": "włączone", "path": ["Ithan", "Zniszczone Opactwo", "Uroczysko", "Zapomniany Szlak", "Kamienna Jaskinia", "Andarum Ilami", "Zdradzieckie Przejście p.1", "Zdradzieckie Przejście p.2", "Labirynt Margorii", "Margoria", "Margoria - Sala Królewska"], "resp": {"Margoria - Sala Królewska": [[21, 11]]}},
 
-        {"name": "Ĺ»elazorÄ™ki Ohydziarz", "level": 92, "prof": "Paladyn", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["LiĹ›ciaste Rozstaje", "Grota Samotnych Dusz p.3 - sala wyjĹ›ciowa", "Grota Samotnych Dusz p.3", "Grota Samotnych Dusz p.4", "Grota Samotnych Dusz p.5", "Grota Samotnych Dusz p.6"], "resp": {"Grota Samotnych Dusz p.6": [[43, 14]]}},
+        {"name": "Żelazoręki Ohydziarz", "level": 92, "prof": "Paladyn", "limit": 999, "pvp": "włączone", "path": ["Liściaste Rozstaje", "Grota Samotnych Dusz p.3 - sala wyjściowa", "Grota Samotnych Dusz p.3", "Grota Samotnych Dusz p.4", "Grota Samotnych Dusz p.5", "Grota Samotnych Dusz p.6"], "resp": {"Grota Samotnych Dusz p.6": [[43, 14]]}},
 
-        {"name": "LeĹ›ne Widmo", "level": 92, "prof": "Tropiciel", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Trupia PrzeĹ‚Ä™cz", "KsiÄ™ĹĽycowe Wzniesienie", "Zapomniany ĹšwiÄ™ty Gaj p.1", "Zapomniany ĹšwiÄ™ty Gaj p.1 - sala 1", "Zapomniany ĹšwiÄ™ty Gaj p.2", "Zapomniany ĹšwiÄ™ty Gaj p.3"], "resp": {"Zapomniany ĹšwiÄ™ty Gaj p.3": [[20, 16]]}},
+        {"name": "Leśne Widmo", "level": 92, "prof": "Tropiciel", "limit": 999, "pvp": "włączone", "path": ["Trupia Przełęcz", "Księżycowe Wzniesienie", "Zapomniany Święty Gaj p.1", "Zapomniany Święty Gaj p.1 - sala 1", "Zapomniany Święty Gaj p.2", "Zapomniany Święty Gaj p.3"], "resp": {"Zapomniany Święty Gaj p.3": [[20, 16]]}},
 
-        {"name": "Goplana", "level": 93, "prof": "Paladyn", "limit": 106, "pvp": "wĹ‚Ä…czone", "path": ["Trupia PrzeĹ‚Ä™cz", "Kamienna StraĹĽnica - wsch. baszta p.1", "Kamienna StraĹĽnica - wsch. baszta skalna sala p.1", "Kamienna StraĹĽnica - wsch. baszta zasypany tunel", "Kamienna StraĹĽnica - tunel", "Kamienna StraĹĽnica - Sanktuarium"], "resp": {"Kamienna StraĹĽnica - Sanktuarium": [[12, 7]]}},
+        {"name": "Goplana", "level": 93, "prof": "Paladyn", "limit": 106, "pvp": "włączone", "path": ["Trupia Przełęcz", "Kamienna Strażnica - wsch. baszta p.1", "Kamienna Strażnica - wsch. baszta skalna sala p.1", "Kamienna Strażnica - wsch. baszta zasypany tunel", "Kamienna Strażnica - tunel", "Kamienna Strażnica - Sanktuarium"], "resp": {"Kamienna Strażnica - Sanktuarium": [[12, 7]]}},
 
-        {"name": "Gnom Figlid", "level": 96, "prof": "Mag", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Mythar", "ZĹ‚owrogie Bagna", "ZagrzybiaĹ‚e ĹšcieĹĽki p.1 - sala 1", "ZagrzybiaĹ‚e ĹšcieĹĽki p.2", "ZagrzybiaĹ‚e ĹšcieĹĽki p.3"], "resp": {"ZagrzybiaĹ‚e ĹšcieĹĽki p.3": [[21, 20]]}},
+        {"name": "Gnom Figlid", "level": 96, "prof": "Mag", "limit": 999, "pvp": "włączone", "path": ["Mythar", "Złowrogie Bagna", "Zagrzybiałe Ścieżki p.1 - sala 1", "Zagrzybiałe Ścieżki p.2", "Zagrzybiałe Ścieżki p.3"], "resp": {"Zagrzybiałe Ścieżki p.3": [[21, 20]]}},
 
-        {"name": "Centaur Zyfryd", "level": 99, "prof": "Ĺowca", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Mythar", "ZawiĹ‚y BĂłr", "Iglaste ĹšcieĹĽki", "Dolina CentaurĂłw"], "resp": {"Dolina CentaurĂłw": [[47, 25]]}},
+        {"name": "Centaur Zyfryd", "level": 99, "prof": "Łowca", "limit": 999, "pvp": "włączone", "path": ["Mythar", "Zawiły Bór", "Iglaste Ścieżki", "Dolina Centaurów"], "resp": {"Dolina Centaurów": [[47, 25]]}},
 
-        {"name": "Kambion", "level": 101, "prof": "Tancerz Ostrzy", "limit": 114, "pvp": "wĹ‚Ä…czone", "path": ["Mythar", "ZĹ‚owrogie Bagna", "Las DziwĂłw", "Namiot Kambiona"], "resp": {"Namiot Kambiona": [[10, 6]]}},
+        {"name": "Kambion", "level": 101, "prof": "Tancerz Ostrzy", "limit": 114, "pvp": "włączone", "path": ["Mythar", "Złowrogie Bagna", "Las Dziwów", "Namiot Kambiona"], "resp": {"Namiot Kambiona": [[10, 6]]}},
 
-        {"name": "Jertek Moxos", "level": 105, "prof": "Paladyn", "limit": 118, "pvp": "wĹ‚Ä…czone", "path": ["Mythar", "Smocze GĂłry", "PrzeĹ‚az olbrzymĂłw", "Selva Oscura", "Ruiny WieĹĽy MagĂłw - przedsionek", "Podziemia Zniszczonej WieĹĽy p.2", "Podziemia Zniszczonej WieĹĽy p.3", "Podziemia Zniszczonej WieĹĽy p.4", "Podziemia Zniszczonej WieĹĽy p.5"], "resp": {"Podziemia Zniszczonej WieĹĽy p.5": [[19, 23]]}},
+        {"name": "Jertek Moxos", "level": 105, "prof": "Paladyn", "limit": 118, "pvp": "włączone", "path": ["Mythar", "Smocze Góry", "Przełaz olbrzymów", "Selva Oscura", "Ruiny Wieży Magów - przedsionek", "Podziemia Zniszczonej Wieży p.2", "Podziemia Zniszczonej Wieży p.3", "Podziemia Zniszczonej Wieży p.4", "Podziemia Zniszczonej Wieży p.5"], "resp": {"Podziemia Zniszczonej Wieży p.5": [[19, 23]]}},
 
-        {"name": "MiĹ‚oĹ›nik Ĺ‚owcĂłw", "level": 108, "prof": "Ĺowca", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Mythar", "ZawiĹ‚y BĂłr", "ZabĹ‚ocona Jama p.1 - sala 1", "ZabĹ‚ocona Jama p.2 - sala 1", "ZabĹ‚ocona Jama p.2 - Sala DuszÄ…cej StÄ™chlizny"], "resp": {"ZabĹ‚ocona Jama p.2 - Sala DuszÄ…cej StÄ™chlizny": [[33, 31]]}},
+        {"name": "Miłośnik łowców", "level": 108, "prof": "Łowca", "limit": 999, "pvp": "włączone", "path": ["Mythar", "Zawiły Bór", "Zabłocona Jama p.1 - sala 1", "Zabłocona Jama p.2 - sala 1", "Zabłocona Jama p.2 - Sala Duszącej Stęchlizny"], "resp": {"Zabłocona Jama p.2 - Sala Duszącej Stęchlizny": [[33, 31]]}},
 
-        {"name": "MiĹ‚oĹ›nik rycerzy", "level": 108, "prof": "Wojownik", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Mythar", "ZawiĹ‚y BĂłr", "ZabĹ‚ocona Jama p.1 - sala 1", "ZabĹ‚ocona Jama p.2 - sala 1", "ZabĹ‚ocona Jama p.2 - sala 2", "ZabĹ‚ocona Jama p.2 - Sala BĹ‚otnistych OdmÄ™tĂłw"], "resp": {"ZabĹ‚ocona Jama p.2 - Sala BĹ‚otnistych OdmÄ™tĂłw": [[30, 42]]}},
+        {"name": "Miłośnik rycerzy", "level": 108, "prof": "Wojownik", "limit": 999, "pvp": "włączone", "path": ["Mythar", "Zawiły Bór", "Zabłocona Jama p.1 - sala 1", "Zabłocona Jama p.2 - sala 1", "Zabłocona Jama p.2 - sala 2", "Zabłocona Jama p.2 - Sala Błotnistych Odmętów"], "resp": {"Zabłocona Jama p.2 - Sala Błotnistych Odmętów": [[30, 42]]}},
 
-        {"name": "MiĹ‚oĹ›nik magii", "level": 108, "prof": "Mag", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Mythar", "ZawiĹ‚y BĂłr", "ZabĹ‚ocona Jama p.1 - sala 1", "ZabĹ‚ocona Jama p.2 - sala 1", "ZabĹ‚ocona Jama p.2 - sala 2", "ZabĹ‚ocona Jama p.2 - sala 3", "ZabĹ‚ocona Jama p.2 - Sala Magicznego BĹ‚ota"], "resp": {"ZabĹ‚ocona Jama p.2 - Sala Magicznego BĹ‚ota": [[39, 15]]}},
+        {"name": "Miłośnik magii", "level": 108, "prof": "Mag", "limit": 999, "pvp": "włączone", "path": ["Mythar", "Zawiły Bór", "Zabłocona Jama p.1 - sala 1", "Zabłocona Jama p.2 - sala 1", "Zabłocona Jama p.2 - sala 2", "Zabłocona Jama p.2 - sala 3", "Zabłocona Jama p.2 - Sala Magicznego Błota"], "resp": {"Zabłocona Jama p.2 - Sala Magicznego Błota": [[39, 15]]}},
 
-        {"name": "Ĺowca czaszek", "level": 112, "prof": "Ĺowca", "limit": 125, "pvp": "wĹ‚Ä…czone", "path": ["Trupia PrzeĹ‚Ä™cz", "PĹ‚askowyĹĽ Arpan", "Skalne Cmentarzysko p.1", "Skalne Cmentarzysko p.2", "Skalne Cmentarzysko p.3", "Skalne Cmentarzysko p.4"], "resp": {"Skalne Cmentarzysko p.4": [[25, 14]]}},
+        {"name": "Łowca czaszek", "level": 112, "prof": "Łowca", "limit": 125, "pvp": "włączone", "path": ["Trupia Przełęcz", "Płaskowyż Arpan", "Skalne Cmentarzysko p.1", "Skalne Cmentarzysko p.2", "Skalne Cmentarzysko p.3", "Skalne Cmentarzysko p.4"], "resp": {"Skalne Cmentarzysko p.4": [[25, 14]]}},
 
-        {"name": "Ozirus WĹ‚adca HieroglifĂłw", "level": 115, "prof": "Mag", "limit": 999, "pvp": "za zgodÄ…", "path": ["Trupia PrzeĹ‚Ä™cz", "PĹ‚askowyĹĽ Arpan", "ZĹ‚ote Piaski", "Piramida Pustynnego WĹ‚adcy p.1", "Piramida Pustynnego WĹ‚adcy p.2", "Piramida Pustynnego WĹ‚adcy p.3"], "resp": {"Piramida Pustynnego WĹ‚adcy p.3": [[22, 13]]}},
+        {"name": "Ozirus Władca Hieroglifów", "level": 115, "prof": "Mag", "limit": 999, "pvp": "za zgodą", "path": ["Trupia Przełęcz", "Płaskowyż Arpan", "Złote Piaski", "Piramida Pustynnego Władcy p.1", "Piramida Pustynnego Władcy p.2", "Piramida Pustynnego Władcy p.3"], "resp": {"Piramida Pustynnego Władcy p.3": [[22, 13]]}},
 
-        {"name": "Morski potwĂłr", "level": 118, "prof": "Tropiciel", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Tuzmer", "Port Tuzmer", "Archipelag Bremus An", "Jama Morskiej Macki p.1 - sala 1", "Jama Morskiej Macki p.1 - sala 2", "Jama Morskiej Macki p.1 - sala 3"], "resp": {"Jama Morskiej Macki p.1 - sala 3": [[9, 12]]}},
+        {"name": "Morski potwór", "level": 118, "prof": "Tropiciel", "limit": 999, "pvp": "włączone", "path": ["Tuzmer", "Port Tuzmer", "Archipelag Bremus An", "Jama Morskiej Macki p.1 - sala 1", "Jama Morskiej Macki p.1 - sala 2", "Jama Morskiej Macki p.1 - sala 3"], "resp": {"Jama Morskiej Macki p.1 - sala 3": [[9, 12]]}},
 
-        {"name": "Krab pustelnik", "level": 124, "prof": "Tancerz Ostrzy", "limit": 137, "pvp": "wĹ‚Ä…czone", "path": ["Tuzmer", "Port Tuzmer", "Wyspa Rem", "Opuszczony statek - pokĹ‚ad pod rufÄ…"], "resp": {"Opuszczony statek - pokĹ‚ad pod rufÄ…": [[7, 7]], "Wyspa Rem": [[63, 33]]}},
+        {"name": "Krab pustelnik", "level": 124, "prof": "Tancerz Ostrzy", "limit": 137, "pvp": "włączone", "path": ["Tuzmer", "Port Tuzmer", "Wyspa Rem", "Opuszczony statek - pokład pod rufą"], "resp": {"Opuszczony statek - pokład pod rufą": [[7, 7]], "Wyspa Rem": [[63, 33]]}},
 
-        {"name": "Borgoros Garamir III", "level": 124, "prof": "Wojownik", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Tuzmer", "Port Tuzmer", "Wyspa Ingotia", "Korytarze WygnaĹ„cĂłw p.1 - Sala Ech", "Korytarze WygnaĹ„cĂłw p.2 - Sala Ĺ»Ä…dzy - Komnata PrzeklÄ™tego Daru", "Twierdza RogogĹ‚owych - Sala Byka"], "resp": {"Twierdza RogogĹ‚owych - Sala Byka": [[16, 7]]}},
+        {"name": "Borgoros Garamir III", "level": 124, "prof": "Wojownik", "limit": 999, "pvp": "włączone", "path": ["Tuzmer", "Port Tuzmer", "Wyspa Ingotia", "Korytarze Wygnańców p.1 - Sala Ech", "Korytarze Wygnańców p.2 - Sala Żądzy - Komnata Przeklętego Daru", "Twierdza Rogogłowych - Sala Byka"], "resp": {"Twierdza Rogogłowych - Sala Byka": [[16, 7]]}},
 
-        {"name": "Stworzyciel", "level": 125, "prof": "Tancerz Ostrzy", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Tuzmer", "Port Tuzmer", "Wyspa Caneum", "Piaskowy wir", "Piaskowa PuĹ‚apka p.1 - sala 2", "Piaskowa PuĹ‚apka - Grota Piaskowej Ĺšmierci"], "resp": {"Piaskowa PuĹ‚apka - Grota Piaskowej Ĺšmierci": [[22, 10]]}},
+        {"name": "Stworzyciel", "level": 125, "prof": "Tancerz Ostrzy", "limit": 999, "pvp": "włączone", "path": ["Tuzmer", "Port Tuzmer", "Wyspa Caneum", "Piaskowy wir", "Piaskowa Pułapka p.1 - sala 2", "Piaskowa Pułapka - Grota Piaskowej Śmierci"], "resp": {"Piaskowa Pułapka - Grota Piaskowej Śmierci": [[22, 10]]}},
 
-        {"name": "Ifryt", "level": 128, "prof": "Mag", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Tuzmer", "Port Tuzmer", "Magradit", "Magradit - GĂłra Ognia", "Wulkan Politraki p.2 - sala 1", "Wulkan Politraki p.2 - sala 2", "Wulkan Politraki p.1 - sala 3"], "resp": {"Wulkan Politraki p.1 - sala 3": [[10, 51]]}},
+        {"name": "Ifryt", "level": 128, "prof": "Mag", "limit": 999, "pvp": "włączone", "path": ["Tuzmer", "Port Tuzmer", "Magradit", "Magradit - Góra Ognia", "Wulkan Politraki p.2 - sala 1", "Wulkan Politraki p.2 - sala 2", "Wulkan Politraki p.1 - sala 3"], "resp": {"Wulkan Politraki p.1 - sala 3": [[10, 51]]}},
 
-        {"name": "Henry Kaprawe Oko", "level": 131, "prof": "Paladyn", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Tuzmer", "Port Tuzmer", "Latarniane WybrzeĹĽe", "Ukryta Grota Morskich DiabĹ‚Ăłw", "Ukryta Grota Morskich DiabĹ‚Ăłw - skarbiec"], "resp": {"Ukryta Grota Morskich DiabĹ‚Ăłw - skarbiec": [[14, 14]]}},
+        {"name": "Henry Kaprawe Oko", "level": 131, "prof": "Paladyn", "limit": 999, "pvp": "włączone", "path": ["Tuzmer", "Port Tuzmer", "Latarniane Wybrzeże", "Ukryta Grota Morskich Diabłów", "Ukryta Grota Morskich Diabłów - skarbiec"], "resp": {"Ukryta Grota Morskich Diabłów - skarbiec": [[14, 14]]}},
 
-        {"name": "Helga Opiekunka Rumu", "level": 131, "prof": "Tropiciel", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Tuzmer", "Port Tuzmer", "Latarniane WybrzeĹĽe", "Ukryta Grota Morskich DiabĹ‚Ăłw", "Ukryta Grota Morskich DiabĹ‚Ăłw - siedziba"], "resp": {"Ukryta Grota Morskich DiabĹ‚Ăłw - siedziba": [[15, 23]]}},
+        {"name": "Helga Opiekunka Rumu", "level": 131, "prof": "Tropiciel", "limit": 999, "pvp": "włączone", "path": ["Tuzmer", "Port Tuzmer", "Latarniane Wybrzeże", "Ukryta Grota Morskich Diabłów", "Ukryta Grota Morskich Diabłów - siedziba"], "resp": {"Ukryta Grota Morskich Diabłów - siedziba": [[15, 23]]}},
 
-        {"name": "MĹ‚ody Jack Truciciel", "level": 131, "prof": "Wojownik", "limit": 144, "pvp": "wĹ‚Ä…czone", "path": ["Tuzmer", "Port Tuzmer", "Latarniane WybrzeĹĽe", "Ukryta Grota Morskich DiabĹ‚Ăłw", "Ukryta Grota Morskich DiabĹ‚Ăłw - magazyn"], "resp": {"Ukryta Grota Morskich DiabĹ‚Ăłw - magazyn": [[25, 16]]}},
+        {"name": "Młody Jack Truciciel", "level": 131, "prof": "Wojownik", "limit": 144, "pvp": "włączone", "path": ["Tuzmer", "Port Tuzmer", "Latarniane Wybrzeże", "Ukryta Grota Morskich Diabłów", "Ukryta Grota Morskich Diabłów - magazyn"], "resp": {"Ukryta Grota Morskich Diabłów - magazyn": [[25, 16]]}},
 
-        {"name": "Eol", "level": 135, "prof": "Ĺowca", "limit": 148, "pvp": "wĹ‚Ä…czone", "path": ["Tuzmer", "Ruchome Piaski", "Piachy Zniewolonych", "Piaszczysta Grota p.1 - sala 1", "Piaszczysta Grota p.1 - sala 2"], "resp": {"Piaszczysta Grota p.1 - sala 2": [[12, 8]]}},
+        {"name": "Eol", "level": 135, "prof": "Łowca", "limit": 148, "pvp": "włączone", "path": ["Tuzmer", "Ruchome Piaski", "Piachy Zniewolonych", "Piaszczysta Grota p.1 - sala 1", "Piaszczysta Grota p.1 - sala 2"], "resp": {"Piaszczysta Grota p.1 - sala 2": [[12, 8]]}},
 
-        {"name": "Grubber Ochlaj", "level": 136, "prof": "Wojownik", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Tuzmer", "Stare SioĹ‚o", "Sucha Dolina", "Dolina Pustynnych KrÄ™gĂłw", "Kopalnia Ĺ»ĂłĹ‚tego Kruszcu p.1 - sala 1", "Kopalnia Ĺ»ĂłĹ‚tego Kruszcu p.2 - sala 1", "Kopalnia Ĺ»ĂłĹ‚tego Kruszcu p.2 - sala 2"], "resp": {"Kopalnia Ĺ»ĂłĹ‚tego Kruszcu p.2 - sala 2": [[15, 10]]}},
+        {"name": "Grubber Ochlaj", "level": 136, "prof": "Wojownik", "limit": 999, "pvp": "włączone", "path": ["Tuzmer", "Stare Sioło", "Sucha Dolina", "Dolina Pustynnych Kręgów", "Kopalnia Żółtego Kruszcu p.1 - sala 1", "Kopalnia Żółtego Kruszcu p.2 - sala 1", "Kopalnia Żółtego Kruszcu p.2 - sala 2"], "resp": {"Kopalnia Żółtego Kruszcu p.2 - sala 2": [[15, 10]]}},
 
-        {"name": "Mistrz Worundriel", "level": 139, "prof": "Paladyn", "limit": 152, "pvp": "wĹ‚Ä…czone", "path": ["LiĹ›ciaste Rozstaje", "Sosnowe Odludzie", "Podziemne Rozpadliny", "KuĹşnia Worundriela p.1", "KuĹşnia Worundriela p.2", "KuĹşnia Worundriela p.3", "KuĹşnia Worundriela - Komnata Ĺ»aru"], "resp": {"KuĹşnia Worundriela - Komnata Ĺ»aru": [[24, 31]]}},
+        {"name": "Mistrz Worundriel", "level": 139, "prof": "Paladyn", "limit": 152, "pvp": "włączone", "path": ["Liściaste Rozstaje", "Sosnowe Odludzie", "Podziemne Rozpadliny", "Kuźnia Worundriela p.1", "Kuźnia Worundriela p.2", "Kuźnia Worundriela p.3", "Kuźnia Worundriela - Komnata Żaru"], "resp": {"Kuźnia Worundriela - Komnata Żaru": [[24, 31]]}},
 
-        {"name": "WĂłjt FistuĹ‚a", "level": 144, "prof": "Tancerz Ostrzy", "limit": 999, "pvp": "za zgodÄ…", "path": ["LiĹ›ciaste Rozstaje", "Jezioro WaĹĽek", "GĂłralskie PrzejĹ›cie", "Chata wĂłjta FistuĹ‚y", "Chata wĂłjta FistuĹ‚y p.1"], "resp": {"Chata wĂłjta FistuĹ‚y p.1": [[13, 7]]}},
+        {"name": "Wójt Fistuła", "level": 144, "prof": "Tancerz Ostrzy", "limit": 999, "pvp": "za zgodą", "path": ["Liściaste Rozstaje", "Jezioro Ważek", "Góralskie Przejście", "Chata wójta Fistuły", "Chata wójta Fistuły p.1"], "resp": {"Chata wójta Fistuły p.1": [[13, 7]]}},
 
-        {"name": "TeĹ›ciowa Rumcajsa", "level": 145, "prof": "Mag", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["LiĹ›ciaste Rozstaje", "Jezioro WaĹĽek", "GĂłralskie PrzejĹ›cie", "Babi WzgĂłrek", "Chata TeĹ›ciowej"], "resp": {"Chata TeĹ›ciowej": [[13, 7]]}},
+        {"name": "Teściowa Rumcajsa", "level": 145, "prof": "Mag", "limit": 999, "pvp": "włączone", "path": ["Liściaste Rozstaje", "Jezioro Ważek", "Góralskie Przejście", "Babi Wzgórek", "Chata Teściowej"], "resp": {"Chata Teściowej": [[13, 7]]}},
 
-        {"name": "Berserker Amuno", "level": 148, "prof": "Wojownik", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Werbin", "Brama PĂłĹ‚nocy", "Zaginiona Dolina", "Grobowiec PrzodkĂłw", "Cenotaf BerserkerĂłw - przejĹ›cie przodkĂłw", "Cenotaf BerserkerĂłw p.1 - sala 1", "Cenotaf BerserkerĂłw p.1 - sala 2"], "resp": {"Cenotaf BerserkerĂłw p.1 - sala 2": [[23, 13]]}},
+        {"name": "Berserker Amuno", "level": 148, "prof": "Wojownik", "limit": 999, "pvp": "włączone", "path": ["Werbin", "Brama Północy", "Zaginiona Dolina", "Grobowiec Przodków", "Cenotaf Berserkerów - przejście przodków", "Cenotaf Berserkerów p.1 - sala 1", "Cenotaf Berserkerów p.1 - sala 2"], "resp": {"Cenotaf Berserkerów p.1 - sala 2": [[23, 13]]}},
 
-        {"name": "Fodug Zolash", "level": 150, "prof": "Mag", "limit": 163, "pvp": "wĹ‚Ä…czone", "path": ["Werbin", "Brama PĂłĹ‚nocy", "Zaginiona Dolina", "Opuszczona Twierdza", "MaĹ‚a Twierdza - sala wejĹ›ciowa", "MaĹ‚a Twierdza - sala gĹ‚Ăłwna"], "resp": {"MaĹ‚a Twierdza - sala gĹ‚Ăłwna": [[16, 5]]}},
+        {"name": "Fodug Zolash", "level": 150, "prof": "Mag", "limit": 163, "pvp": "włączone", "path": ["Werbin", "Brama Północy", "Zaginiona Dolina", "Opuszczona Twierdza", "Mała Twierdza - sala wejściowa", "Mała Twierdza - sala główna"], "resp": {"Mała Twierdza - sala główna": [[16, 5]]}},
 
-        {"name": "Goons Asterus", "level": 154, "prof": "Ĺowca", "limit": 167, "pvp": "wĹ‚Ä…czone", "path": ["Werbin", "Brama PĂłĹ‚nocy", "WĹ‚oĹ›ci rodu Kruzo", "Lokum ZĹ‚ych GoblinĂłw - wieĹĽa", "Lokum ZĹ‚ych GoblinĂłw - zejĹ›cie p.1", "Lokum ZĹ‚ych GoblinĂłw p.2 - sala 1", "Lokum ZĹ‚ych GoblinĂłw p.2 - sala 2", "Lokum ZĹ‚ych GoblinĂłw - warsztat"], "resp": {"Lokum ZĹ‚ych GoblinĂłw - warsztat": [[18, 11]]}},
+        {"name": "Goons Asterus", "level": 154, "prof": "Łowca", "limit": 167, "pvp": "włączone", "path": ["Werbin", "Brama Północy", "Włości rodu Kruzo", "Lokum Złych Goblinów - wieża", "Lokum Złych Goblinów - zejście p.1", "Lokum Złych Goblinów p.2 - sala 1", "Lokum Złych Goblinów p.2 - sala 2", "Lokum Złych Goblinów - warsztat"], "resp": {"Lokum Złych Goblinów - warsztat": [[18, 11]]}},
 
-        {"name": "Adariel", "level": 155, "prof": "Mag", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Werbin", "Orcza WyĹĽyna", "WiedĹşmie KotĹ‚owisko", "Upiorna Droga", "Sabatowe GĂłry", "Tristam", "Opuszczone WiÄ™zienie", "Lochy Tristam", "Laboratorium Adariel"], "resp": {"Laboratorium Adariel": [[20, 25]]}},
+        {"name": "Adariel", "level": 155, "prof": "Mag", "limit": 999, "pvp": "włączone", "path": ["Werbin", "Orcza Wyżyna", "Wiedźmie Kotłowisko", "Upiorna Droga", "Sabatowe Góry", "Tristam", "Opuszczone Więzienie", "Lochy Tristam", "Laboratorium Adariel"], "resp": {"Laboratorium Adariel": [[20, 25]]}},
 
-        {"name": "Sheba Orcza Szamanka", "level": 160, "prof": "Mag", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Werbin", "Orcza WyĹĽyna", "Grota Orczych SzamanĂłw p.1 s.1", "Grota Orczych SzamanĂłw p.3 s.1"], "resp": {"Grota Orczych SzamanĂłw p.3 s.1": [[16, 10]]}},
+        {"name": "Sheba Orcza Szamanka", "level": 160, "prof": "Mag", "limit": 999, "pvp": "włączone", "path": ["Werbin", "Orcza Wyżyna", "Grota Orczych Szamanów p.1 s.1", "Grota Orczych Szamanów p.3 s.1"], "resp": {"Grota Orczych Szamanów p.3 s.1": [[16, 10]]}},
 
-        {"name": "Burkog Lorulk", "level": 160, "prof": "Wojownik", "limit": 173, "pvp": "wĹ‚Ä…czone", "path": ["Werbin", "Orcza WyĹĽyna", "Osada Czerwonych OrkĂłw", "Grota Orczej Hordy p.1 s.2", "Grota Orczej Hordy p.2 s.1", "Grota Orczej Hordy p.2 s.2", "Grota Orczej Hordy p.2 s.3"], "resp": {"Grota Orczej Hordy p.2 s.3": [[19, 16]]}},
+        {"name": "Burkog Lorulk", "level": 160, "prof": "Wojownik", "limit": 173, "pvp": "włączone", "path": ["Werbin", "Orcza Wyżyna", "Osada Czerwonych Orków", "Grota Orczej Hordy p.1 s.2", "Grota Orczej Hordy p.2 s.1", "Grota Orczej Hordy p.2 s.2", "Grota Orczej Hordy p.2 s.3"], "resp": {"Grota Orczej Hordy p.2 s.3": [[19, 16]]}},
 
-        {"name": "Shakkru", "level": 160, "prof": "Nieznana", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Werbin", "Orcza WyĹĽyna", "Grota Orczych SzamanĂłw p.3 s.1"], "resp": {"Grota Orczych SzamanĂłw p.3 s.1": [[12, 4]]}},
+        {"name": "Shakkru", "level": 160, "prof": "Nieznana", "limit": 999, "pvp": "włączone", "path": ["Werbin", "Orcza Wyżyna", "Grota Orczych Szamanów p.3 s.1"], "resp": {"Grota Orczych Szamanów p.3 s.1": [[12, 4]]}},
 
-        {"name": "Duch WĹ‚adcy KlanĂłw", "level": 165, "prof": "Paladyn", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Werbin", "Brama PĂłĹ‚nocy", "WĹ‚oĹ›ci rodu Kruzo", "Osada Czerwonych OrkĂłw", "Kurhany ZwyciÄ™ĹĽonych", "Nawiedzone Komnaty - przedsionek", "Nawiedzone Kazamaty p.1 s.2", "Nawiedzone Kazamaty p.2 s.2", "Nawiedzone Kazamaty p.3 s.2", "Nawiedzone Kazamaty p.4"], "resp": {"Nawiedzone Kazamaty p.4": [[15, 30]]}},
+        {"name": "Duch Władcy Klanów", "level": 165, "prof": "Paladyn", "limit": 999, "pvp": "włączone", "path": ["Werbin", "Brama Północy", "Włości rodu Kruzo", "Osada Czerwonych Orków", "Kurhany Zwyciężonych", "Nawiedzone Komnaty - przedsionek", "Nawiedzone Kazamaty p.1 s.2", "Nawiedzone Kazamaty p.2 s.2", "Nawiedzone Kazamaty p.3 s.2", "Nawiedzone Kazamaty p.4"], "resp": {"Nawiedzone Kazamaty p.4": [[15, 30]]}},
 
-        {"name": "Bragarth MyĹ›liwy Dusz", "level": 170, "prof": "Ĺowca", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Werbin", "Orcza WyĹĽyna", "Osada Czerwonych OrkĂłw", "Kurhany ZwyciÄ™ĹĽonych", "Nawiedzone Komnaty - przedsionek", "Sala DowĂłdcy OrkĂłw", "Sala Rady OrkĂłw"], "resp": {"Sala Rady OrkĂłw": [[22, 26]]}},
+        {"name": "Bragarth Myśliwy Dusz", "level": 170, "prof": "Łowca", "limit": 999, "pvp": "włączone", "path": ["Werbin", "Orcza Wyżyna", "Osada Czerwonych Orków", "Kurhany Zwyciężonych", "Nawiedzone Komnaty - przedsionek", "Sala Dowódcy Orków", "Sala Rady Orków"], "resp": {"Sala Rady Orków": [[22, 26]]}},
 
-        {"name": "Fursharag PoĹĽeracz UmysĹ‚Ăłw", "level": 170, "prof": "Nieznana", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Sala Rady OrkĂłw"], "resp": {"Sala Rady OrkĂłw": [[9, 10]]}},
+        {"name": "Fursharag Pożeracz Umysłów", "level": 170, "prof": "Nieznana", "limit": 999, "pvp": "włączone", "path": ["Sala Rady Orków"], "resp": {"Sala Rady Orków": [[9, 10]]}},
 
-        {"name": "Ziuggrael StraĹĽnik KrĂłlowej", "level": 170, "prof": "Nieznana", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Sala Rady OrkĂłw"], "resp": {"Sala Rady OrkĂłw": [[40, 7]]}},
+        {"name": "Ziuggrael Strażnik Królowej", "level": 170, "prof": "Nieznana", "limit": 999, "pvp": "włączone", "path": ["Sala Rady Orków"], "resp": {"Sala Rady Orków": [[40, 7]]}},
 
-        {"name": "KrĂłlowa Ĺšniegu", "level": 175, "prof": "Mag", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Karka-han", "PrzedmieĹ›cia Karka-han", "PrzeĹ‚Ä™cz DwĂłch Koron", "KrysztaĹ‚owa Grota p.1", "KrysztaĹ‚owa Grota p.2 - sala 1", "KrysztaĹ‚owa Grota - Sala Smutku"], "resp": {"KrysztaĹ‚owa Grota - Sala Smutku": [[21, 9]]}},
+        {"name": "Królowa Śniegu", "level": 175, "prof": "Mag", "limit": 999, "pvp": "włączone", "path": ["Karka-han", "Przedmieścia Karka-han", "Przełęcz Dwóch Koron", "Kryształowa Grota p.1", "Kryształowa Grota p.2 - sala 1", "Kryształowa Grota - Sala Smutku"], "resp": {"Kryształowa Grota - Sala Smutku": [[21, 9]]}},
 
-        {"name": "Lusgrathera KrĂłlowa Pramatka", "level": 175, "prof": "Mag", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Werbin", "Orcza WyĹĽyna", "Osada Czerwonych OrkĂłw", "Kurhany ZwyciÄ™ĹĽonych", "Nawiedzone Komnaty - przedsionek", "Sala DowĂłdcy OrkĂłw", "Sala Rady OrkĂłw", "Sala KrĂłlewska"], "resp": {"Sala KrĂłlewska": [[22, 23]]}},
+        {"name": "Lusgrathera Królowa Pramatka", "level": 175, "prof": "Mag", "limit": 999, "pvp": "włączone", "path": ["Werbin", "Orcza Wyżyna", "Osada Czerwonych Orków", "Kurhany Zwyciężonych", "Nawiedzone Komnaty - przedsionek", "Sala Dowódcy Orków", "Sala Rady Orków", "Sala Królewska"], "resp": {"Sala Królewska": [[22, 23]]}},
 
-        {"name": "Wrzosera", "level": 177, "prof": "Wojownik", "limit": 190, "pvp": "wĹ‚Ä…czone", "path": ["Thuzal", "GraĹ„ Gawronich PiĂłr", "BĹ‚ota Sham Al", "GĹ‚usza Ĺšwistu", "Drzewo Dusz p.1", "Drzewo Dusz p.2"], "resp": {"Drzewo Dusz p.2": [[11, 48]]}},
+        {"name": "Wrzosera", "level": 177, "prof": "Wojownik", "limit": 190, "pvp": "włączone", "path": ["Thuzal", "Grań Gawronich Piór", "Błota Sham Al", "Głusza Świstu", "Drzewo Dusz p.1", "Drzewo Dusz p.2"], "resp": {"Drzewo Dusz p.2": [[11, 48]]}},
 
-        {"name": "Chryzoprenia", "level": 177, "prof": "Nieznana", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Drzewo Dusz p.2"], "resp": {"Drzewo Dusz p.2": [[29, 8]]}},
+        {"name": "Chryzoprenia", "level": 177, "prof": "Nieznana", "limit": 999, "pvp": "włączone", "path": ["Drzewo Dusz p.2"], "resp": {"Drzewo Dusz p.2": [[29, 8]]}},
 
-        {"name": "Cantedewia", "level": 177, "prof": "Nieznana", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Drzewo Dusz p.2"], "resp": {"Drzewo Dusz p.2": [[49, 21]]}},
+        {"name": "Cantedewia", "level": 177, "prof": "Nieznana", "limit": 999, "pvp": "włączone", "path": ["Drzewo Dusz p.2"], "resp": {"Drzewo Dusz p.2": [[49, 21]]}},
 
-        {"name": "Ogr Stalowy Pazur", "level": 183, "prof": "Tancerz Ostrzy", "limit": 999, "pvp": "za zgodÄ…", "path": ["Thuzal", "GraĹ„ Gawronich PiĂłr", "Ogrza Kawerna p.1", "Ogrza Kawerna p.2", "Ogrza Kawerna p.3", "Ogrza Kawerna p.4"], "resp": {"Ogrza Kawerna p.4": [[16, 10]]}},
+        {"name": "Ogr Stalowy Pazur", "level": 183, "prof": "Tancerz Ostrzy", "limit": 999, "pvp": "za zgodą", "path": ["Thuzal", "Grań Gawronich Piór", "Ogrza Kawerna p.1", "Ogrza Kawerna p.2", "Ogrza Kawerna p.3", "Ogrza Kawerna p.4"], "resp": {"Ogrza Kawerna p.4": [[16, 10]]}},
 
-        {"name": "Torunia Ankelwald", "level": 186, "prof": "Paladyn", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Thuzal", "GraĹ„ Gawronich PiĂłr", "BĹ‚ota Sham Al", "Ruiny Tass Zhil", "Krypty Bezsennych p.1 s.1", "Krypty Bezsennych p.2 s.1", "Krypty Bezsennych p.3"], "resp": {"Krypty Bezsennych p.3": [[17, 5]]}},
+        {"name": "Torunia Ankelwald", "level": 186, "prof": "Paladyn", "limit": 999, "pvp": "włączone", "path": ["Thuzal", "Grań Gawronich Piór", "Błota Sham Al", "Ruiny Tass Zhil", "Krypty Bezsennych p.1 s.1", "Krypty Bezsennych p.2 s.1", "Krypty Bezsennych p.3"], "resp": {"Krypty Bezsennych p.3": [[17, 5]]}},
 
-        {"name": "PiÄ™knotka MiÄ™soĹĽerna", "level": 189, "prof": "Ĺowca", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Thuzal", "GraĹ„ Gawronich PiĂłr", "Lazurowe WzgĂłrze", "Kwieciste PrzejĹ›cie", "GĹ‚uchy Las", "Skarpa Trzech SĹ‚Ăłw"], "resp": {"Skarpa Trzech SĹ‚Ăłw": [[28, 38]]}},
+        {"name": "Pięknotka Mięsożerna", "level": 189, "prof": "Łowca", "limit": 999, "pvp": "włączone", "path": ["Thuzal", "Grań Gawronich Piór", "Lazurowe Wzgórze", "Kwieciste Przejście", "Głuchy Las", "Skarpa Trzech Słów"], "resp": {"Skarpa Trzech Słów": [[28, 38]]}},
 
-        {"name": "Breheret Ĺ»elazny Ĺeb", "level": 192, "prof": "Wojownik", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Thuzal", "Ĺ»oĹ‚nierski Korytarz", "Szczerba SamobĂłjcĂłw", "PrzysiĂłĹ‚ek ValmirĂłw"], "resp": {"PrzysiĂłĹ‚ek ValmirĂłw": [[29, 11]]}},
+        {"name": "Breheret Żelazny Łeb", "level": 192, "prof": "Wojownik", "limit": 999, "pvp": "włączone", "path": ["Thuzal", "Żołnierski Korytarz", "Szczerba Samobójców", "Przysiółek Valmirów"], "resp": {"Przysiółek Valmirów": [[29, 11]]}},
 
-        {"name": "Cerasus", "level": 193, "prof": "Ĺowca", "limit": 206, "pvp": "wĹ‚Ä…czone", "path": ["Nithal", "Podgrodzie Nithal", "Nizina WieĹ›niakĂłw", "Zbocze Starych BogĂłw", "Bezgwiezdna GÄ™stwina", "Martwy Las", "Starodrzew Przedwiecznych p.1", "Starodrzew Przedwiecznych p.2"], "resp": {"Starodrzew Przedwiecznych p.2": [[10, 17]]}},
+        {"name": "Cerasus", "level": 193, "prof": "Łowca", "limit": 206, "pvp": "włączone", "path": ["Nithal", "Podgrodzie Nithal", "Nizina Wieśniaków", "Zbocze Starych Bogów", "Bezgwiezdna Gęstwina", "Martwy Las", "Starodrzew Przedwiecznych p.1", "Starodrzew Przedwiecznych p.2"], "resp": {"Starodrzew Przedwiecznych p.2": [[10, 17]]}},
 
-        {"name": "Mysiur MyĹ›wiĂłrowy KrĂłl", "level": 197, "prof": "Mag", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Nithal", "Izba chorych pĹ‚n", "Izba chorych pĹ‚n. - piwnica p1", "Izba chorych pĹ‚n. - piwnica p2", "Izba chorych pĹ‚n. - piwnica p3", "Izba chorych - piwniczne przejĹ›cie", "KanaĹ‚y Nithal p.1 - sala 1", "KanaĹ‚y Nithal p.1 - sala 3", "Szlamowe KanaĹ‚y p.2 - sala 1", "Szlamowe KanaĹ‚y p.2 - sala 3"], "resp": {"Szlamowe KanaĹ‚y p.2 - sala 3": [[19, 7]]}},
+        {"name": "Mysiur Myświórowy Król", "level": 197, "prof": "Mag", "limit": 999, "pvp": "włączone", "path": ["Nithal", "Izba chorych płn", "Izba chorych płn. - piwnica p1", "Izba chorych płn. - piwnica p2", "Izba chorych płn. - piwnica p3", "Izba chorych - piwniczne przejście", "Kanały Nithal p.1 - sala 1", "Kanały Nithal p.1 - sala 3", "Szlamowe Kanały p.2 - sala 1", "Szlamowe Kanały p.2 - sala 3"], "resp": {"Szlamowe Kanały p.2 - sala 3": [[19, 7]]}},
 
-        {"name": "Sadolia Nadzorczyni Hurys", "level": 200, "prof": "Tancerz Ostrzy", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Nithal", "Izba chorych pĹ‚n", "Izba chorych pĹ‚n. - piwnica p1", "Izba chorych pĹ‚n. - piwnica p2", "Izba chorych pĹ‚n. - piwnica p3", "Izba chorych - piwniczne przejĹ›cie", "KanaĹ‚y Nithal p.1 - sala 1", "KanaĹ‚y Nithal p.1 - sala 3", "Szlamowe KanaĹ‚y p.2 - sala 1", "Przedsionek Kultu", "PrzeraĹĽajÄ…ce Sypialnie"], "resp": {"PrzeraĹĽajÄ…ce Sypialnie": [[18, 11]]}},
+        {"name": "Sadolia Nadzorczyni Hurys", "level": 200, "prof": "Tancerz Ostrzy", "limit": 999, "pvp": "włączone", "path": ["Nithal", "Izba chorych płn", "Izba chorych płn. - piwnica p1", "Izba chorych płn. - piwnica p2", "Izba chorych płn. - piwnica p3", "Izba chorych - piwniczne przejście", "Kanały Nithal p.1 - sala 1", "Kanały Nithal p.1 - sala 3", "Szlamowe Kanały p.2 - sala 1", "Przedsionek Kultu", "Przerażające Sypialnie"], "resp": {"Przerażające Sypialnie": [[18, 11]]}},
 
-        {"name": "Bergermona Krwawa Hrabina", "level": 204, "prof": "Tropiciel", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Nithal", "Izba chorych pĹ‚n", "Izba chorych pĹ‚n. - piwnica p1", "Izba chorych pĹ‚n. - piwnica p2", "Izba chorych pĹ‚n. - piwnica p3", "Izba chorych - piwniczne przejĹ›cie", "KanaĹ‚y Nithal p.1 - sala 1", "KanaĹ‚y Nithal p.1 - sala 3", "Szlamowe KanaĹ‚y p.2 - sala 1", "Przedsionek Kultu", "PrzeraĹĽajÄ…ce Sypialnie", "Mroczne Komnaty", "Tajemnicza Siedziba", "Lochy Kultu", "Sale Rozdzierania"], "resp": {"Sale Rozdzierania": [[43, 60]]}},
+        {"name": "Bergermona Krwawa Hrabina", "level": 204, "prof": "Tropiciel", "limit": 999, "pvp": "włączone", "path": ["Nithal", "Izba chorych płn", "Izba chorych płn. - piwnica p1", "Izba chorych płn. - piwnica p2", "Izba chorych płn. - piwnica p3", "Izba chorych - piwniczne przejście", "Kanały Nithal p.1 - sala 1", "Kanały Nithal p.1 - sala 3", "Szlamowe Kanały p.2 - sala 1", "Przedsionek Kultu", "Przerażające Sypialnie", "Mroczne Komnaty", "Tajemnicza Siedziba", "Lochy Kultu", "Sale Rozdzierania"], "resp": {"Sale Rozdzierania": [[43, 60]]}},
 
-        {"name": "Sataniel SkrytobĂłjca", "level": 204, "prof": "Ĺowca", "limit": 217, "pvp": "wĹ‚Ä…czone", "path": ["Nithal", "Izba chorych pĹ‚n", "Izba chorych pĹ‚n. - piwnica p1", "Izba chorych pĹ‚n. - piwnica p2", "Izba chorych pĹ‚n. - piwnica p3", "Izba chorych - piwniczne przejĹ›cie", "KanaĹ‚y Nithal p.1 - sala 1", "KanaĹ‚y Nithal p.1 - sala 3", "Szlamowe KanaĹ‚y p.2 - sala 1", "Przedsionek Kultu", "PrzeraĹĽajÄ…ce Sypialnie", "Mroczne Komnaty", "Tajemnicza Siedziba", "Sala Spowiedzi KonajÄ…cych", "PrzejĹ›cie Oczyszczenia", "Sala Skaryfikacji GrzesznikĂłw"], "resp": {"Sala Skaryfikacji GrzesznikĂłw": [[20, 14]]}},
+        {"name": "Sataniel Skrytobójca", "level": 204, "prof": "Łowca", "limit": 217, "pvp": "włączone", "path": ["Nithal", "Izba chorych płn", "Izba chorych płn. - piwnica p1", "Izba chorych płn. - piwnica p2", "Izba chorych płn. - piwnica p3", "Izba chorych - piwniczne przejście", "Kanały Nithal p.1 - sala 1", "Kanały Nithal p.1 - sala 3", "Szlamowe Kanały p.2 - sala 1", "Przedsionek Kultu", "Przerażające Sypialnie", "Mroczne Komnaty", "Tajemnicza Siedziba", "Sala Spowiedzi Konających", "Przejście Oczyszczenia", "Sala Skaryfikacji Grzeszników"], "resp": {"Sala Skaryfikacji Grzeszników": [[20, 14]]}},
 
-        {"name": "Annaniel Wysysacz MarzeĹ„", "level": 204, "prof": "Mag", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Nithal", "Izba chorych pĹ‚n", "Izba chorych pĹ‚n. - piwnica p1", "Izba chorych pĹ‚n. - piwnica p2", "Izba chorych pĹ‚n. - piwnica p3", "Izba chorych - piwniczne przejĹ›cie", "KanaĹ‚y Nithal p.1 - sala 1", "KanaĹ‚y Nithal p.1 - sala 3", "Szlamowe KanaĹ‚y p.2 - sala 1", "Przedsionek Kultu", "PrzeraĹĽajÄ…ce Sypialnie", "Mroczne Komnaty", "Tajemnicza Siedziba"], "resp": {"Tajemnicza Siedziba": [[26, 22]]}},
+        {"name": "Annaniel Wysysacz Marzeń", "level": 204, "prof": "Mag", "limit": 999, "pvp": "włączone", "path": ["Nithal", "Izba chorych płn", "Izba chorych płn. - piwnica p1", "Izba chorych płn. - piwnica p2", "Izba chorych płn. - piwnica p3", "Izba chorych - piwniczne przejście", "Kanały Nithal p.1 - sala 1", "Kanały Nithal p.1 - sala 3", "Szlamowe Kanały p.2 - sala 1", "Przedsionek Kultu", "Przerażające Sypialnie", "Mroczne Komnaty", "Tajemnicza Siedziba"], "resp": {"Tajemnicza Siedziba": [[26, 22]]}},
 
-        {"name": "Gothardus Kolekcjoner GĹ‚Ăłw", "level": 204, "prof": "Wojownik", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Nithal", "Izba chorych pĹ‚n", "Izba chorych pĹ‚n. - piwnica p1", "Izba chorych pĹ‚n. - piwnica p2", "Izba chorych pĹ‚n. - piwnica p3", "Izba chorych - piwniczne przejĹ›cie", "KanaĹ‚y Nithal p.1 - sala 1", "KanaĹ‚y Nithal p.1 - sala 3", "Szlamowe KanaĹ‚y p.2 - sala 1", "Przedsionek Kultu", "PrzeraĹĽajÄ…ce Sypialnie", "Mroczne Komnaty", "Tajemnicza Siedziba"], "resp": {"Tajemnicza Siedziba": [[44, 22]]}},
+        {"name": "Gothardus Kolekcjoner Głów", "level": 204, "prof": "Wojownik", "limit": 999, "pvp": "włączone", "path": ["Nithal", "Izba chorych płn", "Izba chorych płn. - piwnica p1", "Izba chorych płn. - piwnica p2", "Izba chorych płn. - piwnica p3", "Izba chorych - piwniczne przejście", "Kanały Nithal p.1 - sala 1", "Kanały Nithal p.1 - sala 3", "Szlamowe Kanały p.2 - sala 1", "Przedsionek Kultu", "Przerażające Sypialnie", "Mroczne Komnaty", "Tajemnicza Siedziba"], "resp": {"Tajemnicza Siedziba": [[44, 22]]}},
 
-        {"name": "Zufulus Smakosz Serc", "level": 205, "prof": "Mag", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Nithal", "Izba chorych pĹ‚d.", "Izba chorych pĹ‚d. - piwnica p.1", "Izba- piwniczne przejĹ›cie", "KanaĹ‚y Nithal", "Szlamowe kanaĹ‚y", "Przedsionek Kultu", "Mroczne Komnaty", "Tajemnicza Siedziba", "Sala Spowiedzi KonajÄ…cych", "Sala TysiÄ…ca Ĺšwiec"], "resp": {"Sala TysiÄ…ca Ĺšwiec": [[47, 30]]}},
+        {"name": "Zufulus Smakosz Serc", "level": 205, "prof": "Mag", "limit": 999, "pvp": "włączone", "path": ["Nithal", "Izba chorych płd.", "Izba chorych płd. - piwnica p.1", "Izba- piwniczne przejście", "Kanały Nithal", "Szlamowe kanały", "Przedsionek Kultu", "Mroczne Komnaty", "Tajemnicza Siedziba", "Sala Spowiedzi Konających", "Sala Tysiąca Świec"], "resp": {"Sala Tysiąca Świec": [[47, 30]]}},
 
-        {"name": "Czempion Furboli", "level": 210, "prof": "Wojownik", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Torneg", "Zapomniany Las", "Terytorium Furii", "Dolina Gniewu", "Zalana Grota"], "resp": {"Zalana Grota": [[16, 9]]}},
+        {"name": "Czempion Furboli", "level": 210, "prof": "Wojownik", "limit": 999, "pvp": "włączone", "path": ["Torneg", "Zapomniany Las", "Terytorium Furii", "Dolina Gniewu", "Zalana Grota"], "resp": {"Zalana Grota": [[16, 9]]}},
 
-        {"name": "Arachniregina Colosseus", "level": 214, "prof": "Tancerz Ostrzy", "limit": 227, "pvp": "za zgodÄ…", "path": ["Torneg", "Zapomniany Las", "Terytorium Furii", "Zapadlisko Zniewolonych", "PajÄ™czy las", "OtchĹ‚aĹ„ PajÄ™czych Sieci", "Dolina PajÄ™czych Korytarzy", "Arachnitopia p1", "Arachnitopia p2", "Arachnitopia p3", "Arachnitopia p4", "Arachnitopia p.5", "Arachnitopia p.6"], "resp": {"Arachnitopia p.6": [[12, 14]]}},
+        {"name": "Arachniregina Colosseus", "level": 214, "prof": "Tancerz Ostrzy", "limit": 227, "pvp": "za zgodą", "path": ["Torneg", "Zapomniany Las", "Terytorium Furii", "Zapadlisko Zniewolonych", "Pajęczy las", "Otchłań Pajęczych Sieci", "Dolina Pajęczych Korytarzy", "Arachnitopia p1", "Arachnitopia p2", "Arachnitopia p3", "Arachnitopia p4", "Arachnitopia p.5", "Arachnitopia p.6"], "resp": {"Arachnitopia p.6": [[12, 14]]}},
 
-        {"name": "Rycerz z za maĹ‚ym mieczem", "level": 214, "prof": "Nieznana", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Arachnitopia p.6"], "resp": {"Arachnitopia p.6": [[8, 9]]}},
+        {"name": "Rycerz z za małym mieczem", "level": 214, "prof": "Nieznana", "limit": 999, "pvp": "włączone", "path": ["Arachnitopia p.6"], "resp": {"Arachnitopia p.6": [[8, 9]]}},
 
-        {"name": "Al'diphrin Ilythirahel", "level": 218, "prof": "Mag", "limit": 231, "pvp": "wĹ‚Ä…czone", "path": ["Thuzal", "Ĺ»oĹ‚nierski korytarz", "Zakazana Grota", "Porzucone Noiridum p.2", "Porzucone Noiridum p.3 - sala 1", "Porzucone Noiridum p.3 - sala 2", "Porzucone Noiridum p.3 - sala 3", "Erem Aldiphrina"], "resp": {"Erem Aldiphrina": [[23, 11]]}},
+        {"name": "Al'diphrin Ilythirahel", "level": 218, "prof": "Mag", "limit": 231, "pvp": "włączone", "path": ["Thuzal", "Żołnierski korytarz", "Zakazana Grota", "Porzucone Noiridum p.2", "Porzucone Noiridum p.3 - sala 1", "Porzucone Noiridum p.3 - sala 2", "Porzucone Noiridum p.3 - sala 3", "Erem Aldiphrina"], "resp": {"Erem Aldiphrina": [[23, 11]]}},
 
-        {"name": "Marlloth Malignitas", "level": 220, "prof": "Tancerz Ostrzy", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Thuzal", "Gildia TeologĂłw", "Gildia TeologĂłw - korytarz za oĹ‚tarzem", "Gildia TeologĂłw - przejĹ›cie do jaskiĹ„", "Zapomniane Sztolnie", "ZamierzchĹ‚e Arterie p.2 - sala 1", "OĹ‚tarz PajÄ™czej Bogini"], "resp": {"OĹ‚tarz PajÄ™czej Bogini": [[29, 14]]}},
+        {"name": "Marlloth Malignitas", "level": 220, "prof": "Tancerz Ostrzy", "limit": 999, "pvp": "włączone", "path": ["Thuzal", "Gildia Teologów", "Gildia Teologów - korytarz za ołtarzem", "Gildia Teologów - przejście do jaskiń", "Zapomniane Sztolnie", "Zamierzchłe Arterie p.2 - sala 1", "Ołtarz Pajęczej Bogini"], "resp": {"Ołtarz Pajęczej Bogini": [[29, 14]]}},
 
-        {"name": "Arytodam olbrzymi", "level": 226, "prof": "Paladyn", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["LiĹ›ciaste Rozstaje", "Zapomniana ĹšcieĹĽyna", "Mglisty Las", "GrzÄ…ska Ziemia", "GnijÄ…ce Topielisko"], "resp": {"GnijÄ…ce Topielisko": [[27, 58]]}},
+        {"name": "Arytodam olbrzymi", "level": 226, "prof": "Paladyn", "limit": 999, "pvp": "włączone", "path": ["Liściaste Rozstaje", "Zapomniana Ścieżyna", "Mglisty Las", "Grząska Ziemia", "Gnijące Topielisko"], "resp": {"Gnijące Topielisko": [[27, 58]]}},
 
-        {"name": "Mocny Maddoks", "level": 231, "prof": "Mag", "limit": 244, "pvp": "wĹ‚Ä…czone", "path": ["Thuzal", "GraĹ„ Gawronich PiĂłr", "Lazurowe WzgĂłrze", "Kwieciste PrzejĹ›cie", "ZĹ‚udny Trakt", "ZĹ‚ota DÄ…browa", "Strumienie SzemrzÄ…cych WĂłd", "Jaszczurze Korytarze p.1 - sala 4", "Jaszczurze Korytarze p.2 - sala 2", "Jaszczurze Korytarze p.2 - sala 4", "Jaszczurze Korytarze p.2 - sala 5"], "resp": {"Jaszczurze Korytarze p.2 - sala 5": [[9, 9]]}},
+        {"name": "Mocny Maddoks", "level": 231, "prof": "Mag", "limit": 244, "pvp": "włączone", "path": ["Thuzal", "Grań Gawronich Piór", "Lazurowe Wzgórze", "Kwieciste Przejście", "Złudny Trakt", "Złota Dąbrowa", "Strumienie Szemrzących Wód", "Jaszczurze Korytarze p.1 - sala 4", "Jaszczurze Korytarze p.2 - sala 2", "Jaszczurze Korytarze p.2 - sala 4", "Jaszczurze Korytarze p.2 - sala 5"], "resp": {"Jaszczurze Korytarze p.2 - sala 5": [[9, 9]]}},
 
-        {"name": "Fangaj", "level": 235, "prof": "Ĺowca", "limit": 999, "pvp": "za zgodÄ…", "path": ["Karka-han", "Prastara Puszcza", "Zalesiony Step", "Garb PoĹ‚amanych KonarĂłw", "Gardziel Podgnitych MchĂłw p.1", "Gardziel Podgnitych MchĂłw p.2", "Gardziel Podgnitych MchĂłw p.3"], "resp": {"Gardziel Podgnitych MchĂłw p.3": [[33, 33]]}},
+        {"name": "Fangaj", "level": 235, "prof": "Łowca", "limit": 999, "pvp": "za zgodą", "path": ["Karka-han", "Prastara Puszcza", "Zalesiony Step", "Garb Połamanych Konarów", "Gardziel Podgnitych Mchów p.1", "Gardziel Podgnitych Mchów p.2", "Gardziel Podgnitych Mchów p.3"], "resp": {"Gardziel Podgnitych Mchów p.3": [[33, 33]]}},
 
-        {"name": "Dendroculus", "level": 240, "prof": "Wojownik", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Tuzmer", "Stare SioĹ‚o", "Piachy Zniewolonych", "Piaskowa GÄ™stwina", "ĹąrĂłdĹ‚o Zakorzenionego Ludu", "Jaskinia Korzennego Czaru p.2 - sala 1", "Jaskinia Korzennego Czaru p.1 - sala 1", "Jaskinia Korzennego Czaru p.1 - sala 2", "Jaskinia Korzennego Czaru p.1 - sala 4", "Jaskinia Korzennego Czaru p.2 - sala 2", "Jaskinia Korzennego Czaru p.1 - sala 1", "ĹąrĂłdĹ‚o Zakorzenionego Ludu"], "resp": {"ĹąrĂłdĹ‚o Zakorzenionego Ludu": [[35, 46]]}},
+        {"name": "Dendroculus", "level": 240, "prof": "Wojownik", "limit": 999, "pvp": "włączone", "path": ["Tuzmer", "Stare Sioło", "Piachy Zniewolonych", "Piaskowa Gęstwina", "Źródło Zakorzenionego Ludu", "Jaskinia Korzennego Czaru p.2 - sala 1", "Jaskinia Korzennego Czaru p.1 - sala 1", "Jaskinia Korzennego Czaru p.1 - sala 2", "Jaskinia Korzennego Czaru p.1 - sala 4", "Jaskinia Korzennego Czaru p.2 - sala 2", "Jaskinia Korzennego Czaru p.1 - sala 1", "Źródło Zakorzenionego Ludu"], "resp": {"Źródło Zakorzenionego Ludu": [[35, 46]]}},
 
-        {"name": "Tolypeutes", "level": 245, "prof": "Wojownik", "limit": 258, "pvp": "wĹ‚Ä…czone", "path": ["Mythar", "Urwisko ZdrewniaĹ‚ych", "Dolina Chmur", "ZĹ‚ota GĂłra p.2 - sala 3", "ZĹ‚ota GĂłra p.2 - sala 4", "ZĹ‚ota GĂłra p.3 - sala 2"], "resp": {"ZĹ‚ota GĂłra p.3 - sala 2": [[5, 6]]}},
+        {"name": "Tolypeutes", "level": 245, "prof": "Wojownik", "limit": 258, "pvp": "włączone", "path": ["Mythar", "Urwisko Zdrewniałych", "Dolina Chmur", "Złota Góra p.2 - sala 3", "Złota Góra p.2 - sala 4", "Złota Góra p.3 - sala 2"], "resp": {"Złota Góra p.3 - sala 2": [[5, 6]]}},
 
-        {"name": "Cuaitl Citlalin", "level": 250, "prof": "Wojownik", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Mythar", "Urwisko ZdrewniaĹ‚ych", "Dolina Chmur", "Niecka Xiuh Atl", "Chantli Cuaitla Citlalina"], "resp": {"Chantli Cuaitla Citlalina": [[13, 8]]}},
+        {"name": "Cuaitl Citlalin", "level": 250, "prof": "Wojownik", "limit": 999, "pvp": "włączone", "path": ["Mythar", "Urwisko Zdrewniałych", "Dolina Chmur", "Niecka Xiuh Atl", "Chantli Cuaitla Citlalina"], "resp": {"Chantli Cuaitla Citlalina": [[13, 8]]}},
 
-        {"name": "Yaotl", "level": 258, "prof": "Ĺowca", "limit": 271, "pvp": "wĹ‚Ä…czone", "path": ["Trupia PrzeĹ‚Ä™cz", "Niecka Xiuh Atl", "Altepetl Mahoptekan", "Zachodni Mictlan p.1", "Zachodni Mictlan p.2", "Zachodni Mictlan p.3", "Zachodni Mictlan p.4", "Zachodni Mictlan p.5", "Zachodni Mictlan p.6", "Zachodni Mictlan p.7", "Zachodni Mictlan p.8", "Zachodni Mictlan p.9"], "resp": {"Zachodni Mictlan p.9": [[7, 10]]}},
+        {"name": "Yaotl", "level": 258, "prof": "Łowca", "limit": 271, "pvp": "włączone", "path": ["Trupia Przełęcz", "Niecka Xiuh Atl", "Altepetl Mahoptekan", "Zachodni Mictlan p.1", "Zachodni Mictlan p.2", "Zachodni Mictlan p.3", "Zachodni Mictlan p.4", "Zachodni Mictlan p.5", "Zachodni Mictlan p.6", "Zachodni Mictlan p.7", "Zachodni Mictlan p.8", "Zachodni Mictlan p.9"], "resp": {"Zachodni Mictlan p.9": [[7, 10]]}},
 
-        {"name": "Quetzalcoatl", "level": 258, "prof": "Mag", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Trupia przeĹ‚Ä™cz", "Niecka Xiuh Atl", "Altepetl Mahoptekan", "Wschodni Mictlan p.1", "Wschodni Mictlan p.2", "Wschodni Mictlan p.3", "Wschodni Mictlan p.4", "Wschodni Mictlan p.5", "Wschodni Mictlan p.6", "Wschodni Mictlan p.7", "Wschodni Mictlan p.8", "Wschodni Mictlan p.9"], "resp": {"Wschodni Mictlan p.9": [[11, 9]]}},
+        {"name": "Quetzalcoatl", "level": 258, "prof": "Mag", "limit": 999, "pvp": "włączone", "path": ["Trupia przełęcz", "Niecka Xiuh Atl", "Altepetl Mahoptekan", "Wschodni Mictlan p.1", "Wschodni Mictlan p.2", "Wschodni Mictlan p.3", "Wschodni Mictlan p.4", "Wschodni Mictlan p.5", "Wschodni Mictlan p.6", "Wschodni Mictlan p.7", "Wschodni Mictlan p.8", "Wschodni Mictlan p.9"], "resp": {"Wschodni Mictlan p.9": [[11, 9]]}},
 
-        {"name": "Wabicielka", "level": 260, "prof": "Tancerz Ostrzy", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Werbin", "Orcza WyĹĽyna", "Upiorna Droga", "Pogranicze WisielcĂłw", "JÄ™czywÄ…wĂłz", "Skalisty Styk", "Zacisze Zimnych WiatrĂłw", "Siedlisko Przyjemnej Woni", "Siedlisko Przyjemnej Woni - ĹşrĂłdĹ‚o"], "resp": {"Siedlisko Przyjemnej Woni - ĹşrĂłdĹ‚o": [[19, 13]]}},
+        {"name": "Wabicielka", "level": 260, "prof": "Tancerz Ostrzy", "limit": 999, "pvp": "włączone", "path": ["Werbin", "Orcza Wyżyna", "Upiorna Droga", "Pogranicze Wisielców", "Jęczywąwóz", "Skalisty Styk", "Zacisze Zimnych Wiatrów", "Siedlisko Przyjemnej Woni", "Siedlisko Przyjemnej Woni - źródło"], "resp": {"Siedlisko Przyjemnej Woni - źródło": [[19, 13]]}},
 
-        {"name": "Pogardliwa Sybilla", "level": 263, "prof": "Mag", "limit": 999, "pvp": "za zgodÄ…", "path": ["Werbin", "Orcza WyĹĽyna", "Upiorna Droga", "WiedĹşmie KotĹ‚owisko", "Sabatowe GĂłry", "Tristam", "PotÄ™pione Zamczysko", "PotÄ™pione Zamczysko - korytarz wejĹ›ciowy", "PotÄ™pione Zamczysko - sala ofiarna", "PotÄ™pione Zamczysko - pracownia"], "resp": {"PotÄ™pione Zamczysko - pracownia": [[10, 10]]}},
+        {"name": "Pogardliwa Sybilla", "level": 263, "prof": "Mag", "limit": 999, "pvp": "za zgodą", "path": ["Werbin", "Orcza Wyżyna", "Upiorna Droga", "Wiedźmie Kotłowisko", "Sabatowe Góry", "Tristam", "Potępione Zamczysko", "Potępione Zamczysko - korytarz wejściowy", "Potępione Zamczysko - sala ofiarna", "Potępione Zamczysko - pracownia"], "resp": {"Potępione Zamczysko - pracownia": [[10, 10]]}},
 
-        {"name": "Chopesz", "level": 267, "prof": "Tancerz Ostrzy", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Tuzmer", "Stare SioĹ‚o", "Sucha Dolina", "PĹ‚askowyĹĽ Arpan", "Oaza Siedmiu WichrĂłw", "Ruiny Pustynnych Burz", "Pustynne Katakumby", "Pustynne Katakumby - sala 2", "Komnaty Bezdusznych - sala 1", "Komnaty Bezdusznych - sala 2", "Katakumby GwaĹ‚townej Ĺšmierci"], "resp": {"Katakumby GwaĹ‚townej Ĺšmierci": [[36, 39]]}},
+        {"name": "Chopesz", "level": 267, "prof": "Tancerz Ostrzy", "limit": 999, "pvp": "włączone", "path": ["Tuzmer", "Stare Sioło", "Sucha Dolina", "Płaskowyż Arpan", "Oaza Siedmiu Wichrów", "Ruiny Pustynnych Burz", "Pustynne Katakumby", "Pustynne Katakumby - sala 2", "Komnaty Bezdusznych - sala 1", "Komnaty Bezdusznych - sala 2", "Katakumby Gwałtownej Śmierci"], "resp": {"Katakumby Gwałtownej Śmierci": [[36, 39]]}},
 
-        {"name": "Neferkar Set", "level": 274, "prof": "Wojownik", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Tuzmer", "Stare SioĹ‚o", "Sucha Dolina", "PĹ‚askowyĹĽ Arpan", "Oaza Siedmiu WichrĂłw", "Ruiny Pustynnych Burz", "Pustynne Katakumby", "Pustynne Katakumby - sala 2", "Komnaty Bezdusznych - sala 1", "Komnaty Bezdusznych - sala 2", "Katakumby GwaĹ‚townych Ĺšmierci", "Wschodni Tunel JaĹşni", "Korytarz Porzuconych Nadziei", "Zachodni Tunel JaĹşni", "Katakumby PolegĹ‚ych LegionistĂłw", "Grobowiec Seta"], "resp": {"Grobowiec Seta": [[48, 57]]}},
+        {"name": "Neferkar Set", "level": 274, "prof": "Wojownik", "limit": 999, "pvp": "włączone", "path": ["Tuzmer", "Stare Sioło", "Sucha Dolina", "Płaskowyż Arpan", "Oaza Siedmiu Wichrów", "Ruiny Pustynnych Burz", "Pustynne Katakumby", "Pustynne Katakumby - sala 2", "Komnaty Bezdusznych - sala 1", "Komnaty Bezdusznych - sala 2", "Katakumby Gwałtownych Śmierci", "Wschodni Tunel Jaźni", "Korytarz Porzuconych Nadziei", "Zachodni Tunel Jaźni", "Katakumby Poległych Legionistów", "Grobowiec Seta"], "resp": {"Grobowiec Seta": [[48, 57]]}},
 
-        {"name": "Chaegd Agnrakh", "level": 280, "prof": "Wojownik", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Tuzmer", "Port Tuzmer", "Wioska Rybacka", "Ciche Rumowiska", "Dolina Suchych Ĺez", "SkaĹ‚y UmarĹ‚ych", "Smocze Skalisko", "Jaskinia PrĂłby", "Jaskinia Odwagi", "Smocze Skalisko", "Pustynia Shaiharrud - zachĂłd", "Pustynia Schaiharrud - wschĂłd", "ĹšwiÄ…tynia Hebrehotha - przedsionek", "ĹšwiÄ…tynia Hebrehotha - sala ofiary", "ĹšwiÄ…tynia Hebrehotha - sala czciciela"], "resp": {"ĹšwiÄ…tynia Hebrehotha - sala czciciela": [[24, 22]]}},
+        {"name": "Chaegd Agnrakh", "level": 280, "prof": "Wojownik", "limit": 999, "pvp": "włączone", "path": ["Tuzmer", "Port Tuzmer", "Wioska Rybacka", "Ciche Rumowiska", "Dolina Suchych Łez", "Skały Umarłych", "Smocze Skalisko", "Jaskinia Próby", "Jaskinia Odwagi", "Smocze Skalisko", "Pustynia Shaiharrud - zachód", "Pustynia Schaiharrud - wschód", "Świątynia Hebrehotha - przedsionek", "Świątynia Hebrehotha - sala ofiary", "Świątynia Hebrehotha - sala czciciela"], "resp": {"Świątynia Hebrehotha - sala czciciela": [[24, 22]]}},
 
-        {"name": "Vaenra Charkhaam", "level": 280, "prof": "Mag", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Tuzmer", "Port Tuzmer", "Wioska Rybacka", "Ciche Rumowiska", "Dolina Suchych Ĺez", "SkaĹ‚y UmarĹ‚ych", "Smocze Skalisko", "Jaskinia PrĂłby", "Jaskinia Odwagi", "Smocze Skalisko", "Pustynia Shaiharrud - zachĂłd", "Pustynia Schaiharrud - wschĂłd", "ĹšwiÄ…tynia Hebrehotha - przedsionek", "ĹšwiÄ…tynia Hebrehotha - sala ofiary"], "resp": {"ĹšwiÄ…tynia Hebrehotha - sala ofiary": [[26, 24]]}},
+        {"name": "Vaenra Charkhaam", "level": 280, "prof": "Mag", "limit": 999, "pvp": "włączone", "path": ["Tuzmer", "Port Tuzmer", "Wioska Rybacka", "Ciche Rumowiska", "Dolina Suchych Łez", "Skały Umarłych", "Smocze Skalisko", "Jaskinia Próby", "Jaskinia Odwagi", "Smocze Skalisko", "Pustynia Shaiharrud - zachód", "Pustynia Schaiharrud - wschód", "Świątynia Hebrehotha - przedsionek", "Świątynia Hebrehotha - sala ofiary"], "resp": {"Świątynia Hebrehotha - sala ofiary": [[26, 24]]}},
 
-        {"name": "Terrozaur", "level": 280, "prof": "Tancerz Ostrzy", "limit": 293, "pvp": "wĹ‚Ä…czone", "path": ["Tuzmer", "Port Tuzmer", "Wioska Rybacka", "Ciche Rumowiska", "Dolina Suchych Ĺez", "SkaĹ‚y UmarĹ‚ych", "Pustynia Shaiharrud - zachĂłd", "Jaskinia Smoczej Paszczy p.1", "Jaskinia Smoczej Paszczy p.2"], "resp": {"Jaskinia Smoczej Paszczy p.2": [[18, 22]]}},
+        {"name": "Terrozaur", "level": 280, "prof": "Tancerz Ostrzy", "limit": 293, "pvp": "włączone", "path": ["Tuzmer", "Port Tuzmer", "Wioska Rybacka", "Ciche Rumowiska", "Dolina Suchych Łez", "Skały Umarłych", "Pustynia Shaiharrud - zachód", "Jaskinia Smoczej Paszczy p.1", "Jaskinia Smoczej Paszczy p.2"], "resp": {"Jaskinia Smoczej Paszczy p.2": [[18, 22]]}},
 
-        {"name": "Nymphemonia", "level": 287, "prof": "Ĺowca", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Thuzal", "GraĹ„ Gawronich PiĂłr", "Gvar Hamryd", "Matecznik Szelestu", "Drzewo ĹĽycia p.1", "Drzewo ĹĽycia p.2", "Drzewo ĹĽycia p.3"], "resp": {"Drzewo ĹĽycia p.3": [[4, 13]]}},
+        {"name": "Nymphemonia", "level": 287, "prof": "Łowca", "limit": 999, "pvp": "włączone", "path": ["Thuzal", "Grań Gawronich Piór", "Gvar Hamryd", "Matecznik Szelestu", "Drzewo życia p.1", "Drzewo życia p.2", "Drzewo życia p.3"], "resp": {"Drzewo życia p.3": [[4, 13]]}},
 
-        {"name": "Zorin", "level": 300, "prof": "Tancerz Ostrzy", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Thuzal", "Rozlewisko Kai", "Korytarz Zagubionych MarzeĹ„", "PrzejĹ›cie WĹ‚adcĂłw Mrozu", "Sala MroĹşnych SzeptĂłw"], "resp": {"Sala MroĹşnych SzeptĂłw": [[20, 42]]}},
+        {"name": "Zorin", "level": 300, "prof": "Tancerz Ostrzy", "limit": 999, "pvp": "włączone", "path": ["Thuzal", "Rozlewisko Kai", "Korytarz Zagubionych Marzeń", "Przejście Władców Mrozu", "Sala Mroźnych Szeptów"], "resp": {"Sala Mroźnych Szeptów": [[20, 42]]}},
 
-        {"name": "Furion", "level": 300, "prof": "Ĺowca", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Thuzal", "Rozlewisko Kai", "Korytarz Zagubionych MarzeĹ„", "PrzejĹ›cie WĹ‚adcĂłw Mrozu", "Sala MroĹşnych StrzaĹ‚"], "resp": {"Sala MroĹşnych StrzaĹ‚": [[31, 21]]}},
+        {"name": "Furion", "level": 300, "prof": "Łowca", "limit": 999, "pvp": "włączone", "path": ["Thuzal", "Rozlewisko Kai", "Korytarz Zagubionych Marzeń", "Przejście Władców Mrozu", "Sala Mroźnych Strzał"], "resp": {"Sala Mroźnych Strzał": [[31, 21]]}},
 
-        {"name": "Artenius", "level": 300, "prof": "Mag", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Thuzal", "Rozlewisko Kai", "Korytarz Zagubionych MarzeĹ„", "PrzejĹ›cie WĹ‚adcĂłw Mrozu", "Sala Lodowej Magii"], "resp": {"Sala Lodowej Magii": [[36, 46]]}}
+        {"name": "Artenius", "level": 300, "prof": "Mag", "limit": 999, "pvp": "włączone", "path": ["Thuzal", "Rozlewisko Kai", "Korytarz Zagubionych Marzeń", "Przejście Władców Mrozu", "Sala Lodowej Magii"], "resp": {"Sala Lodowej Magii": [[36, 46]]}}
 
     ];
 
@@ -960,31 +1024,31 @@ setTimeout(() => window.DatabaseModule.initDatabases(), 3000);
 
     // ==========================================
 
-    // BAZA DANYCH KOLOSĂ“W (Zaktualizowana o punkty 'resp')
+    // BAZA DANYCH KOLOSÓW (Zaktualizowana o punkty 'resp')
 
     // ==========================================
 
     const kolosyData = [
 
-        {"name": "Mamlambo", "level": 36, "prof": "Tancerz Ostrzy", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Torneg", "LeĹ›na PrzeĹ‚Ä™cz", "Tygrysia Polana", "Dzikie PagĂłrki", "Pradawne WzgĂłrze PrzodkĂłw", "ĹšwiÄ…tynia Mzintlavy"], "resp": {"ĹšwiÄ…tynia Mzintlavy": [[32, 14]]}},
+        {"name": "Mamlambo", "level": 36, "prof": "Tancerz Ostrzy", "limit": 999, "pvp": "włączone", "path": ["Torneg", "Leśna Przełęcz", "Tygrysia Polana", "Dzikie Pagórki", "Pradawne Wzgórze Przodków", "Świątynia Mzintlavy"], "resp": {"Świątynia Mzintlavy": [[32, 14]]}},
 
-        {"name": "Regulus MÄ™tnooki", "level": 63, "prof": "Wojownik", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Ithan", "Porzucone Pasieki", "Wioska Pszczelarzy", "Dom Jofusa", "Dom Jofusa - piwnica", "Zakurzone przejĹ›cie", "Radosna Polana", "Pieczara SzaleĹ„cĂłw - sala 1", "Pieczara SzaleĹ„cĂłw - sala 2", "Pieczara SzaleĹ„cĂłw - sala 3", "Pieczara SzaleĹ„cĂłw - sala 4", "Pieczara SzaleĹ„cĂłw - przedsionek", "Pieczara SzaleĹ„cĂłw - sala Regulusa MÄ™tnookiego"], "resp": {"Pieczara SzaleĹ„cĂłw - sala Regulusa MÄ™tnookiego": [[31, 9]]}},
+        {"name": "Regulus Mętnooki", "level": 63, "prof": "Wojownik", "limit": 999, "pvp": "włączone", "path": ["Ithan", "Porzucone Pasieki", "Wioska Pszczelarzy", "Dom Jofusa", "Dom Jofusa - piwnica", "Zakurzone przejście", "Radosna Polana", "Pieczara Szaleńców - sala 1", "Pieczara Szaleńców - sala 2", "Pieczara Szaleńców - sala 3", "Pieczara Szaleńców - sala 4", "Pieczara Szaleńców - przedsionek", "Pieczara Szaleńców - sala Regulusa Mętnookiego"], "resp": {"Pieczara Szaleńców - sala Regulusa Mętnookiego": [[31, 9]]}},
 
-        {"name": "Amaimon SoplorÄ™ki", "level": 83, "prof": "Paladyn", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Andarum Ilami", "SkaĹ‚y MroĹşnych ĹšpiewĂłw", "Zmarzlina Amaimona SoplorÄ™kiego - przedsionek", "Zmarzlina Amaimona SoplorÄ™kiego - sala"], "resp": {"Zmarzlina Amaimona SoplorÄ™kiego - sala": [[33, 16]]}},
+        {"name": "Amaimon Soploręki", "level": 83, "prof": "Paladyn", "limit": 999, "pvp": "włączone", "path": ["Andarum Ilami", "Skały Mroźnych Śpiewów", "Zmarzlina Amaimona Soplorękiego - przedsionek", "Zmarzlina Amaimona Soplorękiego - sala"], "resp": {"Zmarzlina Amaimona Soplorękiego - sala": [[33, 16]]}},
 
-        {"name": "Umibozu", "level": 114, "prof": "Tancerz Ostrzy", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Tuzmer", "Port Tuzmer", "Archipelag Bremus An", "GĹ‚Ä™bia PrzeklÄ™tych Fal - przedsionek", "GĹ‚Ä™bia PrzeklÄ™tych Fal - sala"], "resp": {"GĹ‚Ä™bia PrzeklÄ™tych Fal - sala": [[49, 9]]}},
+        {"name": "Umibozu", "level": 114, "prof": "Tancerz Ostrzy", "limit": 999, "pvp": "włączone", "path": ["Tuzmer", "Port Tuzmer", "Archipelag Bremus An", "Głębia Przeklętych Fal - przedsionek", "Głębia Przeklętych Fal - sala"], "resp": {"Głębia Przeklętych Fal - sala": [[49, 9]]}},
 
-        {"name": "Vashkar", "level": 144, "prof": "Ĺowca", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["LiĹ›ciaste Rozstaje", "Jezioro WaĹĽek", "PrzepaĹ›Ä‡ Zadumy - przedsionek", "PrzepaĹ›Ä‡ Zadumy - sala"], "resp": {"PrzepaĹ›Ä‡ Zadumy - sala": [[21, 24]]}},
+        {"name": "Vashkar", "level": 144, "prof": "Łowca", "limit": 999, "pvp": "włączone", "path": ["Liściaste Rozstaje", "Jezioro Ważek", "Przepaść Zadumy - przedsionek", "Przepaść Zadumy - sala"], "resp": {"Przepaść Zadumy - sala": [[21, 24]]}},
 
-        {"name": "Hydrokora Chimeryczna", "level": 167, "prof": "Wojownik", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Dziki Zagajnik", "PrzepaĹ›Ä‡ Aguti", "Las PamiÄ™ci Nikantosa", "PrzeĹ‚Ä™cz Krwistego PosĹ‚aĹ„ca", "CzeluĹ›Ä‡ Chimerycznej Natury - przedsionek", "CzeluĹ›Ä‡ Chimerycznej Natury - sala"], "resp": {"CzeluĹ›Ä‡ Chimerycznej Natury - sala": [[36, 22]]}},
+        {"name": "Hydrokora Chimeryczna", "level": 167, "prof": "Wojownik", "limit": 999, "pvp": "włączone", "path": ["Dziki Zagajnik", "Przepaść Aguti", "Las Pamięci Nikantosa", "Przełęcz Krwistego Posłańca", "Czeluść Chimerycznej Natury - przedsionek", "Czeluść Chimerycznej Natury - sala"], "resp": {"Czeluść Chimerycznej Natury - sala": [[36, 22]]}},
 
-        {"name": "Lulukav", "level": 190, "prof": "Mag", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Thuzal", "GraĹ„ Gawronich PiĂłr", "BĹ‚ota Sham Al", "Ruiny Tass Zhil", "Krypty Bezsennych p.1 s.1", "Krypty Bezsennych p.2 s.2", "Grobowiec PrzeklÄ™tego Krakania - przedsionek", "Grobowiec PrzeklÄ™tego Krakania - sala"], "resp": {"Grobowiec PrzeklÄ™tego Krakania - sala": [[36, 16]]}},
+        {"name": "Lulukav", "level": 190, "prof": "Mag", "limit": 999, "pvp": "włączone", "path": ["Thuzal", "Grań Gawronich Piór", "Błota Sham Al", "Ruiny Tass Zhil", "Krypty Bezsennych p.1 s.1", "Krypty Bezsennych p.2 s.2", "Grobowiec Przeklętego Krakania - przedsionek", "Grobowiec Przeklętego Krakania - sala"], "resp": {"Grobowiec Przeklętego Krakania - sala": [[36, 16]]}},
 
-        {"name": "Arachin PodstÄ™pny", "level": 213, "prof": "Tancerz Ostrzy", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Torneg", "Zapomniany Las", "RozlegĹ‚a RĂłwnina", "Dolina Gniewu", "Terytorium Furii", "Zapadlisko Zniewolonych", "PajÄ™czy Las", "Grota PrzebiegĹ‚ego Tkacza - przedsionek", "Grota PrzebiegĹ‚ego Tkacza - sala"], "resp": {"Grota PrzebiegĹ‚ego Tkacza - sala": [[27, 11]]}},
+        {"name": "Arachin Podstępny", "level": 213, "prof": "Tancerz Ostrzy", "limit": 999, "pvp": "włączone", "path": ["Torneg", "Zapomniany Las", "Rozległa Równina", "Dolina Gniewu", "Terytorium Furii", "Zapadlisko Zniewolonych", "Pajęczy Las", "Grota Przebiegłego Tkacza - przedsionek", "Grota Przebiegłego Tkacza - sala"], "resp": {"Grota Przebiegłego Tkacza - sala": [[27, 11]]}},
 
-        {"name": "Reuzen", "level": 244, "prof": "Wojownik", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Mythar", "Urwisko ZdrewniaĹ‚ych", "WÄ…wĂłz Zakorzenionych Dusz", "Regiel ZabĹ‚Ä…kanych", "Grota MartwodrzewĂłw - przedsionek", "Grota MartwodrzewĂłw - sala"], "resp": {"Grota MartwodrzewĂłw - sala": [[24, 27]]}},
+        {"name": "Reuzen", "level": 244, "prof": "Wojownik", "limit": 999, "pvp": "włączone", "path": ["Mythar", "Urwisko Zdrewniałych", "Wąwóz Zakorzenionych Dusz", "Regiel Zabłąkanych", "Grota Martwodrzewów - przedsionek", "Grota Martwodrzewów - sala"], "resp": {"Grota Martwodrzewów - sala": [[24, 27]]}},
 
-        {"name": "Wernoradzki Drakolisz", "level": 279, "prof": "Mag", "limit": 999, "pvp": "wĹ‚Ä…czone", "path": ["Ruiny Pustynnych Burz", "Pustynne Katakumby", "Pustynne Katakumby - sala 2", "Komnaty Bezdusznych - sala 1", "Komnaty Bezdusznych - sala 2", "Katakumby GwaĹ‚townej Ĺšmierci", "Wschodni Tunel JaĹşni", "Katakumby Krwawych Wypraw", "Katakumby Antycznego Gniewu - przedsionek", "Katakumby Antycznego Gniewu - sala"], "resp": {"Katakumby Antycznego Gniewu - sala": [[16, 14]]}}
+        {"name": "Wernoradzki Drakolisz", "level": 279, "prof": "Mag", "limit": 999, "pvp": "włączone", "path": ["Ruiny Pustynnych Burz", "Pustynne Katakumby", "Pustynne Katakumby - sala 2", "Komnaty Bezdusznych - sala 1", "Komnaty Bezdusznych - sala 2", "Katakumby Gwałtownej Śmierci", "Wschodni Tunel Jaźni", "Katakumby Krwawych Wypraw", "Katakumby Antycznego Gniewu - przedsionek", "Katakumby Antycznego Gniewu - sala"], "resp": {"Katakumby Antycznego Gniewu - sala": [[16, 14]]}}
 
     ];
 
@@ -1003,125 +1067,125 @@ let opacityValue = 0.95;
 
 
    window.defaultExpProfiles = [
-      {"name": "Grobowce (18lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 197)", "mobCount": 197, "maps": ["Grobowiec Rodziny Tywelta", "Grobowiec Rodziny Tywelta p.1", "Grobowiec Rodziny Tywelta p.2", "Krypta Rodu Heregata", "Krypta Rodu Heregata p.1", "Krypta Rodu Heregata p.2 - lewe skrzydĹ‚o", "Krypta Rodu Heregata p.2 - prawe skrzydĹ‚o"]},
-      {"name": "MrĂłwki (20lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 192)", "mobCount": 192, "maps": ["Kopiec MrĂłwek", "Kopiec MrĂłwek p.1", "Kopiec MrĂłwek p.2", "Mrowisko", "Mrowisko p.1", "Mrowisko p.2"]},
-      {"name": "Pumy i tygrysy (21lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 255)", "mobCount": 255, "maps": ["Jaskinia Dzikich KotĂłw", "KryjĂłwka Dzikich KotĂłw", "LeĹ›na PrzeĹ‚Ä™cz", "Tygrysia Polana"]},
-      {"name": "NiedĹşwiedzie i nietoperze (23lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 247)", "mobCount": 247, "maps": ["Dziewicza Knieja", "Siedlisko Nietoperzy p.1", "Siedlisko Nietoperzy p.2", "Siedlisko Nietoperzy p.3 - sala 1", "Siedlisko Nietoperzy p.3 - sala 2", "Siedlisko Nietoperzy p.4", "Siedlisko Nietoperzy p.5"]},
-      {"name": "Bazyliszki (26lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 96)", "mobCount": 96, "maps": ["Las Tropicieli"]},
-      {"name": "Mulusy (28lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 306)", "mobCount": 306, "maps": ["Dzikie PagĂłrki", "Osada MulusĂłw", "Pradawne WzgĂłrze PrzodkĂłw"]},
-      {"name": "Demony (29lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 242)", "mobCount": 242, "maps": ["PrzeklÄ™ta StraĹĽnica", "PrzeklÄ™ta StraĹĽnica - podziemia p.1 s.1", "PrzeklÄ™ta StraĹĽnica - podziemia p.1 s.2", "PrzeklÄ™ta StraĹĽnica - podziemia p.2 s.1", "PrzeklÄ™ta StraĹĽnica - podziemia p.2 s.2", "PrzeklÄ™ta StraĹĽnica - podziemia p.2 s.3", "PrzeklÄ™ta StraĹĽnica p.1", "PrzeklÄ™ta StraĹĽnica p.2"]},
-      {"name": "Rozbojnicy (32lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 185)", "mobCount": 185, "maps": ["Dolina RozbĂłjnikĂłw", "Kamienna KryjĂłwka", "Namiot BandytĂłw", "PagĂłrki ĹupieĹĽcĂłw", "PrzeĹ‚Ä™cz ĹotrzykĂłw", "SkĹ‚ad GrabieĹĽcĂłw"]},
-      {"name": "Gobliny (34lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 120)", "mobCount": 120, "maps": ["Jaskinia Pogardy", "Las GoblinĂłw", "Morwowe PrzejĹ›cie", "PodmokĹ‚a Dolina"]},
-      {"name": "Puffy (37lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 140)", "mobCount": 140, "maps": ["Pieczara Niepogody p.1", "Pieczara Niepogody p.2 - sala 1", "Pieczara Niepogody p.2 - sala 2", "Pieczara Niepogody p.3", "Pieczara Niepogody p.4", "Pieczara Niepogody p.5"]},
-      {"name": "Dziki (40lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 155)", "mobCount": 155, "maps": ["Pieczara Kwiku - sala 1", "Pieczara Kwiku - sala 2", "Racicowy Matecznik", "Spokojne PrzejĹ›cie", "Ukwiecona Skarpa"]},
-      {"name": "Ghule (40lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 165)", "mobCount": 165, "maps": ["Ghuli Mogilnik", "Polana ĹšcierwojadĂłw", "Zapomniany Grobowiec p.1", "Zapomniany Grobowiec p.2", "Zapomniany Grobowiec p.3", "Zapomniany Grobowiec p.4", "Zapomniany Grobowiec p.5"]},
-      {"name": "Wilcze plemiÄ™ (44lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 175)", "mobCount": 175, "maps": ["Krasowa Pieczara p.1", "Krasowa Pieczara p.2", "Krasowa Pieczara p.3", "Legowisko Wilczej Hordy", "WarczÄ…ce Osuwiska", "Wilcza Nora p.1", "Wilcza Nora p.2", "Wilcza Skarpa"]},
-      {"name": "Tolloki (45lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 110)", "mobCount": 110, "maps": ["Skalne Turnie", "Skarpiska TollokĂłw"]},
-      {"name": "Zbiry (46lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 145)", "mobCount": 145, "maps": ["Ciemnica SzubrawcĂłw p.1 - sala 1", "Ciemnica SzubrawcĂłw p.1 - sala 2", "Ciemnica SzubrawcĂłw p.1 - sala 3", "Stary Kupiecki Trakt", "Stukot Widmowych KĂłĹ‚", "Wertepy RzezimieszkĂłw"]},
-      {"name": "Orkowie (47lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 210)", "mobCount": 210, "maps": ["Nawiedzony Jar", "Opuszczony Bastion", "Podziemne PrzejĹ›cie p.1", "Podziemne PrzejĹ›cie p.2", "Stare Wyrobisko p.1", "Stare Wyrobisko p.2", "Stare Wyrobisko p.3", "Stare Wyrobisko p.4", "Stare Wyrobisko p.5", "Zburzona Twierdza", "Zrujnowana WieĹĽa", "ĹšwiszczÄ…ca Grota p.1", "ĹšwiszczÄ…ca Grota p.2", "ĹšwiszczÄ…ca Grota p.3", "ĹšwiszczÄ…ca Grota p.4"]},
-      {"name": "Przesmyk (50lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 130)", "mobCount": 130, "maps": ["Migotliwa Pieczara", "Mroczna Pieczara p.0", "Mroczna Pieczara p.1 - sala 1", "Mroczna Pieczara p.1 - sala 2", "Mroczna Pieczara p.1 - sala 3", "Mroczna Pieczara p.2", "Mroczny Przesmyk", "Zapomniany Szlak"]},
-      {"name": "Galarety (51lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 95)", "mobCount": 95, "maps": ["Mokra Grota p.1", "Mokra Grota p.1 - boczny korytarz", "Mokra Grota p.1 - przeĹ‚az", "Mokra Grota p.2", "Mokra Grota p.2 - korytarz"]},
-      {"name": "PokÄ…tniki (52lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 80)", "mobCount": 80, "maps": ["Grota Bezszelestnych KrokĂłw - sala 1", "Grota Bezszelestnych KrokĂłw - sala 2", "Grota Bezszelestnych KrokĂłw - sala 3"]},
-      {"name": "Koboldy (54lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 115)", "mobCount": 115, "maps": ["Lazurytowa Grota p.1", "Lazurytowa Grota p.2", "Lazurytowa Grota p.3 - sala 1", "Lazurytowa Grota p.3 - sala 2", "Lazurytowa Grota p.4"]},
-      {"name": "Ĺ»Ä…dĹ‚aki (58lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 142)", "mobCount": 142, "maps": ["Kopalnia KapiÄ…cego Miodu p.1 - sala 1", "Kopalnia KapiÄ…cego Miodu p.1 - sala 2", "Kopalnia KapiÄ…cego Miodu p.2 - sala 1", "Kopalnia KapiÄ…cego Miodu p.2 - sala 2", "Kopalnia KapiÄ…cego Miodu p.2 - sala Owadziej Matki", "Kopalnia KapiÄ…cego Miodu p.3", "Porzucone Pasieki"]},
-      {"name": "Bazyliszki (61lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 85)", "mobCount": 85, "maps": ["Pieczara SzaleĹ„cĂłw - sala 1", "Pieczara SzaleĹ„cĂłw - sala 2", "Pieczara SzaleĹ„cĂłw - sala 3", "Pieczara SzaleĹ„cĂłw - sala 4"]},
-      {"name": "Gnolle (64lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 195)", "mobCount": 195, "maps": ["CzeluĹ›Ä‡ Ognistej PoĹĽogi", "Grota Pragnolli p.1", "Grota Pragnolli p.1 - sala 2", "Grota Pragnolli p.2", "Grota Pragnolli p.3", "Jaskinia Gnollich SzamanĂłw - komnata Kozuga", "Jaskinia Gnollich SzamanĂłw p.1", "Jaskinia Gnollich SzamanĂłw p.2", "Jaskinia Gnollich SzamanĂłw p.3", "Namiot Vari Krugera", "Radosna Polana", "Wioska Gnolli"]},
-      {"name": "MrĂłwcza kolonia (66lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 180)", "mobCount": 180, "maps": ["MrĂłwcza Kolonia p.1 - lewy tunel", "MrĂłwcza Kolonia p.1 - prawy tunel", "MrĂłwcza Kolonia p.2 - lewe korytarze", "MrĂłwcza Kolonia p.2 - prawe korytarze", "MrĂłwcza Kolonia p.3 - lewa komora jaj", "MrĂłwcza Kolonia p.3 - prawa komora jaj", "MrĂłwcza Kolonia p.4 - krĂłlewskie gniazdo"]},
-      {"name": "Olbrzymy (67lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 65)", "mobCount": 65, "maps": ["Kamienna Jaskinia - sala 1", "Kamienna Jaskinia - sala 2", "Ukryty Kanion"]},
-      {"name": "Andarum i okolice (70lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 175)", "mobCount": 175, "maps": ["Andarum Ilami", "Cmentarzysko SzerpĂłw", "SkaĹ‚y MroĹşnych ĹšpiewĂłw", "ĹšnieĹĽna Granica"]},
-      {"name": "Jaskiniowe tolloki (71lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 110)", "mobCount": 110, "maps": ["GĹ‚Ä™bokie SkaĹ‚ki p.1", "GĹ‚Ä™bokie SkaĹ‚ki p.2", "GĹ‚Ä™bokie SkaĹ‚ki p.3", "GĹ‚Ä™bokie SkaĹ‚ki p.4", "Zdradzieckie PrzejĹ›cie p.1"]},
-      {"name": "Demilisze (72lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 88)", "mobCount": 88, "maps": ["Krypty Dusz Ĺšniegu p.1", "Krypty Dusz Ĺšniegu p.2", "Krypty Dusz Ĺšniegu p.3", "Krypty Dusz Ĺšniegu p.3 - komnata Lisza"]},
-      {"name": "Mnisi (74lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 125)", "mobCount": 125, "maps": ["ĹšwiÄ…tynia Andarum", "ĹšwiÄ…tynia Andarum - lokum mnichĂłw", "ĹšwiÄ…tynia Andarum - podziemia", "ĹšwiÄ…tynia Andarum - zejĹ›cie lewe", "ĹšwiÄ…tynia Andarum - zejĹ›cie prawe"]},
-      {"name": "Biblioteka Andarum (75lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 92)", "mobCount": 92, "maps": ["ĹšwiÄ…tynia Andarum - biblioteka"]},
-      {"name": "Wodniki (75lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 115)", "mobCount": 115, "maps": ["Moczary Rybiego Oka", "Uroczysko Wodnika", "ĹąrĂłdĹ‚o Narumi"]},
-      {"name": "Magazynierzy (77lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 105)", "mobCount": 105, "maps": ["ĹšwiÄ…tynia Andarum - magazyn p.1", "ĹšwiÄ…tynia Andarum - magazyn p.2", "ĹšwiÄ…tynia Andarum - zbrojownia"]},
-      {"name": "Erem (80lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 165)", "mobCount": 165, "maps": ["Erem Czarnego SĹ‚oĹ„ca p.1 - pĂłĹ‚noc", "Erem Czarnego SĹ‚oĹ„ca p.2", "Erem Czarnego SĹ‚oĹ„ca p.3", "Erem Czarnego SĹ‚oĹ„ca p.3 - poĹ‚udnie", "Erem Czarnego SĹ‚oĹ„ca p.4 - sala 1", "Erem Czarnego SĹ‚oĹ„ca p.4 - sala 2", "Erem Czarnego SĹ‚oĹ„ca p.5"]},
-      {"name": "Minotaury (81lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 105)", "mobCount": 105, "maps": ["Labirynt WyklÄ™tych p.1", "Labirynt WyklÄ™tych p.2 - sala 1", "Labirynt WyklÄ™tych p.2 - sala 2", "Pieczara Czaszek"]},
-      {"name": "DĹ‚awiciele (83lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 95)", "mobCount": 95, "maps": ["WylÄ™garnia ChoukkerĂłw p.1", "WylÄ™garnia ChoukkerĂłw p.2", "WylÄ™garnia ChoukkerĂłw p.3"]},
-      {"name": "MiĹ›ki (83lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 125)", "mobCount": 125, "maps": ["Firnowa Grota p.1", "Firnowa Grota p.2", "Firnowa Grota p.2 s.1", "Lodowa Wyrwa p.1 s.1", "Lodowa Wyrwa p.1 s.2", "Lodowa Wyrwa p.2", "Sala Lodowych Iglic"]},
-      {"name": "Wermonty (85lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 65)", "mobCount": 65, "maps": ["Zdradzieckie PrzejĹ›cie p.2"]},
-      {"name": "Krasnoludy (86lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 145)", "mobCount": 145, "maps": ["Kopalnia Margorii", "Labirynt Margorii", "Margoria", "Margoria - Sala KrĂłlewska"]},
-      {"name": "Darhouny (87lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 75)", "mobCount": 75, "maps": ["Szyb ZdrajcĂłw", "Ĺšlepe Wyrobisko"]},
-      {"name": "Grexy (89 lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 120)", "mobCount": 120, "maps": ["Grota Samotnych Dusz p.1", "Grota Samotnych Dusz p.2", "Grota Samotnych Dusz p.3", "Grota Samotnych Dusz p.3 - sala wyjĹ›ciowa", "Grota Samotnych Dusz p.4", "Grota Samotnych Dusz p.5", "Grota Samotnych Dusz p.6"]},
-      {"name": "Leszy (91lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 115)", "mobCount": 115, "maps": ["KsiÄ™ĹĽycowe Wzniesienie", "LiĹ›ciaste Rozstaje", "Sosnowe Odludzie", "Zapomniany ĹšwiÄ™ty Gaj p.1", "Zapomniany ĹšwiÄ™ty Gaj p.1 - sala 1", "Zapomniany ĹšwiÄ™ty Gaj p.2", "Zapomniany ĹšwiÄ™ty Gaj p.3"]},
-      {"name": "Wieczornice i PoĹ‚udnice (92lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 155)", "mobCount": 155, "maps": ["Kamienna StraĹĽnica - Sala ChwaĹ‚y", "Kamienna StraĹĽnica - Sanktuarium", "Kamienna StraĹĽnica - tunel", "Kamienna StraĹĽnica - wsch. baszta skalna sala p.0", "Kamienna StraĹĽnica - wsch. baszta skalna sala p.1", "Kamienna StraĹĽnica - wsch. baszta zasypany tunel", "Kamienna StraĹĽnica - zach. baszta p.1", "Kamienna StraĹĽnica - zach. baszta p.2", "Mglista Polana Vesy", "PĹ‚aczÄ…ca Grota - sala Lamentu", "PĹ‚aczÄ…ca Grota p.1 - sala 1", "PĹ‚aczÄ…ca Grota p.1 - sala 2", "PĹ‚aczÄ…ca Grota p.2", "PĹ‚aczÄ…ca Grota p.3", "Trupia PrzeĹ‚Ä™cz", "WzgĂłrze PĹ‚aczek"]},
-      {"name": "BĹ‚otniste gady (94lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 95)", "mobCount": 95, "maps": ["Gadzia Kotlina", "ZĹ‚owrogie Bagna"]},
-      {"name": "Gnomy (94lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 155)", "mobCount": 155, "maps": ["Gadzia Kotlina", "Mglista Polana Vesy", "WzgĂłrze PĹ‚aczek", "ZagrzybiaĹ‚e ĹšcieĹĽki p.1 - sala 1", "ZagrzybiaĹ‚e ĹšcieĹĽki p.1 - sala 2", "ZagrzybiaĹ‚e ĹšcieĹĽki p.1 - sala 3", "ZagrzybiaĹ‚e ĹšcieĹĽki p.2", "ZagrzybiaĹ‚e ĹšcieĹĽki p.3", "ZĹ‚owrogie Bagna"]},
-      {"name": "Ogniki (96lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 75)", "mobCount": 75, "maps": ["Gadzia Kotlina", "ZĹ‚owrogie Bagna"]},
-      {"name": "Centaury (98lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 135)", "mobCount": 135, "maps": ["BĹ‚Ä™dny Szlak", "Dolina CentaurĂłw", "Iglaste ĹšcieĹĽki", "OstÄ™py Szalbierskich LasĂłw", "Selva Oscura", "ZawiĹ‚y BĂłr"]},
-      {"name": "MaĹ‚e gady i pĹ‚azy (99lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 85)", "mobCount": 85, "maps": ["OstÄ™py Szalbierskich LasĂłw", "Selva Oscura"]},
-      {"name": "Bandyci (100lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 115)", "mobCount": 115, "maps": ["Cienisty BĂłr", "Las DziwĂłw", "OstÄ™py Szalbierskich LasĂłw"]},
-      {"name": "Mykonidy (102lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 125)", "mobCount": 125, "maps": ["Lodowa Sala", "PrzejĹ›cie Lodowatego Wiatru", "PrzejĹ›cie Magicznego Mrozu", "PrzejĹ›cie ZamarzniÄ™tych KoĹ›ci", "Sala Lodowatego Wiatru", "Sala Magicznego Mrozu", "Sala ZamarzniÄ™tych KoĹ›ci", "ĹšnieĹĽna Grota p.2", "ĹšnieĹĽna Grota p.3"]},
-      {"name": "Molochy (103lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 95)", "mobCount": 95, "maps": ["Podziemia Zniszczonej WieĹĽy p.2", "Podziemia Zniszczonej WieĹĽy p.3", "Podziemia Zniszczonej WieĹĽy p.4", "Podziemia Zniszczonej WieĹĽy p.5"]},
-      {"name": "DwugĹ‚owe olbrzymy (105lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 75)", "mobCount": 75, "maps": ["PrzeĹ‚az olbrzymĂłw", "Selva Oscura", "Smocza Jaskinia", "Smocze GĂłry"]},
-      {"name": "Gady i pĹ‚azy (106lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 105)", "mobCount": 105, "maps": ["Solny Szyb p.3", "ZabĹ‚ocona Jama p.1 - sala 1", "ZabĹ‚ocona Jama p.1 - sala 2", "ZabĹ‚ocona Jama p.2 - sala 1", "ZabĹ‚ocona Jama p.2 - sala 3"]},
-      {"name": "Alghule (111lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 95)", "mobCount": 95, "maps": ["Skalne Cmentarzysko p.1", "Skalne Cmentarzysko p.2", "Skalne Cmentarzysko p.3", "Skalne Cmentarzysko p.4"]},
-      {"name": "Szkielety-koty (111lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 85)", "mobCount": 85, "maps": ["Grobowiec NieznajÄ…cych Spokoju", "PĹ‚askowyĹĽ Arpan", "Sucha Dolina"]},
-      {"name": "Mumie (114lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 145)", "mobCount": 145, "maps": ["Ciche Rumowiska", "Dolina Suchych Ĺez", "Oaza Siedmiu WichrĂłw", "Piramida Pustynnego WĹ‚adcy p.1", "Piramida Pustynnego WĹ‚adcy p.2", "Piramida Pustynnego WĹ‚adcy p.3", "ZĹ‚ote Piaski"]},
-      {"name": "KaĹ‚amarnice (118lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 65)", "mobCount": 65, "maps": ["Archipelag Bremus An", "Jama Morskiej Macki p.1 - sala 1", "Jama Morskiej Macki p.1 - sala 2", "Jama Morskiej Macki p.1 - sala 3"]},
-      {"name": "Ingotia (121lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 255)", "mobCount": 255, "maps": ["Korytarze WygnaĹ„cĂłw p.1 - Bezdenne PrzepaĹ›ci", "Korytarze WygnaĹ„cĂłw p.1 - Hala OdszczepieĹ„cĂłw", "Korytarze WygnaĹ„cĂłw p.1 - Jaskinia Zagubionych", "Korytarze WygnaĹ„cĂłw p.1 - Komora Opuszczonych", "Korytarze WygnaĹ„cĂłw p.1 - Sala Ech", "Korytarze WygnaĹ„cĂłw p.1 - Sala Szlachetnych", "Korytarze WygnaĹ„cĂłw p.2 - Komnata WygnaĹ„cĂłw", "Korytarze WygnaĹ„cĂłw p.2 - Komora Budowniczego", "Korytarze WygnaĹ„cĂłw p.2 - Sala Ĺ»Ä…dzy", "Korytarze WygnaĹ„cĂłw p.3 - Komnata PrzeklÄ™tego Daru", "Twierdza RogogĹ‚owych - Sala Byka", "Wyspa Ingotia"]},
-      {"name": "Kraby (122lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 55)", "mobCount": 55, "maps": ["Wyspa Rem"]},
-      {"name": "Caneum (124lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 155)", "mobCount": 155, "maps": ["Piaskowa PuĹ‚apka - Grota Piaskowej Ĺšmierci", "Piaskowa PuĹ‚apka p.1 - sala 1", "Piaskowa PuĹ‚apka p.1 - sala 2", "Piaskowa PuĹ‚apka p.1 - sala 3", "Piaskowa PuĹ‚apka p.1 - sala 4", "Wyspa Caneum"]},
-      {"name": "Magradit (127lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 125)", "mobCount": 125, "maps": ["Wulkan Politraki p.1 - sala 1", "Wulkan Politraki p.1 - sala 2", "Wulkan Politraki p.1 - sala 3", "Wulkan Politraki p.2 - sala 1", "Wulkan Politraki p.2 - sala 2"]},
-      {"name": "Wraki (127lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 85)", "mobCount": 85, "maps": ["Grota TrzeszczÄ…cych KoĹ›ci p.1 - sala 1", "Grota TrzeszczÄ…cych KoĹ›ci p.1 - sala 2", "Wrak statku", "Wyspa WrakĂłw"]},
-      {"name": "Pajaki (129lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 165)", "mobCount": 165, "maps": ["Szlak Thorpa p.1", "Szlak Thorpa p.2", "Szlak Thorpa p.3", "Szlak Thorpa p.4", "Szlak Thorpa p.5", "Szlak Thorpa p.6"]},
-      {"name": "Piraci (130lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 205)", "mobCount": 205, "maps": ["Korsarska Nora - sala 1", "Korsarska Nora - sala 2", "Korsarska Nora - sala 3", "Korsarska Nora - sala 4", "Korsarska Nora - sala 5", "Korsarska Nora - sala 6", "Korsarska Nora - statek", "Korsarska Nora - wschodni przeĹ‚az", "Korsarska Nora - zachodni przeĹ‚az", "Ukryta Grota Morskich DiabĹ‚Ăłw", "Ukryta Grota Morskich DiabĹ‚Ăłw - arsenaĹ‚", "Ukryta Grota Morskich DiabĹ‚Ăłw - korytarz", "Ukryta Grota Morskich DiabĹ‚Ăłw - magazyn", "Ukryta Grota Morskich DiabĹ‚Ăłw - siedziba", "Ukryta Grota Morskich DiabĹ‚Ăłw - skarbiec"]},
-      {"name": "Piaskowi niewolnicy (133lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 166)", "mobCount": 166, "maps": ["Dolina Pustynnych KrÄ™gĂłw", "Piachy Zniewolonych", "Piaskowa GÄ™stwina", "Piaszczysta Grota p.1 - sala 1", "Piaszczysta Grota p.1 - sala 2", "Ruchome Piaski"]},
-      {"name": "Korredy (134lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 95)", "mobCount": 95, "maps": ["Kopalnia Ĺ»ĂłĹ‚tego Kruszcu p.1 - sala 1", "Kopalnia Ĺ»ĂłĹ‚tego Kruszcu p.1 - sala 2", "Kopalnia Ĺ»ĂłĹ‚tego Kruszcu p.2 - sala 1", "Kopalnia Ĺ»ĂłĹ‚tego Kruszcu p.2 - sala 2"]},
-      {"name": "Impy (136lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 115)", "mobCount": 115, "maps": ["Chodniki Mrinding", "Chodniki Mrinding p.1 - sala 1", "Chodniki Mrinding p.1 - sala 2", "Chodniki Mrinding p.2 - sala 1", "Chodniki Mrinding p.2 - sala 2"]},
-      {"name": "Ognie (137lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 85)", "mobCount": 85, "maps": ["Ognista Studnia p.1", "ĹšcieĹĽki Erebeth p.2 - sala 1", "ĹšcieĹĽki Erebeth p.2 - sala 2", "ĹšcieĹĽki Erebeth p.3"]},
-      {"name": "Ogniste golemy (138lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 105)", "mobCount": 105, "maps": ["KuĹşnia Worundriela - Komnata Ĺ»aru", "KuĹşnia Worundriela p.1", "KuĹşnia Worundriela p.2", "KuĹşnia Worundriela p.3", "Ognista Studnia p.2", "Ognista Studnia p.3"]},
-      {"name": "WaĹĽki (140lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 75)", "mobCount": 75, "maps": ["Jezioro WaĹĽek"]},
-      {"name": "GĂłrale (143lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 185)", "mobCount": 185, "maps": ["Babi WzgĂłrek", "Chata TeĹ›ciowej", "Chata wĂłjta FistuĹ‚y", "Chata wĂłjta FistuĹ‚y p.1", "GĂłralska Pieczara p.1", "GĂłralska Pieczara p.2", "GĂłralska Pieczara p.3", "GĂłralskie PrzejĹ›cie", "WyjÄ…ca Jaskinia", "WyjÄ…cy WÄ…wĂłz"]},
-      {"name": "Berserkerzy (147lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 225)", "mobCount": 225, "maps": ["Cenotaf BerserkerĂłw - przejĹ›cie przodkĂłw", "Cenotaf BerserkerĂłw p.1 - sala 1", "Cenotaf BerserkerĂłw p.1 - sala 2", "Czarcie Oparzeliska", "Grobowiec PrzodkĂłw", "MaĹ‚a Twierdza - korytarz zachodni", "MaĹ‚a Twierdza - magazyn", "MaĹ‚a Twierdza - maĹ‚y barak", "MaĹ‚a Twierdza - mury wschodnie", "MaĹ‚a Twierdza - mury zachodnie", "MaĹ‚a Twierdza - podziemny magazyn", "MaĹ‚a Twierdza - sala gĹ‚Ăłwna", "MaĹ‚a Twierdza - sala wejĹ›ciowa", "MaĹ‚a Twierdza - wieĹĽa straĹĽnicza", "MaĹ‚a Twierdza - wieĹĽa wschodnia", "MaĹ‚a Twierdza - wieĹĽa zachodnia", "MaĹ‚a Twierdza p.1", "Opuszczona Twierdza", "Zaginiona Dolina", "ĹšnieĹĽna Granica"]},
-      {"name": "Duchy (149lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 95)", "mobCount": 95, "maps": ["Korytarze MilczÄ…cych Intryg p.1", "Korytarze MilczÄ…cych Intryg p.2 - sala 1", "Korytarze MilczÄ…cych Intryg p.2 - sala 2", "Korytarze MilczÄ…cych Intryg p.3", "Sala Ukrytych PaktĂłw"]},
-      {"name": "Mechaniczne gobliny (151lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 125)", "mobCount": 125, "maps": ["Lokum ZĹ‚ych GoblinĂłw - warsztat", "Lokum ZĹ‚ych GoblinĂłw - wieĹĽa", "Lokum ZĹ‚ych GoblinĂłw - zejĹ›cie p.1", "Lokum ZĹ‚ych GoblinĂłw p.2 - sala 1", "Lokum ZĹ‚ych GoblinĂłw p.2 - sala 2", "Lokum ZĹ‚ych GoblinĂłw p.3 - sala 1", "Lokum ZĹ‚ych GoblinĂłw p.3 - sala 2"]},
-      {"name": "Dusze (152lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 45)", "mobCount": 45, "maps": ["Upiorna Droga"]},
-      {"name": "Wiedzmy (154lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 175)", "mobCount": 175, "maps": ["Dom Adariel", "Dom Amry", "Dom Atalii", "Dom czarnej magii", "Dom starej czarownicy", "Laboratorium Adariel", "Lochy Tristam", "Magazyn mioteĹ‚", "Ograbiona Ĺ›wiÄ…tynia", "Opuszczone wiÄ™zienie", "Sabatowe GĂłry", "Splugawiona kaplica", "SplÄ…drowana kaplica", "Tristam", "WiedĹşmie KotĹ‚owisko"]},
-      {"name": "Czerwoni orkowie (156lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 205)", "mobCount": 205, "maps": ["Grota Orczej Hordy p.1 s.1", "Grota Orczej Hordy p.1 s.2", "Grota Orczej Hordy p.2 s.1", "Grota Orczej Hordy p.2 s.2", "Grota Orczej Hordy p.2 s.3", "Grota Orczych SzamanĂłw p.1 s.1", "Grota Orczych SzamanĂłw p.1 s.2", "Grota Orczych SzamanĂłw p.2 s.1", "Grota Orczych SzamanĂłw p.2 s.2", "Kurhany ZwyciÄ™ĹĽonych", "Orcza WyĹĽyna", "Osada Czerwonych OrkĂłw"]},
-      {"name": "Dziki zagajnik (161lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 145)", "mobCount": 145, "maps": ["Dziki Zagajnik", "PrzepaĹ›Ä‡ Aguti", "PrzeĹ‚Ä™cz Krwistego PosĹ‚aĹ„ca", "SkaĹ‚y PamiÄ™ci Nikantosa", "Ukryty Kanion"]},
-      {"name": "Kazamaty (163lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 165)", "mobCount": 165, "maps": ["Nawiedzone Kazamaty p.1 s.1", "Nawiedzone Kazamaty p.1 s.2", "Nawiedzone Kazamaty p.2 s.1", "Nawiedzone Kazamaty p.2 s.2", "Nawiedzone Kazamaty p.3 s.1", "Nawiedzone Kazamaty p.3 s.2", "Nawiedzone Kazamaty p.4", "Nawiedzone Komnaty - przedsionek"]},
-      {"name": "Komnaty (170lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 135)", "mobCount": 135, "maps": ["Komnaty Czarnej Gwardii - wschĂłd", "Komnaty Czarnej Gwardii - zachĂłd", "Nawiedzone Komnaty - przedsionek", "Nawiedzone Komnaty - wschĂłd", "Nawiedzone Komnaty - zachĂłd", "Sala DowĂłdcy OrkĂłw", "Sala KrĂłlewska", "Sala Rady OrkĂłw"]},
-      {"name": "KrysztaĹ‚owa grota (174lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 185)", "mobCount": 185, "maps": ["KrysztaĹ‚owa Grota - Sala Smutku", "KrysztaĹ‚owa Grota - przepaĹ›Ä‡", "KrysztaĹ‚owa Grota p.1", "KrysztaĹ‚owa Grota p.2 - sala 1", "KrysztaĹ‚owa Grota p.2 - sala 2", "KrysztaĹ‚owa Grota p.3 - sala 1", "KrysztaĹ‚owa Grota p.3 - sala 2", "KrysztaĹ‚owa Grota p.4", "KrysztaĹ‚owa Grota p.5", "KrysztaĹ‚owa Grota p.6"]},
-      {"name": "Driady (178lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 155)", "mobCount": 155, "maps": ["BĹ‚ota Sham Al", "Drzewo Dusz p.1", "Drzewo Dusz p.2", "Grota Arbor s.1", "Grota Arbor s.2", "GĹ‚usza Ĺšwistu", "Kwieciste Kresy", "Las PorywĂłw Wiatru", "Ruiny Tass Zhil"]},
-      {"name": "Ogry (181lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 115)", "mobCount": 115, "maps": ["Ogrza Kawerna p.1", "Ogrza Kawerna p.2", "Ogrza Kawerna p.3", "Ogrza Kawerna p.4"]},
-      {"name": "Patrycjusze (184lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 145)", "mobCount": 145, "maps": ["Krypty Bezsennych p.1 s.1", "Krypty Bezsennych p.1 s.2", "Krypty Bezsennych p.2 s.1", "Krypty Bezsennych p.2 s.2", "Krypty Bezsennych p.3"]},
-      {"name": "Zmutowane roĹ›liny (187lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 125)", "mobCount": 125, "maps": ["GĹ‚uchy Las", "Kwieciste PrzejĹ›cie", "Skarpa Trzech SĹ‚Ăłw", "Ukwiecona Skarpa", "Zapomniana ĹšcieĹĽyna", "ZĹ‚udny Trakt"]},
-      {"name": "Draki (189lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 105)", "mobCount": 105, "maps": ["Kwieciste Kresy", "PrzysiĂłĹ‚ek ValmirĂłw", "Szczerba SamobĂłjcĂłw", "ĹšnieĹĽna Granica", "ĹšnieĹĽycowy Las"]},
-      {"name": "Mroczny las (192lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 255)", "mobCount": 255, "maps": ["Bezgwiezdna GÄ™stwina", "BĂłr Zagubionych", "Grota SkamieniaĹ‚ej Kory p.1 - sala 1", "Grota SkamieniaĹ‚ej Kory p.1 - sala 2", "Grota SkamieniaĹ‚ej Kory p.2", "Martwy Las", "Starodrzew Przedwiecznych p.1", "Starodrzew Przedwiecznych p.2", "Zbocze Starych BogĂłw", "Ziemia SzepczÄ…cych Cierni", "ZĹ‚udny Trakt"]},
-      {"name": "MyĹ›wiĂłry (196lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 145)", "mobCount": 145, "maps": ["KanaĹ‚y Nithal p.1 - sala 1", "KanaĹ‚y Nithal p.1 - sala 2", "KanaĹ‚y Nithal p.1 - sala 3", "Szlamowe KanaĹ‚y p.2 - sala 1", "Szlamowe KanaĹ‚y p.2 - sala 2", "Szlamowe KanaĹ‚y p.2 - sala 3"]},
-      {"name": "Hurysy (199lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 95)", "mobCount": 95, "maps": ["Mroczne Komnaty", "Przedsionek Kultu", "PrzeraĹĽajÄ…ce Sypialnie"]},
-      {"name": "Heretycy (203lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 165)", "mobCount": 165, "maps": ["Korytarz Ostatnich Nadziei", "Lochy Kultu", "PrzejĹ›cie Oczyszczenia", "Sala Skaryfikacji GrzesznikĂłw", "Sala Spowiedzi KonajÄ…cych", "Sala TysiÄ…ca Ĺšwiec", "Sale Rozdzierania", "Tajemnicza Siedziba"]},
-      {"name": "Furbole (208lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 185)", "mobCount": 185, "maps": ["Dolina Gniewu", "RozlegĹ‚a RĂłwnina", "Terytorium Furii", "WzgĂłrza ObĹ‚Ä™du", "Zalana Grota", "Zapadlisko Zniewolonych", "Zapomniany Las"]},
-      {"name": "PajÄ…ki (212lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 225)", "mobCount": 225, "maps": ["Arachnitopia p.1", "Arachnitopia p.2", "Arachnitopia p.3", "Arachnitopia p.4", "Arachnitopia p.5", "Arachnitopia p.6", "Dolina PajÄ™czych Korytarzy", "OtchĹ‚aĹ„ PajÄ™czych Sieci", "PajÄ™czy Las", "Zapadlisko Zniewolonych"]},
-      {"name": "Drowy (216lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 155)", "mobCount": 155, "maps": ["Dawny PrzeĹ‚az", "Erem Aldiphrina", "Porzucone Noiridum p.2", "Porzucone Noiridum p.3 - sala 1", "Porzucone Noiridum p.3 - sala 2", "Porzucone Noiridum p.3 - sala 3", "Zakazana Grota"]},
-      {"name": "Dridery (219lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 135)", "mobCount": 135, "maps": ["Dawny PrzeĹ‚az", "ZamierzchĹ‚e Arterie p.2 - sala 1", "ZamierzchĹ‚e Arterie p.2 - sala 2", "ZamierzchĹ‚e Arterie p.3", "Zapomniane Sztolnie"]},
-      {"name": "Anuraki (223lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 214)", "mobCount": 214, "maps": ["Bagna UmarĹ‚ych", "GnijÄ…ce Topielisko", "GrzÄ…ska Ziemia", "Mglisty Las", "Smocze Skalisko", "Urwisko Vapora"]},
-      {"name": "Maddoki (227lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 255)", "mobCount": 255, "maps": ["Dolina Potoku Ĺšmierci", "Grota PoroĹ›niÄ™tych StalagmitĂłw p.1 - sala 1", "Grota PoroĹ›niÄ™tych StalagmitĂłw p.1 - sala 2", "Grota PoroĹ›niÄ™tych StalagmitĂłw p.2 - sala 1", "Grota PoroĹ›niÄ™tych StalagmitĂłw p.2 - sala 2", "Jaszczurze Korytarze p.1 - sala 1", "Jaszczurze Korytarze p.1 - sala 2", "Jaszczurze Korytarze p.1 - sala 3", "Jaszczurze Korytarze p.1 - sala 4", "Jaszczurze Korytarze p.2 - sala 1", "Jaszczurze Korytarze p.2 - sala 2", "Jaszczurze Korytarze p.2 - sala 3", "Jaszczurze Korytarze p.2 - sala 4", "Jaszczurze Korytarze p.2 - sala 5", "Mechata Jama p.1", "Mechata Jama p.2", "Mechata Jama p.3", "Nora Jaszczurzych KoszmarĂłw p.1 - sala 1", "Nora Jaszczurzych KoszmarĂłw p.1 - sala 2", "Skryty Azyl", "Strumienie SzemrzÄ…cych WĂłd", "ZawodzÄ…ce Kaskady", "ZĹ‚ota DÄ…browa"]},
-      {"name": "Zagrzybiony las (232lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 205)", "mobCount": 205, "maps": ["Garb PoĹ‚amanych KonarĂłw", "Gardziel Podgnitych MchĂłw p.1", "Gardziel Podgnitych MchĂłw p.2", "Gardziel Podgnitych MchĂłw p.3", "GÄ™ste Sploty", "Zalesiony Step", "ZarosĹ‚e Szczeliny p.1 - sala 1", "ZarosĹ‚e Szczeliny p.1 - sala 2", "ZarosĹ‚e Szczeliny p.1 - sala 3", "ZmurszaĹ‚y ĹÄ™g"]},
-      {"name": "Elgary (236lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 155)", "mobCount": 155, "maps": ["Gaj KsiÄ™ĹĽycowego Blasku", "GĹ‚usza Srebrnego Rogu", "Knieja Lunarnych GĹ‚azĂłw", "Szepty MenhirĂłw", "Zacienione WnÄ™ki p.1 - sala 1", "Zacienione WnÄ™ki p.1 - sala 2", "Zacienione WnÄ™ki p.2 - sala 1", "Zacienione WnÄ™ki p.2 - sala 2", "ZakÄ…tek Nocnych SzelestĂłw"]},
-      {"name": "Drzewce (239lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 215)", "mobCount": 215, "maps": ["Jaskinia Korzennego Czaru p.1 - sala 1", "Jaskinia Korzennego Czaru p.1 - sala 2", "Jaskinia Korzennego Czaru p.1 - sala 3", "Jaskinia Korzennego Czaru p.1 - sala 4", "Jaskinia Korzennego Czaru p.2 - sala 1", "Jaskinia Korzennego Czaru p.2 - sala 2", "Jaskinia Korzennego Czaru p.3", "Krzaczasta Grota p.1 - sala 1", "Krzaczasta Grota p.1 - sala 2", "Krzaczasta Grota p.1 - sala 3", "Krzaczasta Grota p.2 - sala 1", "Krzaczasta Grota p.2 - sala 2", "Krzaczasta Grota p.2 - sala 3", "Piaskowa GÄ™stwina", "Regiel ZabĹ‚Ä…kanych", "Urwisko ZdrewniaĹ‚ych", "WÄ…wĂłz Zakorzenionych Dusz", "ĹąrĂłdĹ‚o Zakorzenionego Ludu"]},
-      {"name": "Bolity (244lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 135)", "mobCount": 135, "maps": ["Dolina Chmur", "ZĹ‚ota GĂłra p.1 - sala 1", "ZĹ‚ota GĂłra p.1 - sala 2", "ZĹ‚ota GĂłra p.1 - sala 3", "ZĹ‚ota GĂłra p.1 - sala 4", "ZĹ‚ota GĂłra p.2 - sala 1", "ZĹ‚ota GĂłra p.2 - sala 2", "ZĹ‚ota GĂłra p.2 - sala 3", "ZĹ‚ota GĂłra p.2 - sala 4", "ZĹ‚ota GĂłra p.3 - sala 1", "ZĹ‚ota GĂłra p.3 - sala 2"]},
-      {"name": "Niecka (248lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 165)", "mobCount": 165, "maps": ["Chantli", "Chantli Cuaitla Citlalina", "Niecka Xiuh Atl", "Oztotl Tzacua p.1 - sala 1", "Oztotl Tzacua p.1 - sala 2", "Oztotl Tzacua p.2 - sala 1", "Oztotl Tzacua p.2 - sala 2", "Oztotl Tzacua p.3 - sala 1", "Oztotl Tzacua p.3 - sala 2", "Oztotl Tzacua p.4 - sala 1", "Oztotl Tzacua p.4 - sala 2", "Oztotl Tzacua p.5"]},
-      {"name": "Maho (253lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 285)", "mobCount": 285, "maps": ["Altepetl Mahoptekan", "Topan p.1", "Topan p.10", "Topan p.11", "Topan p.12", "Topan p.13", "Topan p.2", "Topan p.3", "Topan p.4", "Topan p.5", "Topan p.6", "Topan p.7", "Topan p.8", "Topan p.9", "Wschodni Mictlan p.1", "Wschodni Mictlan p.2", "Wschodni Mictlan p.3", "Wschodni Mictlan p.4", "Wschodni Mictlan p.5", "Wschodni Mictlan p.6", "Wschodni Mictlan p.7", "Wschodni Mictlan p.8", "Zachodni Mictlan p.1", "Zachodni Mictlan p.2", "Zachodni Mictlan p.3", "Zachodni Mictlan p.4", "Zachodni Mictlan p.5", "Zachodni Mictlan p.6", "Zachodni Mictlan p.7", "Zachodni Mictlan p.8", "Zachodni Mictlan p.9"]},
-      {"name": "WiedĹşmowe potwory (258lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 175)", "mobCount": 175, "maps": ["JÄ™czywÄ…wĂłz", "Plugawe Pustkowie", "Pogranicze WisielcĂłw", "Siedlisko Przyjemnej Woni", "Siedlisko Przyjemnej Woni - ĹşrĂłdĹ‚o", "Skalisty Styk", "Zachodnie Zbocze", "Zacisze Zimnych WiatrĂłw"]},
-      {"name": "PotÄ™pione zamczysko (261lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 235)", "mobCount": 235, "maps": ["PotÄ™pione Zamczysko", "PotÄ™pione Zamczysko - gĹ‚Ä™bokie lochy", "PotÄ™pione Zamczysko - korytarz wejĹ›ciowy", "PotÄ™pione Zamczysko - korytarz wschodni", "PotÄ™pione Zamczysko - korytarz zachodni", "PotÄ™pione Zamczysko - lochy wschodnie p.1", "PotÄ™pione Zamczysko - lochy wschodnie p.2", "PotÄ™pione Zamczysko - lochy zachodnie p.1", "PotÄ™pione Zamczysko - lochy zachodnie p.2", "PotÄ™pione Zamczysko - pĂłĹ‚nocna komnata", "PotÄ™pione Zamczysko - sala ofiarna", "PotÄ™pione Zamczysko - wschodnia komnata", "PotÄ™pione Zamczysko - zachodnia komnata", "PotÄ™pione Zamczysko - Ĺ‚Ä…cznik wschodni", "PotÄ™pione Zamczysko - Ĺ‚Ä…cznik zachodni", "WieĹĽa SzlochĂłw p.1", "WieĹĽa SzlochĂłw p.2", "WieĹĽa SzlochĂłw p.3"]},
-      {"name": "Katakumby (268lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 205)", "mobCount": 205, "maps": ["Grobowiec Seta", "Katakumby GwaĹ‚townej Ĺšmierci", "Katakumby Krwawych Wypraw", "Katakumby Odnalezionych SkrytobĂłjcĂłw", "Katakumby OpÄ™tanych Dusz", "Katakumby PolegĹ‚ych LegionistĂłw", "Komnaty Bezdusznych - sala 1", "Komnaty Bezdusznych - sala 2", "Korytarz Porzuconych MarzeĹ„", "Korytarz Porzuconych Nadziei", "Pustynne Katakumby", "Pustynne Katakumby - sala 1", "Pustynne Katakumby - sala 2", "Wschodni Tunel JaĹşni", "Zachodni Tunel JaĹşni"]},
-      {"name": "Pustynia (275lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 265)", "mobCount": 265, "maps": ["Grota PoĹ›wiÄ™cenia", "Jaskinia Odwagi", "Jaskinia Piaskowej Burzy s.1", "Jaskinia Piaskowej Burzy s.2", "Jaskinia PrĂłby", "Jaskinia Smoczej Paszczy p.1", "Jaskinia Smoczej Paszczy p.2", "Jaskinia SzczÄ™k", "Jaskinia SÄ™pa s.1", "Jaskinia SÄ™pa s.2", "Jurta Chaegda", "Jurta Czcicieli", "Jurta Nomadzka", "Namiot BĹ‚ogosĹ‚awionych", "Namiot Gwardii SmokoszczÄ™kich", "Namiot Naznaczonych", "Namiot Piechoty PiĹ‚owej", "Namiot Pustynnych SmokĂłw", "Pustynia Shaiharrud - wschĂłd", "Pustynia Shaiharrud - zachĂłd", "SkaĹ‚y UmarĹ‚ych", "Smocze Skalisko", "SÄ™piarnia", "Urwisko Vapora", "ĹšwiÄ…tynia Hebrehotha - przedsionek", "ĹšwiÄ…tynia Hebrehotha - sala czciciela", "ĹšwiÄ…tynia Hebrehotha - sala ofiary"]},
-      {"name": "Driady (280lvl)", "desc": "Zoptymalizowana baza (PotworĂłw: 155)", "mobCount": 155, "maps": ["Drzewo Ĺ»ycia p.1", "Drzewo Ĺ»ycia p.2", "Drzewo Ĺ»ycia p.3", "Gvar Hamryd", "Jaskinia Suchych PÄ™dĂłw s.1", "Jaskinia Suchych PÄ™dĂłw s.2", "Jaskinia Suchych PÄ™dĂłw s.3", "Jaskinia Suchych PÄ™dĂłw s.4", "Matecznik Szelestu", "Rozlewisko Kai"]}
+      {"name": "Grobowce (18lvl)", "desc": "Zoptymalizowana baza (Potworów: 197)", "mobCount": 197, "maps": ["Grobowiec Rodziny Tywelta", "Grobowiec Rodziny Tywelta p.1", "Grobowiec Rodziny Tywelta p.2", "Krypta Rodu Heregata", "Krypta Rodu Heregata p.1", "Krypta Rodu Heregata p.2 - lewe skrzydło", "Krypta Rodu Heregata p.2 - prawe skrzydło"]},
+      {"name": "Mrówki (20lvl)", "desc": "Zoptymalizowana baza (Potworów: 192)", "mobCount": 192, "maps": ["Kopiec Mrówek", "Kopiec Mrówek p.1", "Kopiec Mrówek p.2", "Mrowisko", "Mrowisko p.1", "Mrowisko p.2"]},
+      {"name": "Pumy i tygrysy (21lvl)", "desc": "Zoptymalizowana baza (Potworów: 255)", "mobCount": 255, "maps": ["Jaskinia Dzikich Kotów", "Kryjówka Dzikich Kotów", "Leśna Przełęcz", "Tygrysia Polana"]},
+      {"name": "Niedźwiedzie i nietoperze (23lvl)", "desc": "Zoptymalizowana baza (Potworów: 247)", "mobCount": 247, "maps": ["Dziewicza Knieja", "Siedlisko Nietoperzy p.1", "Siedlisko Nietoperzy p.2", "Siedlisko Nietoperzy p.3 - sala 1", "Siedlisko Nietoperzy p.3 - sala 2", "Siedlisko Nietoperzy p.4", "Siedlisko Nietoperzy p.5"]},
+      {"name": "Bazyliszki (26lvl)", "desc": "Zoptymalizowana baza (Potworów: 96)", "mobCount": 96, "maps": ["Las Tropicieli"]},
+      {"name": "Mulusy (28lvl)", "desc": "Zoptymalizowana baza (Potworów: 306)", "mobCount": 306, "maps": ["Dzikie Pagórki", "Osada Mulusów", "Pradawne Wzgórze Przodków"]},
+      {"name": "Demony (29lvl)", "desc": "Zoptymalizowana baza (Potworów: 242)", "mobCount": 242, "maps": ["Przeklęta Strażnica", "Przeklęta Strażnica - podziemia p.1 s.1", "Przeklęta Strażnica - podziemia p.1 s.2", "Przeklęta Strażnica - podziemia p.2 s.1", "Przeklęta Strażnica - podziemia p.2 s.2", "Przeklęta Strażnica - podziemia p.2 s.3", "Przeklęta Strażnica p.1", "Przeklęta Strażnica p.2"]},
+      {"name": "Rozbojnicy (32lvl)", "desc": "Zoptymalizowana baza (Potworów: 185)", "mobCount": 185, "maps": ["Dolina Rozbójników", "Kamienna Kryjówka", "Namiot Bandytów", "Pagórki Łupieżców", "Przełęcz Łotrzyków", "Skład Grabieżców"]},
+      {"name": "Gobliny (34lvl)", "desc": "Zoptymalizowana baza (Potworów: 120)", "mobCount": 120, "maps": ["Jaskinia Pogardy", "Las Goblinów", "Morwowe Przejście", "Podmokła Dolina"]},
+      {"name": "Puffy (37lvl)", "desc": "Zoptymalizowana baza (Potworów: 140)", "mobCount": 140, "maps": ["Pieczara Niepogody p.1", "Pieczara Niepogody p.2 - sala 1", "Pieczara Niepogody p.2 - sala 2", "Pieczara Niepogody p.3", "Pieczara Niepogody p.4", "Pieczara Niepogody p.5"]},
+      {"name": "Dziki (40lvl)", "desc": "Zoptymalizowana baza (Potworów: 155)", "mobCount": 155, "maps": ["Pieczara Kwiku - sala 1", "Pieczara Kwiku - sala 2", "Racicowy Matecznik", "Spokojne Przejście", "Ukwiecona Skarpa"]},
+      {"name": "Ghule (40lvl)", "desc": "Zoptymalizowana baza (Potworów: 165)", "mobCount": 165, "maps": ["Ghuli Mogilnik", "Polana Ścierwojadów", "Zapomniany Grobowiec p.1", "Zapomniany Grobowiec p.2", "Zapomniany Grobowiec p.3", "Zapomniany Grobowiec p.4", "Zapomniany Grobowiec p.5"]},
+      {"name": "Wilcze plemię (44lvl)", "desc": "Zoptymalizowana baza (Potworów: 175)", "mobCount": 175, "maps": ["Krasowa Pieczara p.1", "Krasowa Pieczara p.2", "Krasowa Pieczara p.3", "Legowisko Wilczej Hordy", "Warczące Osuwiska", "Wilcza Nora p.1", "Wilcza Nora p.2", "Wilcza Skarpa"]},
+      {"name": "Tolloki (45lvl)", "desc": "Zoptymalizowana baza (Potworów: 110)", "mobCount": 110, "maps": ["Skalne Turnie", "Skarpiska Tolloków"]},
+      {"name": "Zbiry (46lvl)", "desc": "Zoptymalizowana baza (Potworów: 145)", "mobCount": 145, "maps": ["Ciemnica Szubrawców p.1 - sala 1", "Ciemnica Szubrawców p.1 - sala 2", "Ciemnica Szubrawców p.1 - sala 3", "Stary Kupiecki Trakt", "Stukot Widmowych Kół", "Wertepy Rzezimieszków"]},
+      {"name": "Orkowie (47lvl)", "desc": "Zoptymalizowana baza (Potworów: 210)", "mobCount": 210, "maps": ["Nawiedzony Jar", "Opuszczony Bastion", "Podziemne Przejście p.1", "Podziemne Przejście p.2", "Stare Wyrobisko p.1", "Stare Wyrobisko p.2", "Stare Wyrobisko p.3", "Stare Wyrobisko p.4", "Stare Wyrobisko p.5", "Zburzona Twierdza", "Zrujnowana Wieża", "Świszcząca Grota p.1", "Świszcząca Grota p.2", "Świszcząca Grota p.3", "Świszcząca Grota p.4"]},
+      {"name": "Przesmyk (50lvl)", "desc": "Zoptymalizowana baza (Potworów: 130)", "mobCount": 130, "maps": ["Migotliwa Pieczara", "Mroczna Pieczara p.0", "Mroczna Pieczara p.1 - sala 1", "Mroczna Pieczara p.1 - sala 2", "Mroczna Pieczara p.1 - sala 3", "Mroczna Pieczara p.2", "Mroczny Przesmyk", "Zapomniany Szlak"]},
+      {"name": "Galarety (51lvl)", "desc": "Zoptymalizowana baza (Potworów: 95)", "mobCount": 95, "maps": ["Mokra Grota p.1", "Mokra Grota p.1 - boczny korytarz", "Mokra Grota p.1 - przełaz", "Mokra Grota p.2", "Mokra Grota p.2 - korytarz"]},
+      {"name": "Pokątniki (52lvl)", "desc": "Zoptymalizowana baza (Potworów: 80)", "mobCount": 80, "maps": ["Grota Bezszelestnych Kroków - sala 1", "Grota Bezszelestnych Kroków - sala 2", "Grota Bezszelestnych Kroków - sala 3"]},
+      {"name": "Koboldy (54lvl)", "desc": "Zoptymalizowana baza (Potworów: 115)", "mobCount": 115, "maps": ["Lazurytowa Grota p.1", "Lazurytowa Grota p.2", "Lazurytowa Grota p.3 - sala 1", "Lazurytowa Grota p.3 - sala 2", "Lazurytowa Grota p.4"]},
+      {"name": "Żądłaki (58lvl)", "desc": "Zoptymalizowana baza (Potworów: 142)", "mobCount": 142, "maps": ["Kopalnia Kapiącego Miodu p.1 - sala 1", "Kopalnia Kapiącego Miodu p.1 - sala 2", "Kopalnia Kapiącego Miodu p.2 - sala 1", "Kopalnia Kapiącego Miodu p.2 - sala 2", "Kopalnia Kapiącego Miodu p.2 - sala Owadziej Matki", "Kopalnia Kapiącego Miodu p.3", "Porzucone Pasieki"]},
+      {"name": "Bazyliszki (61lvl)", "desc": "Zoptymalizowana baza (Potworów: 85)", "mobCount": 85, "maps": ["Pieczara Szaleńców - sala 1", "Pieczara Szaleńców - sala 2", "Pieczara Szaleńców - sala 3", "Pieczara Szaleńców - sala 4"]},
+      {"name": "Gnolle (64lvl)", "desc": "Zoptymalizowana baza (Potworów: 195)", "mobCount": 195, "maps": ["Czeluść Ognistej Pożogi", "Grota Pragnolli p.1", "Grota Pragnolli p.1 - sala 2", "Grota Pragnolli p.2", "Grota Pragnolli p.3", "Jaskinia Gnollich Szamanów - komnata Kozuga", "Jaskinia Gnollich Szamanów p.1", "Jaskinia Gnollich Szamanów p.2", "Jaskinia Gnollich Szamanów p.3", "Namiot Vari Krugera", "Radosna Polana", "Wioska Gnolli"]},
+      {"name": "Mrówcza kolonia (66lvl)", "desc": "Zoptymalizowana baza (Potworów: 180)", "mobCount": 180, "maps": ["Mrówcza Kolonia p.1 - lewy tunel", "Mrówcza Kolonia p.1 - prawy tunel", "Mrówcza Kolonia p.2 - lewe korytarze", "Mrówcza Kolonia p.2 - prawe korytarze", "Mrówcza Kolonia p.3 - lewa komora jaj", "Mrówcza Kolonia p.3 - prawa komora jaj", "Mrówcza Kolonia p.4 - królewskie gniazdo"]},
+      {"name": "Olbrzymy (67lvl)", "desc": "Zoptymalizowana baza (Potworów: 65)", "mobCount": 65, "maps": ["Kamienna Jaskinia - sala 1", "Kamienna Jaskinia - sala 2", "Ukryty Kanion"]},
+      {"name": "Andarum i okolice (70lvl)", "desc": "Zoptymalizowana baza (Potworów: 175)", "mobCount": 175, "maps": ["Andarum Ilami", "Cmentarzysko Szerpów", "Skały Mroźnych Śpiewów", "Śnieżna Granica"]},
+      {"name": "Jaskiniowe tolloki (71lvl)", "desc": "Zoptymalizowana baza (Potworów: 110)", "mobCount": 110, "maps": ["Głębokie Skałki p.1", "Głębokie Skałki p.2", "Głębokie Skałki p.3", "Głębokie Skałki p.4", "Zdradzieckie Przejście p.1"]},
+      {"name": "Demilisze (72lvl)", "desc": "Zoptymalizowana baza (Potworów: 88)", "mobCount": 88, "maps": ["Krypty Dusz Śniegu p.1", "Krypty Dusz Śniegu p.2", "Krypty Dusz Śniegu p.3", "Krypty Dusz Śniegu p.3 - komnata Lisza"]},
+      {"name": "Mnisi (74lvl)", "desc": "Zoptymalizowana baza (Potworów: 125)", "mobCount": 125, "maps": ["Świątynia Andarum", "Świątynia Andarum - lokum mnichów", "Świątynia Andarum - podziemia", "Świątynia Andarum - zejście lewe", "Świątynia Andarum - zejście prawe"]},
+      {"name": "Biblioteka Andarum (75lvl)", "desc": "Zoptymalizowana baza (Potworów: 92)", "mobCount": 92, "maps": ["Świątynia Andarum - biblioteka"]},
+      {"name": "Wodniki (75lvl)", "desc": "Zoptymalizowana baza (Potworów: 115)", "mobCount": 115, "maps": ["Moczary Rybiego Oka", "Uroczysko Wodnika", "Źródło Narumi"]},
+      {"name": "Magazynierzy (77lvl)", "desc": "Zoptymalizowana baza (Potworów: 105)", "mobCount": 105, "maps": ["Świątynia Andarum - magazyn p.1", "Świątynia Andarum - magazyn p.2", "Świątynia Andarum - zbrojownia"]},
+      {"name": "Erem (80lvl)", "desc": "Zoptymalizowana baza (Potworów: 165)", "mobCount": 165, "maps": ["Erem Czarnego Słońca p.1 - północ", "Erem Czarnego Słońca p.2", "Erem Czarnego Słońca p.3", "Erem Czarnego Słońca p.3 - południe", "Erem Czarnego Słońca p.4 - sala 1", "Erem Czarnego Słońca p.4 - sala 2", "Erem Czarnego Słońca p.5"]},
+      {"name": "Minotaury (81lvl)", "desc": "Zoptymalizowana baza (Potworów: 105)", "mobCount": 105, "maps": ["Labirynt Wyklętych p.1", "Labirynt Wyklętych p.2 - sala 1", "Labirynt Wyklętych p.2 - sala 2", "Pieczara Czaszek"]},
+      {"name": "Dławiciele (83lvl)", "desc": "Zoptymalizowana baza (Potworów: 95)", "mobCount": 95, "maps": ["Wylęgarnia Choukkerów p.1", "Wylęgarnia Choukkerów p.2", "Wylęgarnia Choukkerów p.3"]},
+      {"name": "Miśki (83lvl)", "desc": "Zoptymalizowana baza (Potworów: 125)", "mobCount": 125, "maps": ["Firnowa Grota p.1", "Firnowa Grota p.2", "Firnowa Grota p.2 s.1", "Lodowa Wyrwa p.1 s.1", "Lodowa Wyrwa p.1 s.2", "Lodowa Wyrwa p.2", "Sala Lodowych Iglic"]},
+      {"name": "Wermonty (85lvl)", "desc": "Zoptymalizowana baza (Potworów: 65)", "mobCount": 65, "maps": ["Zdradzieckie Przejście p.2"]},
+      {"name": "Krasnoludy (86lvl)", "desc": "Zoptymalizowana baza (Potworów: 145)", "mobCount": 145, "maps": ["Kopalnia Margorii", "Labirynt Margorii", "Margoria", "Margoria - Sala Królewska"]},
+      {"name": "Darhouny (87lvl)", "desc": "Zoptymalizowana baza (Potworów: 75)", "mobCount": 75, "maps": ["Szyb Zdrajców", "Ślepe Wyrobisko"]},
+      {"name": "Grexy (89 lvl)", "desc": "Zoptymalizowana baza (Potworów: 120)", "mobCount": 120, "maps": ["Grota Samotnych Dusz p.1", "Grota Samotnych Dusz p.2", "Grota Samotnych Dusz p.3", "Grota Samotnych Dusz p.3 - sala wyjściowa", "Grota Samotnych Dusz p.4", "Grota Samotnych Dusz p.5", "Grota Samotnych Dusz p.6"]},
+      {"name": "Leszy (91lvl)", "desc": "Zoptymalizowana baza (Potworów: 115)", "mobCount": 115, "maps": ["Księżycowe Wzniesienie", "Liściaste Rozstaje", "Sosnowe Odludzie", "Zapomniany Święty Gaj p.1", "Zapomniany Święty Gaj p.1 - sala 1", "Zapomniany Święty Gaj p.2", "Zapomniany Święty Gaj p.3"]},
+      {"name": "Wieczornice i Południce (92lvl)", "desc": "Zoptymalizowana baza (Potworów: 155)", "mobCount": 155, "maps": ["Kamienna Strażnica - Sala Chwały", "Kamienna Strażnica - Sanktuarium", "Kamienna Strażnica - tunel", "Kamienna Strażnica - wsch. baszta skalna sala p.0", "Kamienna Strażnica - wsch. baszta skalna sala p.1", "Kamienna Strażnica - wsch. baszta zasypany tunel", "Kamienna Strażnica - zach. baszta p.1", "Kamienna Strażnica - zach. baszta p.2", "Mglista Polana Vesy", "Płacząca Grota - sala Lamentu", "Płacząca Grota p.1 - sala 1", "Płacząca Grota p.1 - sala 2", "Płacząca Grota p.2", "Płacząca Grota p.3", "Trupia Przełęcz", "Wzgórze Płaczek"]},
+      {"name": "Błotniste gady (94lvl)", "desc": "Zoptymalizowana baza (Potworów: 95)", "mobCount": 95, "maps": ["Gadzia Kotlina", "Złowrogie Bagna"]},
+      {"name": "Gnomy (94lvl)", "desc": "Zoptymalizowana baza (Potworów: 155)", "mobCount": 155, "maps": ["Gadzia Kotlina", "Mglista Polana Vesy", "Wzgórze Płaczek", "Zagrzybiałe Ścieżki p.1 - sala 1", "Zagrzybiałe Ścieżki p.1 - sala 2", "Zagrzybiałe Ścieżki p.1 - sala 3", "Zagrzybiałe Ścieżki p.2", "Zagrzybiałe Ścieżki p.3", "Złowrogie Bagna"]},
+      {"name": "Ogniki (96lvl)", "desc": "Zoptymalizowana baza (Potworów: 75)", "mobCount": 75, "maps": ["Gadzia Kotlina", "Złowrogie Bagna"]},
+      {"name": "Centaury (98lvl)", "desc": "Zoptymalizowana baza (Potworów: 135)", "mobCount": 135, "maps": ["Błędny Szlak", "Dolina Centaurów", "Iglaste Ścieżki", "Ostępy Szalbierskich Lasów", "Selva Oscura", "Zawiły Bór"]},
+      {"name": "Małe gady i płazy (99lvl)", "desc": "Zoptymalizowana baza (Potworów: 85)", "mobCount": 85, "maps": ["Ostępy Szalbierskich Lasów", "Selva Oscura"]},
+      {"name": "Bandyci (100lvl)", "desc": "Zoptymalizowana baza (Potworów: 115)", "mobCount": 115, "maps": ["Cienisty Bór", "Las Dziwów", "Ostępy Szalbierskich Lasów"]},
+      {"name": "Mykonidy (102lvl)", "desc": "Zoptymalizowana baza (Potworów: 125)", "mobCount": 125, "maps": ["Lodowa Sala", "Przejście Lodowatego Wiatru", "Przejście Magicznego Mrozu", "Przejście Zamarzniętych Kości", "Sala Lodowatego Wiatru", "Sala Magicznego Mrozu", "Sala Zamarzniętych Kości", "Śnieżna Grota p.2", "Śnieżna Grota p.3"]},
+      {"name": "Molochy (103lvl)", "desc": "Zoptymalizowana baza (Potworów: 95)", "mobCount": 95, "maps": ["Podziemia Zniszczonej Wieży p.2", "Podziemia Zniszczonej Wieży p.3", "Podziemia Zniszczonej Wieży p.4", "Podziemia Zniszczonej Wieży p.5"]},
+      {"name": "Dwugłowe olbrzymy (105lvl)", "desc": "Zoptymalizowana baza (Potworów: 75)", "mobCount": 75, "maps": ["Przełaz olbrzymów", "Selva Oscura", "Smocza Jaskinia", "Smocze Góry"]},
+      {"name": "Gady i płazy (106lvl)", "desc": "Zoptymalizowana baza (Potworów: 105)", "mobCount": 105, "maps": ["Solny Szyb p.3", "Zabłocona Jama p.1 - sala 1", "Zabłocona Jama p.1 - sala 2", "Zabłocona Jama p.2 - sala 1", "Zabłocona Jama p.2 - sala 3"]},
+      {"name": "Alghule (111lvl)", "desc": "Zoptymalizowana baza (Potworów: 95)", "mobCount": 95, "maps": ["Skalne Cmentarzysko p.1", "Skalne Cmentarzysko p.2", "Skalne Cmentarzysko p.3", "Skalne Cmentarzysko p.4"]},
+      {"name": "Szkielety-koty (111lvl)", "desc": "Zoptymalizowana baza (Potworów: 85)", "mobCount": 85, "maps": ["Grobowiec Nieznających Spokoju", "Płaskowyż Arpan", "Sucha Dolina"]},
+      {"name": "Mumie (114lvl)", "desc": "Zoptymalizowana baza (Potworów: 145)", "mobCount": 145, "maps": ["Ciche Rumowiska", "Dolina Suchych Łez", "Oaza Siedmiu Wichrów", "Piramida Pustynnego Władcy p.1", "Piramida Pustynnego Władcy p.2", "Piramida Pustynnego Władcy p.3", "Złote Piaski"]},
+      {"name": "Kałamarnice (118lvl)", "desc": "Zoptymalizowana baza (Potworów: 65)", "mobCount": 65, "maps": ["Archipelag Bremus An", "Jama Morskiej Macki p.1 - sala 1", "Jama Morskiej Macki p.1 - sala 2", "Jama Morskiej Macki p.1 - sala 3"]},
+      {"name": "Ingotia (121lvl)", "desc": "Zoptymalizowana baza (Potworów: 255)", "mobCount": 255, "maps": ["Korytarze Wygnańców p.1 - Bezdenne Przepaści", "Korytarze Wygnańców p.1 - Hala Odszczepieńców", "Korytarze Wygnańców p.1 - Jaskinia Zagubionych", "Korytarze Wygnańców p.1 - Komora Opuszczonych", "Korytarze Wygnańców p.1 - Sala Ech", "Korytarze Wygnańców p.1 - Sala Szlachetnych", "Korytarze Wygnańców p.2 - Komnata Wygnańców", "Korytarze Wygnańców p.2 - Komora Budowniczego", "Korytarze Wygnańców p.2 - Sala Żądzy", "Korytarze Wygnańców p.3 - Komnata Przeklętego Daru", "Twierdza Rogogłowych - Sala Byka", "Wyspa Ingotia"]},
+      {"name": "Kraby (122lvl)", "desc": "Zoptymalizowana baza (Potworów: 55)", "mobCount": 55, "maps": ["Wyspa Rem"]},
+      {"name": "Caneum (124lvl)", "desc": "Zoptymalizowana baza (Potworów: 155)", "mobCount": 155, "maps": ["Piaskowa Pułapka - Grota Piaskowej Śmierci", "Piaskowa Pułapka p.1 - sala 1", "Piaskowa Pułapka p.1 - sala 2", "Piaskowa Pułapka p.1 - sala 3", "Piaskowa Pułapka p.1 - sala 4", "Wyspa Caneum"]},
+      {"name": "Magradit (127lvl)", "desc": "Zoptymalizowana baza (Potworów: 125)", "mobCount": 125, "maps": ["Wulkan Politraki p.1 - sala 1", "Wulkan Politraki p.1 - sala 2", "Wulkan Politraki p.1 - sala 3", "Wulkan Politraki p.2 - sala 1", "Wulkan Politraki p.2 - sala 2"]},
+      {"name": "Wraki (127lvl)", "desc": "Zoptymalizowana baza (Potworów: 85)", "mobCount": 85, "maps": ["Grota Trzeszczących Kości p.1 - sala 1", "Grota Trzeszczących Kości p.1 - sala 2", "Wrak statku", "Wyspa Wraków"]},
+      {"name": "Pajaki (129lvl)", "desc": "Zoptymalizowana baza (Potworów: 165)", "mobCount": 165, "maps": ["Szlak Thorpa p.1", "Szlak Thorpa p.2", "Szlak Thorpa p.3", "Szlak Thorpa p.4", "Szlak Thorpa p.5", "Szlak Thorpa p.6"]},
+      {"name": "Piraci (130lvl)", "desc": "Zoptymalizowana baza (Potworów: 205)", "mobCount": 205, "maps": ["Korsarska Nora - sala 1", "Korsarska Nora - sala 2", "Korsarska Nora - sala 3", "Korsarska Nora - sala 4", "Korsarska Nora - sala 5", "Korsarska Nora - sala 6", "Korsarska Nora - statek", "Korsarska Nora - wschodni przełaz", "Korsarska Nora - zachodni przełaz", "Ukryta Grota Morskich Diabłów", "Ukryta Grota Morskich Diabłów - arsenał", "Ukryta Grota Morskich Diabłów - korytarz", "Ukryta Grota Morskich Diabłów - magazyn", "Ukryta Grota Morskich Diabłów - siedziba", "Ukryta Grota Morskich Diabłów - skarbiec"]},
+      {"name": "Piaskowi niewolnicy (133lvl)", "desc": "Zoptymalizowana baza (Potworów: 166)", "mobCount": 166, "maps": ["Dolina Pustynnych Kręgów", "Piachy Zniewolonych", "Piaskowa Gęstwina", "Piaszczysta Grota p.1 - sala 1", "Piaszczysta Grota p.1 - sala 2", "Ruchome Piaski"]},
+      {"name": "Korredy (134lvl)", "desc": "Zoptymalizowana baza (Potworów: 95)", "mobCount": 95, "maps": ["Kopalnia Żółtego Kruszcu p.1 - sala 1", "Kopalnia Żółtego Kruszcu p.1 - sala 2", "Kopalnia Żółtego Kruszcu p.2 - sala 1", "Kopalnia Żółtego Kruszcu p.2 - sala 2"]},
+      {"name": "Impy (136lvl)", "desc": "Zoptymalizowana baza (Potworów: 115)", "mobCount": 115, "maps": ["Chodniki Mrinding", "Chodniki Mrinding p.1 - sala 1", "Chodniki Mrinding p.1 - sala 2", "Chodniki Mrinding p.2 - sala 1", "Chodniki Mrinding p.2 - sala 2"]},
+      {"name": "Ognie (137lvl)", "desc": "Zoptymalizowana baza (Potworów: 85)", "mobCount": 85, "maps": ["Ognista Studnia p.1", "Ścieżki Erebeth p.2 - sala 1", "Ścieżki Erebeth p.2 - sala 2", "Ścieżki Erebeth p.3"]},
+      {"name": "Ogniste golemy (138lvl)", "desc": "Zoptymalizowana baza (Potworów: 105)", "mobCount": 105, "maps": ["Kuźnia Worundriela - Komnata Żaru", "Kuźnia Worundriela p.1", "Kuźnia Worundriela p.2", "Kuźnia Worundriela p.3", "Ognista Studnia p.2", "Ognista Studnia p.3"]},
+      {"name": "Ważki (140lvl)", "desc": "Zoptymalizowana baza (Potworów: 75)", "mobCount": 75, "maps": ["Jezioro Ważek"]},
+      {"name": "Górale (143lvl)", "desc": "Zoptymalizowana baza (Potworów: 185)", "mobCount": 185, "maps": ["Babi Wzgórek", "Chata Teściowej", "Chata wójta Fistuły", "Chata wójta Fistuły p.1", "Góralska Pieczara p.1", "Góralska Pieczara p.2", "Góralska Pieczara p.3", "Góralskie Przejście", "Wyjąca Jaskinia", "Wyjący Wąwóz"]},
+      {"name": "Berserkerzy (147lvl)", "desc": "Zoptymalizowana baza (Potworów: 225)", "mobCount": 225, "maps": ["Cenotaf Berserkerów - przejście przodków", "Cenotaf Berserkerów p.1 - sala 1", "Cenotaf Berserkerów p.1 - sala 2", "Czarcie Oparzeliska", "Grobowiec Przodków", "Mała Twierdza - korytarz zachodni", "Mała Twierdza - magazyn", "Mała Twierdza - mały barak", "Mała Twierdza - mury wschodnie", "Mała Twierdza - mury zachodnie", "Mała Twierdza - podziemny magazyn", "Mała Twierdza - sala główna", "Mała Twierdza - sala wejściowa", "Mała Twierdza - wieża strażnicza", "Mała Twierdza - wieża wschodnia", "Mała Twierdza - wieża zachodnia", "Mała Twierdza p.1", "Opuszczona Twierdza", "Zaginiona Dolina", "Śnieżna Granica"]},
+      {"name": "Duchy (149lvl)", "desc": "Zoptymalizowana baza (Potworów: 95)", "mobCount": 95, "maps": ["Korytarze Milczących Intryg p.1", "Korytarze Milczących Intryg p.2 - sala 1", "Korytarze Milczących Intryg p.2 - sala 2", "Korytarze Milczących Intryg p.3", "Sala Ukrytych Paktów"]},
+      {"name": "Mechaniczne gobliny (151lvl)", "desc": "Zoptymalizowana baza (Potworów: 125)", "mobCount": 125, "maps": ["Lokum Złych Goblinów - warsztat", "Lokum Złych Goblinów - wieża", "Lokum Złych Goblinów - zejście p.1", "Lokum Złych Goblinów p.2 - sala 1", "Lokum Złych Goblinów p.2 - sala 2", "Lokum Złych Goblinów p.3 - sala 1", "Lokum Złych Goblinów p.3 - sala 2"]},
+      {"name": "Dusze (152lvl)", "desc": "Zoptymalizowana baza (Potworów: 45)", "mobCount": 45, "maps": ["Upiorna Droga"]},
+      {"name": "Wiedzmy (154lvl)", "desc": "Zoptymalizowana baza (Potworów: 175)", "mobCount": 175, "maps": ["Dom Adariel", "Dom Amry", "Dom Atalii", "Dom czarnej magii", "Dom starej czarownicy", "Laboratorium Adariel", "Lochy Tristam", "Magazyn mioteł", "Ograbiona świątynia", "Opuszczone więzienie", "Sabatowe Góry", "Splugawiona kaplica", "Splądrowana kaplica", "Tristam", "Wiedźmie Kotłowisko"]},
+      {"name": "Czerwoni orkowie (156lvl)", "desc": "Zoptymalizowana baza (Potworów: 205)", "mobCount": 205, "maps": ["Grota Orczej Hordy p.1 s.1", "Grota Orczej Hordy p.1 s.2", "Grota Orczej Hordy p.2 s.1", "Grota Orczej Hordy p.2 s.2", "Grota Orczej Hordy p.2 s.3", "Grota Orczych Szamanów p.1 s.1", "Grota Orczych Szamanów p.1 s.2", "Grota Orczych Szamanów p.2 s.1", "Grota Orczych Szamanów p.2 s.2", "Kurhany Zwyciężonych", "Orcza Wyżyna", "Osada Czerwonych Orków"]},
+      {"name": "Dziki zagajnik (161lvl)", "desc": "Zoptymalizowana baza (Potworów: 145)", "mobCount": 145, "maps": ["Dziki Zagajnik", "Przepaść Aguti", "Przełęcz Krwistego Posłańca", "Skały Pamięci Nikantosa", "Ukryty Kanion"]},
+      {"name": "Kazamaty (163lvl)", "desc": "Zoptymalizowana baza (Potworów: 165)", "mobCount": 165, "maps": ["Nawiedzone Kazamaty p.1 s.1", "Nawiedzone Kazamaty p.1 s.2", "Nawiedzone Kazamaty p.2 s.1", "Nawiedzone Kazamaty p.2 s.2", "Nawiedzone Kazamaty p.3 s.1", "Nawiedzone Kazamaty p.3 s.2", "Nawiedzone Kazamaty p.4", "Nawiedzone Komnaty - przedsionek"]},
+      {"name": "Komnaty (170lvl)", "desc": "Zoptymalizowana baza (Potworów: 135)", "mobCount": 135, "maps": ["Komnaty Czarnej Gwardii - wschód", "Komnaty Czarnej Gwardii - zachód", "Nawiedzone Komnaty - przedsionek", "Nawiedzone Komnaty - wschód", "Nawiedzone Komnaty - zachód", "Sala Dowódcy Orków", "Sala Królewska", "Sala Rady Orków"]},
+      {"name": "Kryształowa grota (174lvl)", "desc": "Zoptymalizowana baza (Potworów: 185)", "mobCount": 185, "maps": ["Kryształowa Grota - Sala Smutku", "Kryształowa Grota - przepaść", "Kryształowa Grota p.1", "Kryształowa Grota p.2 - sala 1", "Kryształowa Grota p.2 - sala 2", "Kryształowa Grota p.3 - sala 1", "Kryształowa Grota p.3 - sala 2", "Kryształowa Grota p.4", "Kryształowa Grota p.5", "Kryształowa Grota p.6"]},
+      {"name": "Driady (178lvl)", "desc": "Zoptymalizowana baza (Potworów: 155)", "mobCount": 155, "maps": ["Błota Sham Al", "Drzewo Dusz p.1", "Drzewo Dusz p.2", "Grota Arbor s.1", "Grota Arbor s.2", "Głusza Świstu", "Kwieciste Kresy", "Las Porywów Wiatru", "Ruiny Tass Zhil"]},
+      {"name": "Ogry (181lvl)", "desc": "Zoptymalizowana baza (Potworów: 115)", "mobCount": 115, "maps": ["Ogrza Kawerna p.1", "Ogrza Kawerna p.2", "Ogrza Kawerna p.3", "Ogrza Kawerna p.4"]},
+      {"name": "Patrycjusze (184lvl)", "desc": "Zoptymalizowana baza (Potworów: 145)", "mobCount": 145, "maps": ["Krypty Bezsennych p.1 s.1", "Krypty Bezsennych p.1 s.2", "Krypty Bezsennych p.2 s.1", "Krypty Bezsennych p.2 s.2", "Krypty Bezsennych p.3"]},
+      {"name": "Zmutowane rośliny (187lvl)", "desc": "Zoptymalizowana baza (Potworów: 125)", "mobCount": 125, "maps": ["Głuchy Las", "Kwieciste Przejście", "Skarpa Trzech Słów", "Ukwiecona Skarpa", "Zapomniana Ścieżyna", "Złudny Trakt"]},
+      {"name": "Draki (189lvl)", "desc": "Zoptymalizowana baza (Potworów: 105)", "mobCount": 105, "maps": ["Kwieciste Kresy", "Przysiółek Valmirów", "Szczerba Samobójców", "Śnieżna Granica", "Śnieżycowy Las"]},
+      {"name": "Mroczny las (192lvl)", "desc": "Zoptymalizowana baza (Potworów: 255)", "mobCount": 255, "maps": ["Bezgwiezdna Gęstwina", "Bór Zagubionych", "Grota Skamieniałej Kory p.1 - sala 1", "Grota Skamieniałej Kory p.1 - sala 2", "Grota Skamieniałej Kory p.2", "Martwy Las", "Starodrzew Przedwiecznych p.1", "Starodrzew Przedwiecznych p.2", "Zbocze Starych Bogów", "Ziemia Szepczących Cierni", "Złudny Trakt"]},
+      {"name": "Myświóry (196lvl)", "desc": "Zoptymalizowana baza (Potworów: 145)", "mobCount": 145, "maps": ["Kanały Nithal p.1 - sala 1", "Kanały Nithal p.1 - sala 2", "Kanały Nithal p.1 - sala 3", "Szlamowe Kanały p.2 - sala 1", "Szlamowe Kanały p.2 - sala 2", "Szlamowe Kanały p.2 - sala 3"]},
+      {"name": "Hurysy (199lvl)", "desc": "Zoptymalizowana baza (Potworów: 95)", "mobCount": 95, "maps": ["Mroczne Komnaty", "Przedsionek Kultu", "Przerażające Sypialnie"]},
+      {"name": "Heretycy (203lvl)", "desc": "Zoptymalizowana baza (Potworów: 165)", "mobCount": 165, "maps": ["Korytarz Ostatnich Nadziei", "Lochy Kultu", "Przejście Oczyszczenia", "Sala Skaryfikacji Grzeszników", "Sala Spowiedzi Konających", "Sala Tysiąca Świec", "Sale Rozdzierania", "Tajemnicza Siedziba"]},
+      {"name": "Furbole (208lvl)", "desc": "Zoptymalizowana baza (Potworów: 185)", "mobCount": 185, "maps": ["Dolina Gniewu", "Rozległa Równina", "Terytorium Furii", "Wzgórza Obłędu", "Zalana Grota", "Zapadlisko Zniewolonych", "Zapomniany Las"]},
+      {"name": "Pająki (212lvl)", "desc": "Zoptymalizowana baza (Potworów: 225)", "mobCount": 225, "maps": ["Arachnitopia p.1", "Arachnitopia p.2", "Arachnitopia p.3", "Arachnitopia p.4", "Arachnitopia p.5", "Arachnitopia p.6", "Dolina Pajęczych Korytarzy", "Otchłań Pajęczych Sieci", "Pajęczy Las", "Zapadlisko Zniewolonych"]},
+      {"name": "Drowy (216lvl)", "desc": "Zoptymalizowana baza (Potworów: 155)", "mobCount": 155, "maps": ["Dawny Przełaz", "Erem Aldiphrina", "Porzucone Noiridum p.2", "Porzucone Noiridum p.3 - sala 1", "Porzucone Noiridum p.3 - sala 2", "Porzucone Noiridum p.3 - sala 3", "Zakazana Grota"]},
+      {"name": "Dridery (219lvl)", "desc": "Zoptymalizowana baza (Potworów: 135)", "mobCount": 135, "maps": ["Dawny Przełaz", "Zamierzchłe Arterie p.2 - sala 1", "Zamierzchłe Arterie p.2 - sala 2", "Zamierzchłe Arterie p.3", "Zapomniane Sztolnie"]},
+      {"name": "Anuraki (223lvl)", "desc": "Zoptymalizowana baza (Potworów: 214)", "mobCount": 214, "maps": ["Bagna Umarłych", "Gnijące Topielisko", "Grząska Ziemia", "Mglisty Las", "Smocze Skalisko", "Urwisko Vapora"]},
+      {"name": "Maddoki (227lvl)", "desc": "Zoptymalizowana baza (Potworów: 255)", "mobCount": 255, "maps": ["Dolina Potoku Śmierci", "Grota Porośniętych Stalagmitów p.1 - sala 1", "Grota Porośniętych Stalagmitów p.1 - sala 2", "Grota Porośniętych Stalagmitów p.2 - sala 1", "Grota Porośniętych Stalagmitów p.2 - sala 2", "Jaszczurze Korytarze p.1 - sala 1", "Jaszczurze Korytarze p.1 - sala 2", "Jaszczurze Korytarze p.1 - sala 3", "Jaszczurze Korytarze p.1 - sala 4", "Jaszczurze Korytarze p.2 - sala 1", "Jaszczurze Korytarze p.2 - sala 2", "Jaszczurze Korytarze p.2 - sala 3", "Jaszczurze Korytarze p.2 - sala 4", "Jaszczurze Korytarze p.2 - sala 5", "Mechata Jama p.1", "Mechata Jama p.2", "Mechata Jama p.3", "Nora Jaszczurzych Koszmarów p.1 - sala 1", "Nora Jaszczurzych Koszmarów p.1 - sala 2", "Skryty Azyl", "Strumienie Szemrzących Wód", "Zawodzące Kaskady", "Złota Dąbrowa"]},
+      {"name": "Zagrzybiony las (232lvl)", "desc": "Zoptymalizowana baza (Potworów: 205)", "mobCount": 205, "maps": ["Garb Połamanych Konarów", "Gardziel Podgnitych Mchów p.1", "Gardziel Podgnitych Mchów p.2", "Gardziel Podgnitych Mchów p.3", "Gęste Sploty", "Zalesiony Step", "Zarosłe Szczeliny p.1 - sala 1", "Zarosłe Szczeliny p.1 - sala 2", "Zarosłe Szczeliny p.1 - sala 3", "Zmurszały Łęg"]},
+      {"name": "Elgary (236lvl)", "desc": "Zoptymalizowana baza (Potworów: 155)", "mobCount": 155, "maps": ["Gaj Księżycowego Blasku", "Głusza Srebrnego Rogu", "Knieja Lunarnych Głazów", "Szepty Menhirów", "Zacienione Wnęki p.1 - sala 1", "Zacienione Wnęki p.1 - sala 2", "Zacienione Wnęki p.2 - sala 1", "Zacienione Wnęki p.2 - sala 2", "Zakątek Nocnych Szelestów"]},
+      {"name": "Drzewce (239lvl)", "desc": "Zoptymalizowana baza (Potworów: 215)", "mobCount": 215, "maps": ["Jaskinia Korzennego Czaru p.1 - sala 1", "Jaskinia Korzennego Czaru p.1 - sala 2", "Jaskinia Korzennego Czaru p.1 - sala 3", "Jaskinia Korzennego Czaru p.1 - sala 4", "Jaskinia Korzennego Czaru p.2 - sala 1", "Jaskinia Korzennego Czaru p.2 - sala 2", "Jaskinia Korzennego Czaru p.3", "Krzaczasta Grota p.1 - sala 1", "Krzaczasta Grota p.1 - sala 2", "Krzaczasta Grota p.1 - sala 3", "Krzaczasta Grota p.2 - sala 1", "Krzaczasta Grota p.2 - sala 2", "Krzaczasta Grota p.2 - sala 3", "Piaskowa Gęstwina", "Regiel Zabłąkanych", "Urwisko Zdrewniałych", "Wąwóz Zakorzenionych Dusz", "Źródło Zakorzenionego Ludu"]},
+      {"name": "Bolity (244lvl)", "desc": "Zoptymalizowana baza (Potworów: 135)", "mobCount": 135, "maps": ["Dolina Chmur", "Złota Góra p.1 - sala 1", "Złota Góra p.1 - sala 2", "Złota Góra p.1 - sala 3", "Złota Góra p.1 - sala 4", "Złota Góra p.2 - sala 1", "Złota Góra p.2 - sala 2", "Złota Góra p.2 - sala 3", "Złota Góra p.2 - sala 4", "Złota Góra p.3 - sala 1", "Złota Góra p.3 - sala 2"]},
+      {"name": "Niecka (248lvl)", "desc": "Zoptymalizowana baza (Potworów: 165)", "mobCount": 165, "maps": ["Chantli", "Chantli Cuaitla Citlalina", "Niecka Xiuh Atl", "Oztotl Tzacua p.1 - sala 1", "Oztotl Tzacua p.1 - sala 2", "Oztotl Tzacua p.2 - sala 1", "Oztotl Tzacua p.2 - sala 2", "Oztotl Tzacua p.3 - sala 1", "Oztotl Tzacua p.3 - sala 2", "Oztotl Tzacua p.4 - sala 1", "Oztotl Tzacua p.4 - sala 2", "Oztotl Tzacua p.5"]},
+      {"name": "Maho (253lvl)", "desc": "Zoptymalizowana baza (Potworów: 285)", "mobCount": 285, "maps": ["Altepetl Mahoptekan", "Topan p.1", "Topan p.10", "Topan p.11", "Topan p.12", "Topan p.13", "Topan p.2", "Topan p.3", "Topan p.4", "Topan p.5", "Topan p.6", "Topan p.7", "Topan p.8", "Topan p.9", "Wschodni Mictlan p.1", "Wschodni Mictlan p.2", "Wschodni Mictlan p.3", "Wschodni Mictlan p.4", "Wschodni Mictlan p.5", "Wschodni Mictlan p.6", "Wschodni Mictlan p.7", "Wschodni Mictlan p.8", "Zachodni Mictlan p.1", "Zachodni Mictlan p.2", "Zachodni Mictlan p.3", "Zachodni Mictlan p.4", "Zachodni Mictlan p.5", "Zachodni Mictlan p.6", "Zachodni Mictlan p.7", "Zachodni Mictlan p.8", "Zachodni Mictlan p.9"]},
+      {"name": "Wiedźmowe potwory (258lvl)", "desc": "Zoptymalizowana baza (Potworów: 175)", "mobCount": 175, "maps": ["Jęczywąwóz", "Plugawe Pustkowie", "Pogranicze Wisielców", "Siedlisko Przyjemnej Woni", "Siedlisko Przyjemnej Woni - źródło", "Skalisty Styk", "Zachodnie Zbocze", "Zacisze Zimnych Wiatrów"]},
+      {"name": "Potępione zamczysko (261lvl)", "desc": "Zoptymalizowana baza (Potworów: 235)", "mobCount": 235, "maps": ["Potępione Zamczysko", "Potępione Zamczysko - głębokie lochy", "Potępione Zamczysko - korytarz wejściowy", "Potępione Zamczysko - korytarz wschodni", "Potępione Zamczysko - korytarz zachodni", "Potępione Zamczysko - lochy wschodnie p.1", "Potępione Zamczysko - lochy wschodnie p.2", "Potępione Zamczysko - lochy zachodnie p.1", "Potępione Zamczysko - lochy zachodnie p.2", "Potępione Zamczysko - północna komnata", "Potępione Zamczysko - sala ofiarna", "Potępione Zamczysko - wschodnia komnata", "Potępione Zamczysko - zachodnia komnata", "Potępione Zamczysko - łącznik wschodni", "Potępione Zamczysko - łącznik zachodni", "Wieża Szlochów p.1", "Wieża Szlochów p.2", "Wieża Szlochów p.3"]},
+      {"name": "Katakumby (268lvl)", "desc": "Zoptymalizowana baza (Potworów: 205)", "mobCount": 205, "maps": ["Grobowiec Seta", "Katakumby Gwałtownej Śmierci", "Katakumby Krwawych Wypraw", "Katakumby Odnalezionych Skrytobójców", "Katakumby Opętanych Dusz", "Katakumby Poległych Legionistów", "Komnaty Bezdusznych - sala 1", "Komnaty Bezdusznych - sala 2", "Korytarz Porzuconych Marzeń", "Korytarz Porzuconych Nadziei", "Pustynne Katakumby", "Pustynne Katakumby - sala 1", "Pustynne Katakumby - sala 2", "Wschodni Tunel Jaźni", "Zachodni Tunel Jaźni"]},
+      {"name": "Pustynia (275lvl)", "desc": "Zoptymalizowana baza (Potworów: 265)", "mobCount": 265, "maps": ["Grota Poświęcenia", "Jaskinia Odwagi", "Jaskinia Piaskowej Burzy s.1", "Jaskinia Piaskowej Burzy s.2", "Jaskinia Próby", "Jaskinia Smoczej Paszczy p.1", "Jaskinia Smoczej Paszczy p.2", "Jaskinia Szczęk", "Jaskinia Sępa s.1", "Jaskinia Sępa s.2", "Jurta Chaegda", "Jurta Czcicieli", "Jurta Nomadzka", "Namiot Błogosławionych", "Namiot Gwardii Smokoszczękich", "Namiot Naznaczonych", "Namiot Piechoty Piłowej", "Namiot Pustynnych Smoków", "Pustynia Shaiharrud - wschód", "Pustynia Shaiharrud - zachód", "Skały Umarłych", "Smocze Skalisko", "Sępiarnia", "Urwisko Vapora", "Świątynia Hebrehotha - przedsionek", "Świątynia Hebrehotha - sala czciciela", "Świątynia Hebrehotha - sala ofiary"]},
+      {"name": "Driady (280lvl)", "desc": "Zoptymalizowana baza (Potworów: 155)", "mobCount": 155, "maps": ["Drzewo Życia p.1", "Drzewo Życia p.2", "Drzewo Życia p.3", "Gvar Hamryd", "Jaskinia Suchych Pędów s.1", "Jaskinia Suchych Pędów s.2", "Jaskinia Suchych Pędów s.3", "Jaskinia Suchych Pędów s.4", "Matecznik Szelestu", "Rozlewisko Kai"]}
     ];
 
-// === BEZWZGLÄDNA ĹATKA CZYSZCZÄ„CA v64.4 ===
+// === BEZWZGLĘDNA ŁATKA CZYSZCZĄCA v64.4 ===
     let lsProfiles = JSON.parse(localStorage.getItem('exp_profiles_v64_4') || 'null');
 
-    // JeĹ›li baza jest pusta lub rĂłĹĽni siÄ™ dĹ‚ugoĹ›ciÄ… od tej z kodu - wymusza twardy reset
+    // Jeśli baza jest pusta lub różni się długością od tej z kodu - wymusza twardy reset
     if (!lsProfiles || lsProfiles.length !== window.defaultExpProfiles.length) {
         lsProfiles = JSON.parse(JSON.stringify(window.defaultExpProfiles));
         localStorage.setItem('exp_profiles_v64_4', JSON.stringify(lsProfiles));
-        HERO_LOG.success("Baza expowisk zostaĹ‚a zaktualizowana z kodu.");
+        HERO_LOG.success("Baza expowisk została zaktualizowana z kodu.");
     }
     let loadedProfiles = lsProfiles;
-    window.loadedProfiles = lsProfiles; // Globalne zabezpieczenie przed bĹ‚Ä™dem ReferenceError
+    window.loadedProfiles = lsProfiles; // Globalne zabezpieczenie przed błędem ReferenceError
 
 // --- NOWA LOGIKA BAZY I POLECANYCH EXPOWISK ---
     window.renderRecommendedExp = function() {
@@ -1135,7 +1199,7 @@ let opacityValue = 0.95;
 
         let html = '';
 
-        // Wyeliminowanie ReferenceError, siÄ™gamy wprost do botSettings lub zabezpieczenia
+        // Wyeliminowanie ReferenceError, sięgamy wprost do botSettings lub zabezpieczenia
         let profilesToRender = (botSettings && botSettings.expProfiles) ? botSettings.expProfiles : window.defaultExpProfiles;
 
         if (profilesToRender) {
@@ -1159,7 +1223,7 @@ let opacityValue = 0.95;
         }
 
         if(html === '') {
-            c.innerHTML = '<div style="text-align:center; color:#777; padding:10px; font-size:10px;">Brak gotowych expowisk w bazie dla Twojego przedziaĹ‚u poziomowego.</div>';
+            c.innerHTML = '<div style="text-align:center; color:#777; padding:10px; font-size:10px;">Brak gotowych expowisk w bazie dla Twojego przedziału poziomowego.</div>';
         } else {
             c.innerHTML = html;
         }
@@ -1232,7 +1296,7 @@ let opacityValue = 0.95;
         if (!reachable) return false;
         botSettings.unlockedTeleports[currentMap] = true;
         persistTeleportMemory([currentMap]);
-        if (window.logExp) window.logExp(`đźš€ Wykryto dostÄ™pnego Zakonnika na mapie [${currentMap}] â€” zapisujÄ™ teleporter.`, "#9c27b0");
+        if (window.logExp) window.logExp(`🚀 Wykryto dostępnego Zakonnika na mapie [${currentMap}] — zapisuję teleporter.`, "#9c27b0");
         return true;
     }
 
@@ -1242,7 +1306,7 @@ let opacityValue = 0.95;
 
         const knownMaps = getKnownTeleportMaps();
         const changed = [];
-        const blockedRe = /(brak zezwolenia|nie mozesz|nie moĹĽesz|niedostep|niedostÄ™p|zablokowan|brak uprawnien|brak uprawnieĹ„)/i;
+        const blockedRe = /(brak zezwolenia|nie mozesz|nie możesz|niedostep|niedostęp|zablokowan|brak uprawnien|brak uprawnień)/i;
         const optionTexts = options.map(el => ({
             raw: (el && (el.innerText || el.textContent)) || "",
             norm: normalizeDialogText((el && (el.innerText || el.textContent)) || "")
@@ -1266,7 +1330,7 @@ let opacityValue = 0.95;
 
         if (changed.length > 0) {
             persistTeleportMemory(changed);
-            if (window.logExp) window.logExp(`đźš€ Zakonnik: zapisano dostÄ™pne teleporty: ${changed.join(", ")}`, "#9c27b0");
+            if (window.logExp) window.logExp(`🚀 Zakonnik: zapisano dostępne teleporty: ${changed.join(", ")}`, "#9c27b0");
         }
         return changed;
     }
@@ -1274,7 +1338,7 @@ let opacityValue = 0.95;
     function pickBestTeleportDialogOption(options, finalTarget) {
         if (!Array.isArray(options) || !options.length || !finalTarget) return null;
         const knownMaps = getKnownTeleportMaps();
-        const blockedRe = /(brak zezwolenia|nie mozesz|nie moĹĽesz|niedostep|niedostÄ™p|zablokowan|brak uprawnien|brak uprawnieĹ„)/i;
+        const blockedRe = /(brak zezwolenia|nie mozesz|nie możesz|niedostep|niedostęp|zablokowan|brak uprawnien|brak uprawnień)/i;
         const finalNorm = normalizeDialogText(finalTarget);
         let best = null;
 
@@ -1305,7 +1369,7 @@ let opacityValue = 0.95;
     const SPECIAL_TRANSPORT_ROUTES = [
         {
             from: ["Port Tuzmer"],
-            to: ["Archipelag Bremus An", "Wyspa Ingotia", "Wyspa Rem", "Wyspa Caneum", "Magradit", "Wyspa WrakĂłw", "Agia Triada"],
+            to: ["Archipelag Bremus An", "Wyspa Ingotia", "Wyspa Rem", "Wyspa Caneum", "Magradit", "Wyspa Wraków", "Agia Triada"],
             npcNickIncludes: ["kapitan fork la rush"],
             optionPatterns: {
                 boardShip: [
@@ -1325,12 +1389,12 @@ let opacityValue = 0.95;
             npcNickIncludes: ["lodka"],
             preferGateway: true,
             optionPatterns: {
-                boardShip: ["udaje sie na poklad", "na poklad poslaĹ„ca", "na poklad poslanca"],
+                boardShip: ["udaje sie na poklad", "na poklad poslańca", "na poklad poslanca"],
                 confirm: ["cale szczescie", "w droge", "powrot"]
             }
         },
         {
-            from: ["PosĹ‚aniec Ĺšmierci", "PosĹ‚aniec Ĺšmierci - PokĹ‚ad", "Poslaniec Smierci", "Poslaniec Smierci - Poklad"],
+            from: ["Posłaniec Śmierci", "Posłaniec Śmierci - Pokład", "Poslaniec Smierci", "Poslaniec Smierci - Poklad"],
             to: ["Port Tuzmer", "Tuzmer"],
             npcNickIncludes: ["oficer statku"],
             optionPatterns: {
@@ -1363,7 +1427,7 @@ let opacityValue = 0.95;
         expAntiLagMin: 1500, expAntiLagMax: 2500,
 
         useTeleports: true,
-        discord: { enabled: false, url: '' }, // NOWOĹšÄ†: PamiÄ™Ä‡ ustawieĹ„ Discorda
+        discord: { enabled: false, url: '' }, // NOWOŚĆ: Pamięć ustawień Discorda
 
         unlockedTeleports: JSON.parse(localStorage.getItem('hero_teleports_v64') || '{"Thuzal":false, "Tuzmer":false, "Karka-han":false, "Werbin":false, "Torneg":false, "Ithan":false, "Eder":false}'),
         exp: {
@@ -1446,7 +1510,7 @@ let opacityValue = 0.95;
 
     // ==========================================
 
-    // LOGIKA INTELIGENTNEGO ZASIÄGU
+    // LOGIKA INTELIGENTNEGO ZASIĘGU
 
     // ==========================================
 
@@ -1494,7 +1558,7 @@ let opacityValue = 0.95;
 
     }
 
-// --- POCZÄ„TEK BRAKUJÄ„CYCH FUNKCJI ---
+// --- POCZĄTEK BRAKUJĄCYCH FUNKCJI ---
 function getMobRank(n) {
     if (!n) return "normal";
     let wt = parseInt(n.wt, 10) || 0;
@@ -1524,7 +1588,7 @@ function buildDistanceMapFromHero() {
     if (window._walkMaskMapName !== currentMapName) {
         window.margoWalkableMask.clear();
         if (typeof updateWalkableArea === 'function') {
-            HERO_LOG.info(`OdĹ›wieĹĽam maskÄ™ przejĹ›cia dla mapy: ${currentMapName}`);
+            HERO_LOG.info(`Odświeżam maskę przejścia dla mapy: ${currentMapName}`);
             updateWalkableArea();
         }
     }
@@ -1660,7 +1724,7 @@ function getCurrentMapGatewaysForRadar(distMap) {
                 if(dist < minDist) { minDist = dist; bestStand = {x: nx, y: ny}; }
             }
         }
-        let cleanName = (data.name || data.targetName || data.title || data.tooltip || "").toString().replace(/<[^>]*>?/gm, '').split('\n')[0].replace("PrzejĹ›cie do:", "").trim();
+        let cleanName = (data.name || data.targetName || data.title || data.tooltip || "").toString().replace(/<[^>]*>?/gm, '').split('\n')[0].replace("Przejście do:", "").trim();
         found.push({ x: data.x, y: data.y, targetMap: cleanName, reachable: isReachable, stand: bestStand, pathDistance: minDist });
     });
     return found;
@@ -1767,8 +1831,8 @@ function markGatewayCoordBad(from, to, x, y, durationMs = 600000, reason = 'stuc
         }
     }
 
-    if (window.logExp) window.logExp(`đźš§ Odrzucam podejrzanÄ… kratkÄ™ przejĹ›cia [${x},${y}] dla [${from}] â†’ [${to}] (${reason}).`, '#ff8a65');
-    if (window.logHero) window.logHero(`đźš§ Odrzucam podejrzanÄ… kratkÄ™ przejĹ›cia [${x},${y}] dla [${from}] â†’ [${to}] (${reason}).`, '#ff8a65');
+    if (window.logExp) window.logExp(`🚧 Odrzucam podejrzaną kratkę przejścia [${x},${y}] dla [${from}] → [${to}] (${reason}).`, '#ff8a65');
+    if (window.logHero) window.logHero(`🚧 Odrzucam podejrzaną kratkę przejścia [${x},${y}] dla [${from}] → [${to}] (${reason}).`, '#ff8a65');
     return true;
 }
 
@@ -1807,7 +1871,7 @@ function banEdge(from, to, durationMs = 30000) {
     const expiresAt = Date.now() + Math.max(1000, durationMs || 0);
     window.__bannedEdges[from][to] = expiresAt;
     window.__routePathCacheVersion = (window.__routePathCacheVersion || 0) + 1;
-    if (window.logHero) window.logHero(`â›” BlokujÄ™ przejĹ›cie: [${from}] â†’ [${to}] na ${Math.round((expiresAt - Date.now()) / 1000)}s`, '#ff9800');
+    if (window.logHero) window.logHero(`⛔ Blokuję przejście: [${from}] → [${to}] na ${Math.round((expiresAt - Date.now()) / 1000)}s`, '#ff9800');
 }
 
 function banPhysicalEdge(from, to, durationMs = 120000) {
@@ -1817,7 +1881,7 @@ function banPhysicalEdge(from, to, durationMs = 120000) {
     const expiresAt = Date.now() + Math.max(1000, durationMs || 0);
     window.__physicalBlockedEdges[from][to] = expiresAt;
     window.__routePathCacheVersion = (window.__routePathCacheVersion || 0) + 1;
-    if (window.logExp) window.logExp(`đź§± PrzejĹ›cie fizycznie niedostÄ™pne: [${from}] â†’ [${to}], szukam objazdu.`, '#ff8a65');
+    if (window.logExp) window.logExp(`🧱 Przejście fizycznie niedostępne: [${from}] → [${to}], szukam objazdu.`, '#ff8a65');
 }
 
 function isPhysicalEdgeBlocked(from, to, now = Date.now()) {
@@ -2015,7 +2079,7 @@ function isMapKnownInGatewayBase(mapName) {
     }
     return false;
 }
-// --- KONIEC BRAKUJÄ„CYCH FUNKCJI ---
+// --- KONIEC BRAKUJĄCYCH FUNKCJI ---
     // ==========================================
 
     // INICJALIZACJA
@@ -2036,7 +2100,7 @@ function isMapKnownInGatewayBase(mapName) {
 
                 // --- AUTO-WZNAWIANIE BOTA PO REFRESHU (F5 / RELOAD) ---
                 window.addEventListener('beforeunload', () => {
-                    // Zapisujemy, czy bot byĹ‚ wĹ‚Ä…czony tuĹĽ przed znikniÄ™ciem strony
+                    // Zapisujemy, czy bot był włączony tuż przed zniknięciem strony
                     if (window.isExping) sessionStorage.setItem('hero_resume_exp', 'true');
                     else sessionStorage.removeItem('hero_resume_exp');
 
@@ -2048,17 +2112,17 @@ function isMapKnownInGatewayBase(mapName) {
                     if (sessionStorage.getItem('hero_resume_exp') === 'true') {
                         let btn = document.getElementById('btnStartExp');
                         if (btn && !window.isExping) btn.click();
-                        if (window.logExp) window.logExp("đź”„ Automatycznie wznowiono Expa po odĹ›wieĹĽeniu gry!", "#4caf50");
+                        if (window.logExp) window.logExp("🔄 Automatycznie wznowiono Expa po odświeżeniu gry!", "#4caf50");
                     } else if (sessionStorage.getItem('hero_resume_patrol') === 'true') {
                         let btn = document.getElementById('btnStartStop');
                         if (btn && typeof isPatrolling !== 'undefined' && !isPatrolling) btn.click();
-                        if (window.logHero) window.logHero("đź”„ Automatycznie wznowiono Patrol po odĹ›wieĹĽeniu gry!", "#4caf50");
+                        if (window.logHero) window.logHero("🔄 Automatycznie wznowiono Patrol po odświeżeniu gry!", "#4caf50");
                     }
-                }, 1500); // 1.5 sekundy opĂłĹşnienia, ĹĽeby gra "odetchnÄ™Ĺ‚a" po wczytaniu
+                }, 1500); // 1.5 sekundy opóźnienia, żeby gra "odetchnęła" po wczytaniu
             }
         }, 2000);
 
-    // Zabezpieczenie brakujÄ…cej funkcji, naprawia krytyczny CRASH!
+    // Zabezpieczenie brakującej funkcji, naprawia krytyczny CRASH!
     function setupMapClickListener() {
         document.body.addEventListener('click', (e) => {
             if (isWaitingForBossClick && activeBossTarget) {
@@ -2115,7 +2179,7 @@ window.heroMapOrder = heroMapOrder;
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
-        }).catch(e => HERO_LOG.error("BĹ‚Ä…d wysyĹ‚ania na Discorda.", e));
+        }).catch(e => HERO_LOG.error("Błąd wysyłania na Discorda.", e));
     };
 
     function saveGateways() {
@@ -2129,7 +2193,7 @@ window.heroMapOrder = heroMapOrder;
 
 
 
-// TwĂłj perfekcyjny kalkulator na bazie Engine.bags
+// Twój perfekcyjny kalkulator na bazie Engine.bags
     window.getBagStats = function() {
         if (typeof Engine === 'undefined' || !Engine.bags) return { freeSlots: 0, usedSlots: 0, totalCapacity: 0 };
 
@@ -2205,7 +2269,7 @@ function cleanOldGateways() {
                 let gw = globalGateways[src][target];
                 let tp = ZAKONNICY[src];
 
-                // AUTOMATYCZNE USUWANIE ZAKONNIKĂ“W Z BAZY BRAM
+                // AUTOMATYCZNE USUWANIE ZAKONNIKÓW Z BAZY BRAM
                 if (tp && gw && Math.abs(gw.x - tp.x) <= 2 && Math.abs(gw.y - tp.y) <= 2) {
                     delete globalGateways[src][target];
                     changed = true;
@@ -2230,7 +2294,7 @@ function cleanOldGateways() {
     }
 
     window.saveGatewayToDB = function(source, target, x, y, options = {}) {
-        // Blokada przed rÄ™cznym nagraniem Zakonnika
+        // Blokada przed ręcznym nagraniem Zakonnika
         if (!source || !target) return null;
         x = parseInt(x, 10);
         y = parseInt(y, 10);
@@ -2532,17 +2596,17 @@ let attackInterval = null;
 
         let targetId = parseInt(npcId, 10);
 
-        HERO_LOG.info(`Cel namierzony (ID: ${targetId}). WĹ‚Ä…czam Kieszonkowego Berserka...`);
+        HERO_LOG.info(`Cel namierzony (ID: ${targetId}). Włączam Kieszonkowego Berserka...`);
 
 
 
-        // METODA GARGONEMA - WĹ‚Ä…cza natywnego auto-ataka prosto na serwerze gry
+        // METODA GARGONEMA - Włącza natywnego auto-ataka prosto na serwerze gry
 
         if (typeof window._g === 'function') {
-            window._g(`settings&action=update&id=34&v=1`); // WĹ‚Ä…cz Berserka
+            window._g(`settings&action=update&id=34&v=1`); // Włącz Berserka
             window._g(`settings&action=update&id=34&key=elite&v=1`); // Bij Elity
-            window._g(`settings&action=update&id=34&key=elite2&v=1`); // Bij Elity 2 i HerosĂłw
-            if (!window.RouteCombatFSM || window.RouteCombatFSM.canAutoAttack()) window._g(`fight&a=attack&id=${targetId}`); // WymuĹ› start
+            window._g(`settings&action=update&id=34&key=elite2&v=1`); // Bij Elity 2 i Herosów
+            if (!window.RouteCombatFSM || window.RouteCombatFSM.canAutoAttack()) window._g(`fight&a=attack&id=${targetId}`); // Wymuś start
         }
 
         attackInterval = setInterval(() => {
@@ -2551,7 +2615,7 @@ let attackInterval = null;
 
 
 
-            // 1. JeĹ›li walka trwa - wyĹ‚Ä…czamy Berserka (ĹĽeby nie biegaĹ‚ dalej) i koĹ„czymy pÄ™tlÄ™
+            // 1. Jeśli walka trwa - wyłączamy Berserka (żeby nie biegał dalej) i kończymy pętlę
 
             if (Engine.battle && (Engine.battle.show || Engine.battle.d)) {
 
@@ -2559,7 +2623,7 @@ let attackInterval = null;
 
                 if (typeof window._g === 'function') window._g(`settings&action=update&id=34&v=0`);
 
-                HERO_LOG.success("Walka rozpoczÄ™ta. Berserk wyĹ‚Ä…czony.");
+                HERO_LOG.success("Walka rozpoczęta. Berserk wyłączony.");
 
                 return;
 
@@ -2567,7 +2631,7 @@ let attackInterval = null;
 
 
 
-            // 2. JeĹ›li serwer jeszcze nie zareagowaĹ‚, podbiegamy standardowo i klikamy (Zabezpieczenie)
+            // 2. Jeśli serwer jeszcze nie zareagował, podbiegamy standardowo i klikamy (Zabezpieczenie)
 
             let npcs = (typeof Engine.npcs.check === 'function') ? Engine.npcs.check() : Engine.npcs.d;
 
@@ -2760,8 +2824,8 @@ let attackInterval = null;
                         let mapName = typeof Engine !== 'undefined' ? Engine.map.d.name : lastMapName;
                         window.sendDiscordWebhook(
                             "đźš¨ WYKRYTO CEL NA RADARZE!",
-                            `**ZnalazĹ‚em:** ${foundName}\n**Lokalizacja:** ${mapName} [X: ${nData.x}, Y: ${nData.y}]`,
-                            16753920 // ZĹ‚oty kolor
+                            `**Znalazłem:** ${foundName}\n**Lokalizacja:** ${mapName} [X: ${nData.x}, Y: ${nData.y}]`,
+                            16753920 // Złoty kolor
                         );
                     }
 
@@ -2781,7 +2845,7 @@ let attackInterval = null;
 
                         setTimeout(() => {
 
-                            // Naprawa: zamieniamy tekstowe ID (string) na liczbÄ™ (integer)
+                            // Naprawa: zamieniamy tekstowe ID (string) na liczbę (integer)
 
                             attackTarget(parseInt(id, 10), nData.x, nData.y);
 
@@ -2805,13 +2869,13 @@ let attackInterval = null;
 
    // ==========================================
 
-    // E2 / KOLOSY: Zapisywanie Aktualnych KoordynatĂłw
+    // E2 / KOLOSY: Zapisywanie Aktualnych Koordynatów
 
     // ==========================================
 
     window.saveCurrentCoordsForBoss = function(bossName) {
 
-        if (typeof Engine === 'undefined' || !Engine.hero || !Engine.hero.d) return heroAlert("BĹ‚Ä…d: Nie moĹĽna pobraÄ‡ Twojej pozycji.");
+        if (typeof Engine === 'undefined' || !Engine.hero || !Engine.hero.d) return heroAlert("Błąd: Nie można pobrać Twojej pozycji.");
 
         let cx = Engine.hero.d.x; let cy = Engine.hero.d.y;
 
@@ -2819,7 +2883,7 @@ let attackInterval = null;
 
         saveBossCoords(); updateUI();
 
-        heroAlert(`âś… PomyĹ›lnie zapisano koordynaty dla ${bossName}!\n\nZapisano TwojÄ… obecnÄ… pozycjÄ™:\nMapa: ${lastMapName}\nKratka: [${cx}, ${cy}]`);
+        heroAlert(`✅ Pomyślnie zapisano koordynaty dla ${bossName}!\n\nZapisano Twoją obecną pozycję:\nMapa: ${lastMapName}\nKratka: [${cx}, ${cy}]`);
 
     };
 
@@ -2829,11 +2893,11 @@ let attackInterval = null;
 
         let currentData = bossSavedCoords[bossName]; if (!currentData) return;
 
-        heroPrompt(`Edytuj oĹ› X dla ${bossName}:`, currentData.x, (newX) => {
+        heroPrompt(`Edytuj oś X dla ${bossName}:`, currentData.x, (newX) => {
 
             if(newX !== null && newX !== "") {
 
-                heroPrompt(`Edytuj oĹ› Y dla ${bossName}:`, currentData.y, (newY) => {
+                heroPrompt(`Edytuj oś Y dla ${bossName}:`, currentData.y, (newY) => {
 
                     if(newY !== null && newY !== "") {
 
@@ -2855,7 +2919,7 @@ let attackInterval = null;
 
     window.deleteBossCoords = function(bossName) {
 
-        heroConfirm(`Czy na pewno usunÄ…Ä‡ zapisane koordynaty dla bosa:\n${bossName}?`, (res) => {
+        heroConfirm(`Czy na pewno usunąć zapisane koordynaty dla bosa:\n${bossName}?`, (res) => {
 
             if(res) { delete bossSavedCoords[bossName]; saveBossCoords(); updateUI(); }
 
@@ -2881,7 +2945,7 @@ let attackInterval = null;
 
         banner.style.cssText = "position:fixed; top:10%; left:50%; transform:translateX(-50%); background:rgba(0, 172, 193, 0.9); border:2px solid #fff; color:#fff; padding:15px; font-size:16px; font-weight:bold; z-index:999999; border-radius:10px; pointer-events:none;";
 
-        banner.innerHTML = `đź–±ď¸Ź Kliknij w mapÄ™ by ustawiÄ‡ respawn dla: ${bossName}`;
+        banner.innerHTML = `🖱️ Kliknij w mapę by ustawić respawn dla: ${bossName}`;
 
         document.body.appendChild(banner);
 
@@ -2917,7 +2981,7 @@ let attackInterval = null;
 
 
 
-        // Boss wyĹ›wietla siÄ™ od (boss.level - 13) do jego maksa. Kolosy majÄ… limit = 999.
+        // Boss wyświetla się od (boss.level - 13) do jego maksa. Kolosy mają limit = 999.
 
         let suitable = dataArray.filter(e => playerLvl >= (e.level - 13) && playerLvl <= e.limit);
 
@@ -2925,9 +2989,9 @@ let attackInterval = null;
 
 
 
-        container.innerHTML = `<div style="font-size:10px; color:#a99a75; font-weight:bold;">Moby na TwĂłj poziom (od ${playerLvl - 13 > 0 ? playerLvl - 13 : 1} w gĂłrÄ™):</div>
+        container.innerHTML = `<div style="font-size:10px; color:#a99a75; font-weight:bold;">Moby na Twój poziom (od ${playerLvl - 13 > 0 ? playerLvl - 13 : 1} w górę):</div>
 
-                               <div style="font-size:11px; margin-top:3px; max-height:60px; overflow-y:auto; line-height:1.4;">${html || 'Brak mobĂłw w Twoim przedziale'}</div>`;
+                               <div style="font-size:11px; margin-top:3px; max-height:60px; overflow-y:auto; line-height:1.4;">${html || 'Brak mobów w Twoim przedziale'}</div>`;
 
     }
 
@@ -2954,7 +3018,7 @@ let attackInterval = null;
 // ==========================================
 
 // ==========================================
-    // AUTO-SKANER SILNIKA MARGONEM (Deep Engine Read - GrupujÄ…cy wejĹ›cia)
+    // AUTO-SKANER SILNIKA MARGONEM (Deep Engine Read - Grupujący wejścia)
     // ==========================================
     function autoLearnGateways() {
     if (typeof Engine === 'undefined' || !Engine.map || !Engine.map.d) return;
@@ -3010,7 +3074,7 @@ function autoDetectEngineData() {
     let currentName = Engine.map.d.name;
     if (!currentName || currentName === "undefined") return;
 
-    // --- ĹATKA: SYNCHRONIZACJA TELEPORTĂ“W NA PODSTAWIE NICKU ---
+    // --- ŁATKA: SYNCHRONIZACJA TELEPORTÓW NA PODSTAWIE NICKU ---
     if (Engine.hero && Engine.hero.d && Engine.hero.d.nick) {
         if (window.lastLoadedNick !== Engine.hero.d.nick) {
             window.lastLoadedNick = Engine.hero.d.nick;
@@ -3031,7 +3095,7 @@ function autoDetectEngineData() {
         try { learnCurrentTeleporterSource(currentName); } catch (e) {}
     }
 
-    // --- ĹATKA: SPRAWDZANIE AWANSU I AUTO-EXPOWISKO ---
+    // --- ŁATKA: SPRAWDZANIE AWANSU I AUTO-EXPOWISKO ---
     if (Engine.hero && Engine.hero.d && Engine.hero.d.lvl) {
         let currentLvl = Engine.hero.d.lvl;
         if (window.lastHeroExpLevel !== currentLvl) {
@@ -3169,7 +3233,7 @@ function autoDetectEngineData() {
 }
 
 // ==========================================
-    // RUSH MODE (PĹYNNY RUCH)
+    // RUSH MODE (PŁYNNY RUCH)
     // ==========================================
     window.rushToMap = function(targetMapName, x = null, y = null, fullPath = null, resumePatrol = false) {
         let currentSysMap = getCurrentMapName();
@@ -3200,20 +3264,20 @@ function autoDetectEngineData() {
         } catch (e) {
             window.rushFullPath = [];
         }
-        window.resumePatrolAfterRush = resumePatrol; // Flaga wznawiajÄ…ca szukanie Herosa!
+        window.resumePatrolAfterRush = resumePatrol; // Flaga wznawiająca szukanie Herosa!
 
         let btn = document.getElementById('btnStartStop');
         if (btn) {
-            btn.innerHTML = '<span class="btn-icon">âŹą</span><span>Stop RUSH</span>';
+            btn.innerHTML = '<span class="btn-icon">⏹</span><span>Stop RUSH</span>';
             btn.style.color = "#00acc1";
             btn.style.borderColor = "#00acc1";
         }
 
-        // Zabezpieczenie przed podwĂłjnymi logami
+        // Zabezpieczenie przed podwójnymi logami
         let groupName = typeof getExpGroupNameForMap === 'function' ? getExpGroupNameForMap(targetMapName) : null;
         let msg = groupName
-            ? `đźŹ Obieram kurs na: [${targetMapName}] â€˘ Grupa: [${groupName}]`
-            : `đźŹ Obieram kurs na: [${targetMapName}]`;
+            ? `🏃 Obieram kurs na: [${targetMapName}] • Grupa: [${groupName}]`
+            : `🏃 Obieram kurs na: [${targetMapName}]`;
         if (window._lastRushTargetLog !== msg) {
             if (window.logHero) window.logHero(msg, "#00acc1");
             if (window.logExp) window.logExp(msg, "#00acc1");
@@ -3223,7 +3287,7 @@ function autoDetectEngineData() {
         window.executeRushStep();
     };
 
-// --- SYSTEM ZWOJĂ“W TELEPORTACJI Z BAZÄ„ MAP (V4 - PARSER ZEWNÄTRZNY) ---
+// --- SYSTEM ZWOJÓW TELEPORTACJI Z BAZĄ MAP (V4 - PARSER ZEWNĘTRZNY) ---
     window.parseStatString = function(stat) {
         if (!stat || typeof stat !== "string") return {};
         const out = {};
@@ -3242,11 +3306,11 @@ function autoDetectEngineData() {
     };
 
     window.getMyItems = function() {
-        // Priorytetowo uĹĽywamy metody testMyItems() jeĹ›li jest dostÄ™pna
+        // Priorytetowo używamy metody testMyItems() jeśli jest dostępna
         if (typeof Engine !== 'undefined' && Engine.items && typeof Engine.items.testMyItems === 'function') {
             return Object.values(Engine.items.testMyItems()).map(i => i?.d || i).filter(Boolean);
         }
-        // Fallback dla innych trybĂłw
+        // Fallback dla innych trybów
         if (typeof Engine !== 'undefined' && Engine.heroEquipment && typeof Engine.heroEquipment.getHItems === 'function') {
             return Object.values(Engine.heroEquipment.getHItems()).map(i => i?.d || i).filter(Boolean);
         }
@@ -3269,7 +3333,7 @@ function autoDetectEngineData() {
             const stats = window.parseStatString(itemStat);
             if (!stats.teleport) continue;
 
-            // WyciÄ…gamy [mapId, x, y, mapName]
+            // Wyciągamy [mapId, x, y, mapName]
             const [mapId, x, y, mapName] = stats.teleport.split(",");
             if (!mapName) continue;
 
@@ -3277,7 +3341,7 @@ function autoDetectEngineData() {
             let reqLvl = parseInt(stats.reqLvl || stats.reqlvl || stats.lvl || 0);
             if (reqLvl && heroLvl < reqLvl) continue;
 
-            // WyrĂłwnanie wielkoĹ›ci liter do bazy pathfindera
+            // Wyrównanie wielkości liter do bazy pathfindera
             let exactMapName = allMapNames.find(k => k.toLowerCase() === mapName.trim().toLowerCase()) || mapName.trim();
             if (!allMapNames.includes(exactMapName)) exactMapName = exactMapName.replace(/\b\w/g, c => c.toUpperCase());
 
@@ -3304,7 +3368,7 @@ function autoDetectEngineData() {
                 window._g(`moveitem&st=1&id=${itemId}`);
             }
         } catch (e) {
-            HERO_LOG.error("BĹ‚Ä…d uĹĽycia teleportu.", e);
+            HERO_LOG.error("Błąd użycia teleportu.", e);
         }
     };
 
@@ -3319,7 +3383,7 @@ window.executeRushStep = function() {
             return;
         }
         if (!isRushing && !window.isRushing) return;
-        // Samonaprawa synchronizacji flag rusha (czÄ™Ĺ›Ä‡ moduĹ‚Ăłw ustawia tylko window.isRushing).
+        // Samonaprawa synchronizacji flag rusha (część modułów ustawia tylko window.isRushing).
         if (!isRushing && window.isRushing && rushTarget) {
             isRushing = true;
         }
@@ -3336,7 +3400,7 @@ window.executeRushStep = function() {
             window._lastRushNextMap = null;
             window._lastRushTargetLog = null;
             let btn = document.getElementById('btnStartStop');
-            if (btn) { btn.innerHTML = '<span class="btn-icon">â–¶</span><span>START</span>'; btn.style.color = "#4caf50"; btn.style.borderColor = "#4caf50"; }
+            if (btn) { btn.innerHTML = '<span class="btn-icon">▶</span><span>START</span>'; btn.style.color = "#4caf50"; btn.style.borderColor = "#4caf50"; }
 
             if (rushTargetX !== null && rushTargetY !== null) {
                 setTimeout(() => safeGoTo(rushTargetX, rushTargetY, false), 500);
@@ -3345,8 +3409,8 @@ window.executeRushStep = function() {
             if (window.resumePatrolAfterRush) {
                 window.resumePatrolAfterRush = false;
                 isPatrolling = true;
-                if (btn) { btn.innerHTML = '<span class="btn-icon">âŹą</span><span>STOP</span>'; btn.style.color = "#f44336"; btn.style.borderColor = "#f44336"; }
-                if (window.logHero) window.logHero(`âś… Dotarto na nowÄ… mapÄ™. AnalizujÄ™ teren...`, "#4caf50");
+                if (btn) { btn.innerHTML = '<span class="btn-icon">⏹</span><span>STOP</span>'; btn.style.color = "#f44336"; btn.style.borderColor = "#f44336"; }
+                if (window.logHero) window.logHero(`✅ Dotarto na nową mapę. Analizuję teren...`, "#4caf50");
                 setTimeout(() => { if (typeof executePatrolStep === 'function') executePatrolStep(); }, 1500);
             }
             return;
@@ -3358,14 +3422,14 @@ window.executeRushStep = function() {
         let currentDistance = path ? path.length : 999;
 
         if (!path) {
-            if (window.logExp) window.logExp(`đź§© Brak trasy [${currentSysMap}] â†’ [${rushTarget}], odĹ›wieĹĽam bazÄ™ przejĹ›Ä‡...`, '#ffb74d');
+            if (window.logExp) window.logExp(`🧩 Brak trasy [${currentSysMap}] → [${rushTarget}], odświeżam bazę przejść...`, '#ffb74d');
             if (typeof refreshGatewayBaseFromStorage === 'function') refreshGatewayBaseFromStorage();
             if (typeof autoLearnGateways === 'function') autoLearnGateways();
             if (typeof requestGatewayRefresh === 'function') requestGatewayRefresh('rush-no-path', true);
             path = typeof getShortestPath === 'function' ? getShortestPath(currentSysMap, rushTarget, routePathOptions()) : null;
             currentDistance = path ? path.length : 999;
 
-            // Awaryjnie: jeĹ›li jedyne znane przejĹ›cia sÄ… tymczasowo zbanowane, sprĂłbuj zignorowaÄ‡ bany krawÄ™dzi.
+            // Awaryjnie: jeśli jedyne znane przejścia są tymczasowo zbanowane, spróbuj zignorować bany krawędzi.
             if (!path && typeof getShortestPath === 'function') {
                 const emergencyPath = getShortestPath(currentSysMap, rushTarget, routePathOptions({ ignoreEdgeBans: true }));
                 if (emergencyPath && emergencyPath.length > 1) {
@@ -3377,8 +3441,8 @@ window.executeRushStep = function() {
                         if (Object.keys(window.__bannedEdges[currentSysMap]).length === 0) delete window.__bannedEdges[currentSysMap];
                         window.__routePathCacheVersion = (window.__routePathCacheVersion || 0) + 1;
                     }
-                    if (window.logExp) window.logExp(`đź§­ Awaryjny powrĂłt na trasÄ™: [${currentSysMap}] â†’ [${firstHop}] (pomijam chwilowe bany).`, '#66bb6a');
-                    if (window.logHero) window.logHero(`đź§­ Awaryjny powrĂłt na trasÄ™: [${currentSysMap}] â†’ [${firstHop}] (pomijam chwilowe bany).`, '#66bb6a');
+                    if (window.logExp) window.logExp(`🧭 Awaryjny powrót na trasę: [${currentSysMap}] → [${firstHop}] (pomijam chwilowe bany).`, '#66bb6a');
+                    if (window.logHero) window.logHero(`🧭 Awaryjny powrót na trasę: [${currentSysMap}] → [${firstHop}] (pomijam chwilowe bany).`, '#66bb6a');
                 }
             }
         }
@@ -3409,7 +3473,7 @@ window.executeRushStep = function() {
 
         if (bestTp && eqTeleportReady && savesEnough) {
             if (window._lastRushNextMap !== bestTp.map) {
-                let msg = `đź“ś UĹĽywam zwoju: ${bestTp.map}! (Trasa skraca siÄ™ z ${currentDistance} do ${bestDist} map)`;
+                let msg = `📜 Używam zwoju: ${bestTp.map}! (Trasa skraca się z ${currentDistance} do ${bestDist} map)`;
                 if (window.logExp) window.logExp(msg, "#e040fb");
                 if (window.logHero) window.logHero(msg, "#e040fb");
                 window._lastRushNextMap = bestTp.map;
@@ -3465,7 +3529,7 @@ window.executeRushStep = function() {
         if (!nextMap) {
             isRushing = false;
             window.isRushing = false;
-            let msg = `đźš¨ BĹÄ„D TRASY! Bot nie wie jak dojĹ›Ä‡ z [${currentSysMap}] do [${rushTarget}].`;
+            let msg = `🚨 BŁĄD TRASY! Bot nie wie jak dojść z [${currentSysMap}] do [${rushTarget}].`;
             if (window.logHero) window.logHero(msg, "#e53935");
             if (window.logExp) window.logExp(msg, "#e53935");
             if (window.isExping) document.getElementById('btnStartExp')?.click();
@@ -3476,8 +3540,8 @@ window.executeRushStep = function() {
         const hasSpecialTransport = typeof getSpecialTransportRoute === 'function' && !!getSpecialTransportRoute(currentSysMap, nextMap);
         if (hasSpecialTransport) {
             if (window._lastRushNextMap !== nextMap) {
-                if (window.logExp) window.logExp(`â›´ď¸Ź UĹĽywam transportu NPC: [${currentSysMap}] â†’ [${nextMap}]`, "#26c6da");
-                if (window.logHero) window.logHero(`â›´ď¸Ź UĹĽywam transportu NPC: [${currentSysMap}] â†’ [${nextMap}]`, "#26c6da");
+                if (window.logExp) window.logExp(`⛴️ Używam transportu NPC: [${currentSysMap}] → [${nextMap}]`, "#26c6da");
+                if (window.logHero) window.logHero(`⛴️ Używam transportu NPC: [${currentSysMap}] → [${nextMap}]`, "#26c6da");
                 window._lastRushNextMap = nextMap;
             }
             clearTimeout(rushInterval);
@@ -3494,14 +3558,14 @@ window.executeRushStep = function() {
 
         if (isTeleportRoute) {
             if (window._lastRushNextMap !== nextMap) {
-                if (window.logExp) window.logExp(`đźš€ TeleportujÄ™ (Zakonnik) do: ${nextMap}`, "#9c27b0");
-                if (window.logHero) window.logHero(`đźš€ TeleportujÄ™ (Zakonnik) do: ${nextMap}`, "#9c27b0");
+                if (window.logExp) window.logExp(`🚀 Teleportuję (Zakonnik) do: ${nextMap}`, "#9c27b0");
+                if (window.logHero) window.logHero(`🚀 Teleportuję (Zakonnik) do: ${nextMap}`, "#9c27b0");
                 window._lastRushNextMap = nextMap;
             }
             clearTimeout(rushInterval);
             rushInterval = setTimeout(() => window.handleTeleportNPC(nextMap), 200);
         } else {
-            // --- SPRAWDZANIE BRAM (Z RADAREM ĹšCIAN) ---
+            // --- SPRAWDZANIE BRAM (Z RADAREM ŚCIAN) ---
             let targetX = null, targetY = null;
             let doorInfo = "";
             let liveDoor = typeof getBestReachableGatewayToMap === 'function' ? getBestReachableGatewayToMap(nextMap) : null;
@@ -3513,7 +3577,7 @@ window.executeRushStep = function() {
             } else if (liveDoor && liveDoor.reachable) {
                 targetX = liveDoor.x;
                 targetY = liveDoor.y;
-                doorInfo = "(ZasiÄ™g radaru)";
+                doorInfo = "(Zasięg radaru)";
             } else if (baseDoor) {
                 let distMap = typeof buildDistanceMapFromHero === 'function' ? buildDistanceMapFromHero() : new Map();
                 let bestBaseCoord = typeof pickBestReachableGatewayCoordFromBaseDoor === 'function'
@@ -3523,7 +3587,7 @@ window.executeRushStep = function() {
                 if (bestBaseCoord) {
                     targetX = bestBaseCoord.x;
                     targetY = bestBaseCoord.y;
-                    doorInfo = `(Z pamiÄ™ci bazy, d=${bestBaseCoord.pathDistance})`;
+                    doorInfo = `(Z pamięci bazy, d=${bestBaseCoord.pathDistance})`;
                 }
             }
 
@@ -3560,10 +3624,10 @@ window.executeRushStep = function() {
                         source: 'rush-fallback'
                     };
                     if (window._lastRushNextMap !== immediateHop) {
-                        let suffix = fallback.finalTarget ? ` â†’ cel trasy: ${fallback.finalTarget}` : "";
-                        if (!suffix && fallback.nextMap && fallback.nextMap !== immediateHop) suffix = ` â†’ cel trasy: ${fallback.nextMap}`;
-                        if (window.logExp) window.logExp(`đźšŞ BiegnÄ™ do: ${immediateHop}${suffix} (awaryjny tranzyt przez widoczne przejĹ›cie)`, "#ba68c8");
-                        if (window.logHero) window.logHero(`đźšŞ BiegnÄ™ do: ${immediateHop}${suffix} (awaryjny tranzyt przez widoczne przejĹ›cie)`, "#ba68c8");
+                        let suffix = fallback.finalTarget ? ` → cel trasy: ${fallback.finalTarget}` : "";
+                        if (!suffix && fallback.nextMap && fallback.nextMap !== immediateHop) suffix = ` → cel trasy: ${fallback.nextMap}`;
+                        if (window.logExp) window.logExp(`🚪 Biegnę do: ${immediateHop}${suffix} (awaryjny tranzyt przez widoczne przejście)`, "#ba68c8");
+                        if (window.logHero) window.logHero(`🚪 Biegnę do: ${immediateHop}${suffix} (awaryjny tranzyt przez widoczne przejście)`, "#ba68c8");
                         window._lastRushNextMap = immediateHop;
                     }
                     safeGoTo(fallback.door.x, fallback.door.y, false);
@@ -3572,7 +3636,7 @@ window.executeRushStep = function() {
                     return;
                 }
 
-                // Odpali siÄ™ po wykluczeniu zablokowanej bramy - obliczy nowÄ… drogÄ™ wokĂłĹ‚!
+                // Odpali się po wykluczeniu zablokowanej bramy - obliczy nową drogę wokół!
                 window.rushNextMap = null;
                 clearTimeout(rushInterval);
                 rushInterval = setTimeout(window.executeRushStep, 250);
@@ -3580,8 +3644,8 @@ window.executeRushStep = function() {
             }
 
             if (window._lastRushNextMap !== nextMap) {
-                if (window.logExp) window.logExp(`đźšŞ BiegnÄ™ do przejĹ›cia na: ${nextMap} ${doorInfo}`, "#ba68c8");
-                if (window.logHero) window.logHero(`đźšŞ BiegnÄ™ do przejĹ›cia na: ${nextMap} ${doorInfo}`, "#ba68c8");
+                if (window.logExp) window.logExp(`🚪 Biegnę do przejścia na: ${nextMap} ${doorInfo}`, "#ba68c8");
+                if (window.logHero) window.logHero(`🚪 Biegnę do przejścia na: ${nextMap} ${doorInfo}`, "#ba68c8");
                 window._lastRushNextMap = nextMap;
             }
 
@@ -3660,8 +3724,8 @@ window.executeRushStep = function() {
                         safeGoTo(exactX, exactY, false);
                     }
                     if (stuckCount > 15) {
-                        if (window.logHero) window.logHero("âš ď¸Ź Brama nieosiÄ…galna! Szukam innej drogi...", "#ffb300");
-                        if (window.logExp) window.logExp("âš ď¸Ź Brama nieosiÄ…galna! Szukam innej drogi...", "#ffb300");
+                        if (window.logHero) window.logHero("⚠️ Brama nieosiągalna! Szukam innej drogi...", "#ffb300");
+                        if (window.logExp) window.logExp("⚠️ Brama nieosiągalna! Szukam innej drogi...", "#ffb300");
                         if (typeof markGatewayAsBlocked === 'function') markGatewayAsBlocked(currentSysMap, nextMap, 90000, 'stuck');
                         window.executeRushStep();
                         return;
@@ -3700,19 +3764,19 @@ window.executeRushStep = function() {
             window.rushGateLastClickAt = Date.now();
         }
 
-        // POPRAWKA (RUSH): Gdy stoimy 1 kratkÄ™ od bramy i nie ruszamy siÄ™ przez dĹ‚uĹĽej niĹĽ N sekund,
-        // wymuszamy wejĹ›cie bezpoĹ›rednio na kratkÄ™ przejĹ›cia (wÄ…skie gardĹ‚a / 3 strony kolizji).
+        // POPRAWKA (RUSH): Gdy stoimy 1 kratkę od bramy i nie ruszamy się przez dłużej niż N sekund,
+        // wymuszamy wejście bezpośrednio na kratkę przejścia (wąskie gardła / 3 strony kolizji).
         const isMovingNow = !!(Engine?.hero?.d?.path && Engine.hero.d.path.length > 0);
         if (dist <= 1 && !isMovingNow) {
             if (!window.rushGatewayStallSince) window.rushGatewayStallSince = Date.now();
             const stallMs = Date.now() - window.rushGatewayStallSince;
             if (stallMs > 2200) {
                 if (window.logExp && window._lastGateForceLog !== `${currentSysMap}:${nextMap}`) {
-                    window.logExp(`đź§· Wymuszam krok na kratkÄ™ przejĹ›cia [${exactX},${exactY}] â†’ [${nextMap}] (odblokowanie).`, "#ffb74d");
+                    window.logExp(`🧷 Wymuszam krok na kratkę przejścia [${exactX},${exactY}] → [${nextMap}] (odblokowanie).`, "#ffb74d");
                     window._lastGateForceLog = `${currentSysMap}:${nextMap}`;
                 }
                 if (typeof window.safeGoTo === 'function') {
-                    // Nie wymuszamy obchodzenia throttle w bramie â€” bywa to odrzucane przez serwer.
+                    // Nie wymuszamy obchodzenia throttle w bramie — bywa to odrzucane przez serwer.
                     window.__pendingGatewayTransition = {
                         fromMap: currentSysMap,
                         toMap: nextMap,
@@ -3740,14 +3804,14 @@ window.executeRushStep = function() {
             const stateKey = `${currentSysMap}->${nextMap}@${exactX},${exactY}`;
             if (GateRecovery.state.key !== stateKey) GateRecovery.state = { key: stateKey, attempts: 0, blockedUntil: 0 };
             GateRecovery.state.attempts++;
-            HeroLogger.emit('WARN', 'GATE_BLOCKED', `Brama zajÄ™ta (${GateRecovery.state.attempts})`, "#ffb300", { dedupeMs: 2800 });
+            HeroLogger.emit('WARN', 'GATE_BLOCKED', `Brama zajęta (${GateRecovery.state.attempts})`, "#ffb300", { dedupeMs: 2800 });
 
             window.__movementLock = Date.now() + 1500;
             const attempts = GateRecovery.state.attempts;
             if (gateCoordSource === "memory" && attempts >= 3) {
                 if (typeof markGatewayCoordBad === 'function') markGatewayCoordBad(currentSysMap, nextMap, exactX, exactY, 20 * 60 * 1000, 'memory-gate-stuck');
                 if (typeof markGatewayAsBlocked === 'function') markGatewayAsBlocked(currentSysMap, nextMap, 90000, 'stuck');
-                HeroLogger.emit('WARN', 'RECOVERY_STEP', `BĹ‚Ä™dna kratka bramy z pamiÄ™ci: [${exactX},${exactY}], przeliczam trasÄ™.`, "#ff8a65");
+                HeroLogger.emit('WARN', 'RECOVERY_STEP', `Błędna kratka bramy z pamięci: [${exactX},${exactY}], przeliczam trasę.`, "#ff8a65");
                 GateRecovery.state.attempts = 0;
                 window.rushNextMap = null;
                 clearTimeout(rushInterval);
@@ -3756,10 +3820,10 @@ window.executeRushStep = function() {
             }
             let moved = false;
             if (attempts === 1) {
-                // krĂłtki wait + retry klikniÄ™cia
+                // krótki wait + retry kliknięcia
             } else if (attempts === 2) {
                 moved = GateRecovery.tryStep(cx, cy, [[0,1], [0,-1]]);
-                HeroLogger.emit('INFO', 'RECOVERY_STEP', `GateRecovery: krok w tyĹ‚`, "#ffcc80");
+                HeroLogger.emit('INFO', 'RECOVERY_STEP', `GateRecovery: krok w tył`, "#ffcc80");
             } else if (attempts === 3) {
                 moved = GateRecovery.tryStep(cx, cy, [[1,0], [-1,0], [1,1], [-1,-1]]);
                 HeroLogger.emit('INFO', 'RECOVERY_STEP', `GateRecovery: krok w bok`, "#ffcc80");
@@ -3771,7 +3835,7 @@ window.executeRushStep = function() {
                 if (typeof markGatewayAsBlocked === 'function' && attempts >= 6) {
                     if (typeof markGatewayCoordBad === 'function') markGatewayCoordBad(currentSysMap, nextMap, exactX, exactY, 10 * 60 * 1000, `gate-${gateCoordSource}-stuck`);
                     markGatewayAsBlocked(currentSysMap, nextMap, 90000, 'stuck');
-                    HeroLogger.emit('WARN', 'RECOVERY_STEP', `GateRecovery: oznaczam bramÄ™ jako czasowo zablokowanÄ…`, "#ff8a65");
+                    HeroLogger.emit('WARN', 'RECOVERY_STEP', `GateRecovery: oznaczam bramę jako czasowo zablokowaną`, "#ff8a65");
                     GateRecovery.state.attempts = 0;
                     clearTimeout(rushInterval);
                     rushInterval = setTimeout(window.executeRushStep, 450);
@@ -3787,7 +3851,7 @@ window.executeRushStep = function() {
     };
 
 // ==========================================
-    // ALGORYTM DIJKSTRY (Z CZARNÄ„ LISTÄ„ BRAM I WAGAMI)
+    // ALGORYTM DIJKSTRY (Z CZARNĄ LISTĄ BRAM I WAGAMI)
     // ==========================================
     function refreshGatewayBaseFromStorage() {
         try {
@@ -3813,13 +3877,13 @@ window.executeRushStep = function() {
             vLower.includes("dom ") ||
             vLower.includes("domu") ||
             vLower.includes("mlyn") ||
-            vLower.includes("mĹ‚yn") ||
+            vLower.includes("młyn") ||
             vLower.includes("jaskinia") ||
             vLower.includes("grota") ||
             vLower.includes("kopalnia") ||
             vLower.includes("piwnica") ||
             vLower.includes("pietro") ||
-            vLower.includes("piÄ™tro") ||
+            vLower.includes("piętro") ||
             vLower.includes("parter") ||
             vLower.includes("komnata") ||
             vLower.includes("korytarz")
@@ -4142,7 +4206,7 @@ window.handleTeleportNPC = function(targetMap) {
         HeroTeleportModule.processDialog(
             targetMap,
             () => {
-                if (window.isExping) { window.logExp("Teleport zablokowany! Brak opĹ‚aty.", "#e53935"); document.getElementById('btnStartExp').click(); }
+                if (window.isExping) { window.logExp("Teleport zablokowany! Brak opłaty.", "#e53935"); document.getElementById('btnStartExp').click(); }
                 else stopPatrol(false);
             },
             () => {
@@ -4166,8 +4230,8 @@ window.handleTeleportNPC = function(targetMap) {
         return (aliases || []).some(alias => {
             const a = normalizeDialogText(alias);
             if (!a) return false;
-            // Celowo bez "a.includes(currNorm)" â€“ powodowaĹ‚o faĹ‚szywe dopasowanie
-            // "Tuzmer" => "Port Tuzmer" i uruchamianie transportu na zĹ‚ej mapie.
+            // Celowo bez "a.includes(currNorm)" – powodowało fałszywe dopasowanie
+            // "Tuzmer" => "Port Tuzmer" i uruchamianie transportu na złej mapie.
             return currNorm === a || currNorm.includes(a);
         });
     }
@@ -4216,7 +4280,7 @@ window.handleTeleportNPC = function(targetMap) {
         const stopWords = new Set(["wyspa", "archipelag", "na", "do", "od", "z", "ze"]);
         const simplifyWord = (word) => {
             if (!word) return "";
-            const endings = ["owie", "owiec", "owie", "owej", "owego", "owym", "ami", "ach", "owie", "owi", "ie", "ia", "iu", "a", "e", "u", "y", "Ä…", "Ä™"]; 
+            const endings = ["owie", "owiec", "owie", "owej", "owego", "owym", "ami", "ach", "owie", "owi", "ie", "ia", "iu", "a", "e", "u", "y", "ą", "ę"]; 
             for (const end of endings) {
                 if (word.length > end.length + 2 && word.endsWith(end)) {
                     return word.slice(0, -end.length);
@@ -4381,7 +4445,7 @@ window.handleTeleportNPC = function(targetMap) {
         ];
         for (const patterns of tryPatterns) {
             if (clickDialogOptionByPatterns(patterns, targetMap)) {
-                if (window.logExp) window.logExp(`â›´ď¸Ź Transport: wybieram opcjÄ™ dla [${targetMap}]`, "#26c6da");
+                if (window.logExp) window.logExp(`⛴️ Transport: wybieram opcję dla [${targetMap}]`, "#26c6da");
                 rescheduleSpecialTransport(targetMap);
                 return true;
             }
@@ -4417,9 +4481,9 @@ window.handleTeleportNPC = function(targetMap) {
         }
     }
 
-    // --- FUNKCJE WSPOMAGAJÄ„CE ---
+    // --- FUNKCJE WSPOMAGAJĄCE ---
 
-    // Symuluje uderzenie palcem w klawiaturÄ™ (KeyDown + KeyUp)
+    // Symuluje uderzenie palcem w klawiaturę (KeyDown + KeyUp)
 
     function simulateKeyPress(keyChar) {
 
@@ -4473,9 +4537,9 @@ window.handleTeleportNPC = function(targetMap) {
 
         let modalContent = `
 
-            <div style="margin-bottom:10px; color:#00acc1; font-weight:bold;">âš™ď¸Ź KREATOR AUTO-TRASY</div>
+            <div style="margin-bottom:10px; color:#00acc1; font-weight:bold;">⚙️ KREATOR AUTO-TRASY</div>
 
-            <div style="margin-bottom:10px; font-size:11px; color:#a99a75;">Algorytm poĹ‚Ä…czy mapy logicznÄ… pÄ™tlÄ…, duplikujÄ…c Ĺ›lepe zauĹ‚ki na liĹ›cie.</div>
+            <div style="margin-bottom:10px; font-size:11px; color:#a99a75;">Algorytm połączy mapy logiczną pętlą, duplikując ślepe zaułki na liście.</div>
 
             <select id="startMapSelect" style="width:100%; padding:5px; background:#0f0f0f; color:#d4af37; border:1px solid #4a3f2b; margin-bottom:10px; outline:none; text-align:center;">
 
@@ -4483,7 +4547,7 @@ window.handleTeleportNPC = function(targetMap) {
 
             </select>
 
-            <div class="nav-row"><label style="margin-bottom: 2px;">ZasiÄ™g omijania punktĂłw / losowoĹ›Ä‡ trasy (kratki):</label><input type="number" id="inpRandomInKreator" value="${botSettings.randomRadius}" min="0" max="5"></div>
+            <div class="nav-row"><label style="margin-bottom: 2px;">Zasięg omijania punktów / losowość trasy (kratki):</label><input type="number" id="inpRandomInKreator" value="${botSettings.randomRadius}" min="0" max="5"></div>
 
         `;
 
@@ -4514,7 +4578,7 @@ window.runRoutingAlgorithm = function(hero, targets, startMap) {
 
         if (unvisited.has(currentMap)) unvisited.delete(currentMap);
 
-        // Do kalkulacji odlegĹ‚oĹ›ci Ĺ›ledzimy naszÄ… fizycznÄ… pozycjÄ™ X, Y
+        // Do kalkulacji odległości śledzimy naszą fizyczną pozycję X, Y
         let currentX = (typeof Engine !== 'undefined' && Engine.hero) ? Engine.hero.d.x : 32;
         let currentY = (typeof Engine !== 'undefined' && Engine.hero) ? Engine.hero.d.y : 32;
 
@@ -4522,7 +4586,7 @@ window.runRoutingAlgorithm = function(hero, targets, startMap) {
             currentX = heroData[hero][currentMap][0][0]; currentY = heroData[hero][currentMap][0][1];
         }
 
-        // --- FAZA 1: OPTYMALIZACJA KOLEJNOĹšCI MAP ---
+        // --- FAZA 1: OPTYMALIZACJA KOLEJNOŚCI MAP ---
         while(unvisited.size > 0) {
             let bestPath = null;
             let bestTarget = null;
@@ -4531,7 +4595,7 @@ window.runRoutingAlgorithm = function(hero, targets, startMap) {
             for (let target of unvisited) {
                 let path = getShortestPath(currentMap, target, routePathOptions());
                 if (path) {
-                    // Waga 1: IloĹ›Ä‡ przejĹ›Ä‡ miÄ™dzy mapami (bardzo duĹĽy koszt, unikamy Ĺ‚adowania map)
+                    // Waga 1: Ilość przejść między mapami (bardzo duży koszt, unikamy ładowania map)
                     let score = (path.length - 1) * 10000;
 
                     // Waga 2: Dystans fizyczny do bramy
@@ -4540,7 +4604,7 @@ window.runRoutingAlgorithm = function(hero, targets, startMap) {
                         if (door) score += (Math.abs(currentX - door.x) + Math.abs(currentY - door.y)) * 10;
                     }
 
-                    // Waga 3: Szacowany koszt wejĹ›cia na pierwszego moba na nowej mapie
+                    // Waga 3: Szacowany koszt wejścia na pierwszego moba na nowej mapie
                     if (heroData[hero][target] && heroData[hero][target].length > 0) {
                         let entryDoor = null;
                         if (path.length > 1 && globalGateways[path[path.length-2]] && globalGateways[path[path.length-2]][target]) {
@@ -4558,23 +4622,23 @@ window.runRoutingAlgorithm = function(hero, targets, startMap) {
             }
 
             if (!bestPath) {
-                heroAlert(`đźš¨ Zatrzymano ukĹ‚adanie!\nAlgorytm utknÄ…Ĺ‚ na mapie:\n[${currentMap}]\nNie potrafi stÄ…d wyjĹ›Ä‡. Upewnij siÄ™, ĹĽe nagraĹ‚eĹ› bramy.`);
+                heroAlert(`🚨 Zatrzymano układanie!\nAlgorytm utknął na mapie:\n[${currentMap}]\nNie potrafi stąd wyjść. Upewnij się, że nagrałeś bramy.`);
                 break;
             }
 
-            // Wrzucamy Ĺ›cieĹĽkÄ™ do finalnej pÄ™tli
+            // Wrzucamy ścieżkę do finalnej pętli
             for (let i = 1; i < bestPath.length; i++) finalRoute.push(bestPath[i]);
             unvisited.delete(bestTarget);
             currentMap = bestTarget;
 
-            // Zaktualizuj pozycjÄ™ do koĹ„ca obliczonej mapy
+            // Zaktualizuj pozycję do końca obliczonej mapy
             if (heroData[hero][currentMap] && heroData[hero][currentMap].length > 0) {
                 let coords = heroData[hero][currentMap];
                 currentX = coords[coords.length - 1][0]; currentY = coords[coords.length - 1][1];
             }
         }
 
-        // --- FAZA 2: WEWNÄTRZNA OPTYMALIZACJA KOORDYNATĂ“W (Smart-Pathing na kaĹĽdej mapie) ---
+        // --- FAZA 2: WEWNĘTRZNA OPTYMALIZACJA KOORDYNATÓW (Smart-Pathing na każdej mapie) ---
         finalRoute.forEach((mapName, idx) => {
             if (heroData[hero] && heroData[hero][mapName] && heroData[hero][mapName].length > 1) {
                 let nextMap = finalRoute[(idx + 1) % finalRoute.length];
@@ -4588,7 +4652,7 @@ window.runRoutingAlgorithm = function(hero, targets, startMap) {
                 let originalCoords = [...heroData[hero][mapName]];
                 let optimizedCoords = [];
 
-                // Szacowanie punktu wejĹ›cia na mapÄ™
+                // Szacowanie punktu wejścia na mapę
                 let startX = 32, startY = 32;
                 let prevMap = idx > 0 ? finalRoute[idx - 1] : finalRoute[finalRoute.length - 1];
                 if (globalGateways[mapName] && globalGateways[mapName][prevMap]) {
@@ -4598,7 +4662,7 @@ window.runRoutingAlgorithm = function(hero, targets, startMap) {
 
                 let currX = startX, currY = startY;
 
-                // Algorytm Problem KomiwojaĹĽera (Nearest Neighbor z omijaniem wyjĹ›cia)
+                // Algorytm Problem Komiwojażera (Nearest Neighbor z omijaniem wyjścia)
                 while (originalCoords.length > 0) {
                     if (originalCoords.length === 1) {
                         optimizedCoords.push(originalCoords[0]);
@@ -4615,7 +4679,7 @@ window.runRoutingAlgorithm = function(hero, targets, startMap) {
                         let distToExit = 0;
                         if (exitGw) distToExit = Math.abs(pt[0] - exitGw.x) + Math.abs(pt[1] - exitGw.y);
 
-                        // Im mniejszy dystans tym lepiej. Odpychamy punkty, ktĂłre leĹĽÄ… blisko wyjĹ›cia (zostawiamy je na koniec)
+                        // Im mniejszy dystans tym lepiej. Odpychamy punkty, które leżą blisko wyjścia (zostawiamy je na koniec)
                         let score = distToPt - (distToExit * 0.4);
 
                         if (score < bestScore) {
@@ -4630,7 +4694,7 @@ window.runRoutingAlgorithm = function(hero, targets, startMap) {
                     currY = chosenPt[1];
                 }
 
-                // Ostatni szlif: Wymuszenie absolutnie najbliĹĽszego punktu do wyjĹ›cia jako ostatniego
+                // Ostatni szlif: Wymuszenie absolutnie najbliższego punktu do wyjścia jako ostatniego
                 if (exitGw && optimizedCoords.length > 1) {
                     let closestToExitIdx = 0;
                     let minDistToExit = Infinity;
@@ -4653,17 +4717,18 @@ window.runRoutingAlgorithm = function(hero, targets, startMap) {
         saveMapOrder();
         currentRouteIndex = -1; sessionStorage.removeItem('hero_route_index'); checkedMapsThisSession.clear(); saveCheckedMaps(); updateUI();
 
-        heroAlert("đź§  Zainstalowano MargoNeuro Smart-Route V2!\n\nTrasa zostaĹ‚a obliczona uwzglÄ™dniajÄ…c:\n1. Koszty wejĹ›cia na mapy.\n2. OptymalizacjÄ™ Ĺ›cieĹĽek bezpoĹ›rednio miÄ™dzy mobami na mapach.\n3. PĹ‚ynne wyprowadzenie postaci idealnie pod drzwi wyjĹ›ciowe.");
+        heroAlert("🧠 Zainstalowano MargoNeuro Smart-Route V2!\n\nTrasa została obliczona uwzględniając:\n1. Koszty wejścia na mapy.\n2. Optymalizację ścieżek bezpośrednio między mobami na mapach.\n3. Płynne wyprowadzenie postaci idealnie pod drzwi wyjściowe.");
     };
 
 
     // ==========================================
 
-    // INTERFEJS UĹ»YTKOWNIKA (UI)
+    // INTERFEJS UŻYTKOWNIKA (UI)
 
     // ==========================================
 
 function initGUI() {
+        console.log('[Margoneuro UI] Renderuję panel');
         const style = document.createElement('style');
         style.innerHTML = `
             .hero-window { position: fixed; background: #111; border: 1px solid #5a4b31; border-radius: 4px; color: #cbd5e1; font-family: Tahoma, Arial, sans-serif; z-index: 10000; box-shadow: 0 4px 15px rgba(0,0,0,0.8); display: flex; flex-direction: column; overflow: hidden; }
@@ -4727,36 +4792,36 @@ function initGUI() {
         `;
         document.head.appendChild(style);
 
-        const gearIcon = document.createElement('div'); gearIcon.id = 'gearIcon'; gearIcon.innerHTML = 'âš™ď¸Ź'; gearIcon.title = 'PrzesuĹ„ lub Kliknij'; document.body.appendChild(gearIcon);
+        const gearIcon = document.createElement('div'); gearIcon.id = 'gearIcon'; gearIcon.innerHTML = 'Opcje'; gearIcon.title = 'Przesuń lub kliknij'; document.body.appendChild(gearIcon);
 
         const mainGui = document.createElement('div'); mainGui.id = 'heroNavGUI'; mainGui.className = 'hero-window';
         mainGui.innerHTML = `
             <div class="gui-header">
                 <div id="guiHeaderTitle" style="margin-right:5px; color:#00e5ff; text-shadow: 0 0 5px #00e5ff; font-weight:900;">MargoNeuro</div>
                <div class="header-buttons">
-                    <button id="btnStartStop" style="color:#4caf50; border-color:#4caf50;"><span class="btn-icon">â–¶</span><span>START</span></button>
-                    <button id="btnGoToTop" style="color:#00acc1; border-color:#00acc1;"><span class="btn-icon">âžˇ</span><span>IDĹą DO</span></button>
-                    <button id="btnOpenMaps" style="color:#2196f3; border-color:#2196f3;"><span class="btn-icon">đź—şď¸Ź</span><span>Mapy</span></button>
-                    <button id="btnToggleRadar" style="color:#9c27b0; border-color:#9c27b0;"><span class="btn-icon">đź“ˇ</span><span>Radar</span></button>
-                    <button id="btnOpenSettings"><span class="btn-icon">âš™ď¸Ź</span><span>Opcje</span></button>
-                    <button id="btnMinimizeMain" style="background:transparent; border:none; color:#777;" onclick="window.toggleMainVisibility()"><span class="btn-icon">âś–</span></button>
+                    <button id="btnStartStop" style="color:#4caf50; border-color:#4caf50;"><span class="btn-icon">&gt;</span><span>START</span></button>
+                    <button id="btnGoToTop" style="color:#00acc1; border-color:#00acc1;"><span class="btn-icon">Idź</span><span>DO</span></button>
+                    <button id="btnOpenMaps" style="color:#2196f3; border-color:#2196f3;"><span class="btn-icon">Mapy</span><span>Mapy</span></button>
+                    <button id="btnToggleRadar" style="color:#9c27b0; border-color:#9c27b0;"><span class="btn-icon">Radar</span><span>Radar</span></button>
+                    <button id="btnOpenSettings"><span class="btn-icon">Opcje</span><span>Opcje</span></button>
+                    <button id="btnMinimizeMain" style="background:transparent; border:none; color:#777;" onclick="window.toggleMainVisibility()"><span class="btn-icon">x</span></button>
                 </div>
             </div>
            <div class="tabs-wrapper">
-                <div id="heroModeToggle" class="nav-tab active-tab">đź˛ HEROSI</div>
-                <div id="e2ModeToggle" class="nav-tab">đź’€ ELITY II</div>
-                <div id="kolosyModeToggle" class="nav-tab">đź‘ą KOLOSY</div>
-                <div id="expModeToggle" class="nav-tab">âš”ď¸Ź EXP</div>
-                <div id="teleportsModeToggle" class="nav-tab">đźš€ TP/EQ/HP</div>
+                <div id="heroModeToggle" class="nav-tab active-tab">HEROSI</div>
+                <div id="e2ModeToggle" class="nav-tab">ELITY II</div>
+                <div id="kolosyModeToggle" class="nav-tab">KOLOSY</div>
+                <div id="expModeToggle" class="nav-tab">EXP</div>
+                <div id="teleportsModeToggle" class="nav-tab">TP/EQ/HP</div>
             </div>
             <div class="gui-content" id="mainRoutingPanel">
                 <div class="location-wrapper" style="margin-bottom: 8px;">
                     <span class="location-label">Stoisz na:</span>
-                    <span id="currentMapNameDisplay">Ĺadowanie...</span>
+                    <span id="currentMapNameDisplay">Ładowanie...</span>
                 </div>
                 <div id="heroContainer" style="display:flex; flex-direction:column; flex-grow:1;">
                     <div id="heroConsole" style="background:#080808; border:1px solid #333; padding:4px; font-size:10px; color:#a99a75; height:55px; min-height: 55px; max-height: 150px; resize: vertical; overflow-y:auto; font-family:monospace; box-shadow:inset 0 1px 3px #000; margin-bottom:5px;">
-                        <span style="color:#777;">[System]</span> ModuĹ‚ Patrolu w gotowoĹ›ci...
+                        <span style="color:#777;">[System]</span> Moduł Patrolu w gotowości...
                     </div>
                     <div id="radarControlsWrapper" style="margin-bottom: 8px;">
                         <div class="nav-row" style="background: rgba(183, 28, 28, 0.2); padding:5px; border-radius:2px; border:1px solid #8e0000;">
@@ -4768,24 +4833,24 @@ function initGUI() {
                     </div>
                     <div class="nav-row"><label>Szukany Heros:</label><select id="selHero" style="flex-grow: 1;"><option value="">-- Wybierz --</option></select></div>
                     <div class="nav-row" style="display: flex; flex-direction: column; flex-grow: 1;">
-                        <label style="color:#00acc1;">KolejnoĹ›Ä‡ Przechodzenia Map:</label>
+                        <label style="color:#00acc1;">Kolejność przechodzenia map:</label>
                         <div id="heroMapListContainer"><div style="padding:5px;text-align:center;color:#777;">Wybierz herosa</div></div>
                         <div id="inlineTransitEditor" style="display:none; padding:8px; border:1px solid #00acc1; background:rgba(0, 172, 193, 0.1); margin-top:5px; border-radius:2px;">
-                            <label style="color:#00acc1; font-weight:bold; margin-bottom:4px; display:block;">Dodaj PrzejĹ›cie:</label>
+                            <label style="color:#00acc1; font-weight:bold; margin-bottom:4px; display:block;">Dodaj przejście:</label>
                             <input type="text" id="newTransitMapName" placeholder="Nazwa mapy docelowej..." style="margin-bottom:4px;">
-                            <input type="number" id="newTransitPos" placeholder="Pozycja na liĹ›cie (puste = na koniec)" style="margin-bottom:6px;">
-                            <div style="display:flex; gap:4px; margin-bottom:6px;"><input type="number" id="newTransitX" placeholder="X" style="width:40px;"><input type="number" id="newTransitY" placeholder="Y" style="width:40px;"><button class="btn-sepia" style="flex-grow:1;" onclick="document.getElementById('newTransitX').value = Engine.hero.d.x; document.getElementById('newTransitY').value = Engine.hero.d.y;">đź“Ť StÄ…d</button></div>
-                            <div style="display:flex; gap:4px;"><button class="btn-sepia btn-go-sepia" style="flex-grow:1;" onclick="saveNewTransit()">ZAPISZ MAPÄ</button><button class="btn-sepia" style="background:#8e0000; width:30px;" onclick="document.getElementById('inlineTransitEditor').style.display='none'">âś–</button></div>
+                            <input type="number" id="newTransitPos" placeholder="Pozycja na liście (puste = na koniec)" style="margin-bottom:6px;">
+                            <div style="display:flex; gap:4px; margin-bottom:6px;"><input type="number" id="newTransitX" placeholder="X" style="width:40px;"><input type="number" id="newTransitY" placeholder="Y" style="width:40px;"><button class="btn-sepia" style="flex-grow:1;" onclick="document.getElementById('newTransitX').value = Engine.hero.d.x; document.getElementById('newTransitY').value = Engine.hero.d.y;">Stąd</button></div>
+                            <div style="display:flex; gap:4px;"><button class="btn-sepia btn-go-sepia" style="flex-grow:1;" onclick="saveNewTransit()">Zapisz mapę</button><button class="btn-sepia" style="background:#8e0000; width:30px;" onclick="document.getElementById('inlineTransitEditor').style.display='none'">x</button></div>
                         </div>
                         <div style="display:flex; gap:5px; margin-top:5px;">
-                            <button id="btnAutoRoute" class="btn btn-go-sepia" style="flex-grow:1;" onclick="openAutoRouteModal()">đźŞ„ KREATOR TRASY</button>
-                            <button id="btnResetRoute" class="btn btn-sepia" style="background:#8e0000; width: auto;" title="Zresetuj pÄ™tlÄ™ i przywrĂłÄ‡ z bazy">đź” ZRESETUJ BAZÄ</button>
+                            <button id="btnAutoRoute" class="btn btn-go-sepia" style="flex-grow:1;" onclick="openAutoRouteModal()">Kreator trasy</button>
+                            <button id="btnResetRoute" class="btn btn-sepia" style="background:#8e0000; width: auto;" title="Zresetuj pętlę i przywróć z bazy">Resetuj bazę</button>
                         </div>
                     </div>
-                    <div class="nav-row" style="margin-top: 10px; display: flex; flex-direction: column;"><label style="color:#d4af37;">Koordynaty (ZasiÄ™g: 7 kratek):</label><div id="cordsListContainer"></div></div>
+                    <div class="nav-row" style="margin-top: 10px; display: flex; flex-direction: column;"><label style="color:#d4af37;">Koordynaty (zasięg: 7 kratek):</label><div id="cordsListContainer"></div></div>
                 </div>
                 <div id="e2Container" style="display:none; flex-direction:column; flex:1; min-height:0;">
-                    <div id="e2SuitableContainer" style="background:rgba(156,39,176,0.1); border:1px solid #9c27b0; padding:6px; margin-bottom:8px; border-radius:2px;"><span style="color:#777; font-size:10px;">Ĺadowanie podpowiedzi levelowych...</span></div>
+                    <div id="e2SuitableContainer" style="background:rgba(156,39,176,0.1); border:1px solid #9c27b0; padding:6px; margin-bottom:8px; border-radius:2px;"><span style="color:#777; font-size:10px;">Ładowanie podpowiedzi levelowych...</span></div>
                     <div style="display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:5px;">
                         <label style="color:#9c27b0; font-weight:bold;">Baza Elit II (Spis tras):</label>
                         <input type="text" id="e2Search" placeholder="Szukaj..." style="width:100px; padding:2px; font-size:10px; background:#0f0f0f; border:1px solid #4a3f2b; color:#fff;">
@@ -4793,116 +4858,116 @@ function initGUI() {
                     <div id="e2ListContainer"></div>
                 </div>
                 <div id="kolosyContainer" style="display:none; flex-direction:column; flex:1; min-height:0;">
-                    <div id="kolosySuitableContainer" style="background:rgba(230,74,25,0.1); border:1px solid #e64a19; padding:6px; margin-bottom:8px; border-radius:2px;"><span style="color:#777; font-size:10px;">Ĺadowanie podpowiedzi levelowych...</span></div>
+                    <div id="kolosySuitableContainer" style="background:rgba(230,74,25,0.1); border:1px solid #e64a19; padding:6px; margin-bottom:8px; border-radius:2px;"><span style="color:#777; font-size:10px;">Ładowanie podpowiedzi levelowych...</span></div>
                     <div style="display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:5px;">
-                        <label style="color:#e64a19; font-weight:bold;">Baza KolosĂłw:</label>
+                        <label style="color:#e64a19; font-weight:bold;">Baza Kolosów:</label>
                         <input type="text" id="kolosySearch" placeholder="Szukaj..." style="width:100px; padding:2px; font-size:10px; background:#0f0f0f; border:1px solid #4a3f2b; color:#fff;">
                     </div>
                     <div id="kolosyListContainer"></div>
                 </div>
                 <div id="expContainer" style="display:none; flex-direction:column; flex:1; min-height:0; gap:4px; padding-top:4px;">
                     <div id="expConsole" style="background:#080808; border:1px solid #333; padding:4px; font-size:10px; color:#a99a75; height:55px; min-height: 55px; max-height: 250px; resize: vertical; overflow-y:auto; font-family:monospace; box-shadow:inset 0 1px 3px #000; margin-bottom:2px;">
-                        <span style="color:#777;">[System]</span> WĹ‚Ä…czony moduĹ‚ Smart-Roam (Dynamiczne czyszczenie)...
+                        <span style="color:#777;">[System]</span> Włączony moduł Smart-Roam (dynamiczne czyszczenie)...
                     </div>
-                    <div class="accordion-header" id="accBerserk" onclick="toggleSettingsAcc('accBerserk')" style="background: rgba(255, 152, 0, 0.2); border-color: #ff9800; color: #ff9800; margin-bottom: 0;">â–Ľ KIESZONKOWY BERSERK</div>
+                    <div class="accordion-header" id="accBerserk" onclick="toggleSettingsAcc('accBerserk')" style="background: rgba(255, 152, 0, 0.2); border-color: #ff9800; color: #ff9800; margin-bottom: 0;">Kieszonkowy Berserk</div>
                     <div id="accBerserkContent" style="display:none; padding: 8px; background: rgba(0,0,0,0.3); border: 1px solid #ff9800; border-top: none; margin-bottom: 5px;">
                         <label style="color:#ff9800; font-weight:bold; display:flex; align-items:center; gap:5px; margin-bottom: 8px; cursor: pointer;">
                             <input type="checkbox" id="berserkEnabled" ${botSettings.berserk?.enabled ? 'checked' : ''}> Aktywuj Berserka
                         </label>
                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding-left: 5px; margin-bottom: 8px;">
-                            <label style="color:#e0d8c0; font-size:10px; cursor: pointer;"><input type="checkbox" id="berserkCommon" ${botSettings.berserk?.common ? 'checked' : ''}> ZwykĹ‚e potwory</label>
+                            <label style="color:#e0d8c0; font-size:10px; cursor: pointer;"><input type="checkbox" id="berserkCommon" ${botSettings.berserk?.common ? 'checked' : ''}> Zwykłe potwory</label>
                             <label style="color:#e0d8c0; font-size:10px; cursor: pointer;"><input type="checkbox" id="berserkE1" ${botSettings.berserk?.e1 ? 'checked' : ''}> Elity I</label>
                             <label style="color:#e0d8c0; font-size:10px; cursor: pointer;"><input type="checkbox" id="berserkE2" ${botSettings.berserk?.e2 ? 'checked' : ''}> Elity II</label>
                             <label style="color:#e0d8c0; font-size:10px; cursor: pointer;"><input type="checkbox" id="berserkHero" ${botSettings.berserk?.hero ? 'checked' : ''}> Herosi / Tytani</label>
                         </div>
                         <div style="display:flex; justify-content: space-between; gap: 5px;">
-                            <label style="color:#a99a75; font-size:10px; flex:1;">WiÄ™kszy od nas o lvl:<br><input type="number" id="berserkMaxLvl" value="${botSettings.berserk?.maxLvlOffset ?? 100}" style="width:100%; padding:2px; font-size:10px; text-align:center;"></label>
+                            <label style="color:#a99a75; font-size:10px; flex:1;">Większy od nas o lvl:<br><input type="number" id="berserkMaxLvl" value="${botSettings.berserk?.maxLvlOffset ?? 100}" style="width:100%; padding:2px; font-size:10px; text-align:center;"></label>
                             <label style="color:#a99a75; font-size:10px; flex:1;">Mniejszy od nas o lvl:<br><input type="number" id="berserkMinLvl" value="${Math.abs(botSettings.berserk?.minLvlOffset ?? 20)}" style="width:100%; padding:2px; font-size:10px; text-align:center;"></label>
                         </div>
                     </div>
-                    <div class="accordion-header" id="accAutoheal" onclick="toggleSettingsAcc('accAutoheal')" style="background: rgba(76, 175, 80, 0.2); border-color: #4caf50; color: #4caf50; margin-bottom: 0;">â–Ľ AUTOHEAL I AUTO-SPRZEDAĹ»</div>
+                    <div class="accordion-header" id="accAutoheal" onclick="toggleSettingsAcc('accAutoheal')" style="background: rgba(76, 175, 80, 0.2); border-color: #4caf50; color: #4caf50; margin-bottom: 0;">Autoheal i auto-sprzedaż</div>
                     <div id="accAutohealContent" style="display:none; padding: 8px; background: rgba(0,0,0,0.3); border: 1px solid #4caf50; border-top: none; margin-bottom: 5px;">
                         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                             <div style="display:flex; gap:10px; align-items:center;">
                                 <label style="color:#4caf50; font-weight:bold; display:flex; align-items:center; gap:5px; cursor: pointer; margin:0;"><input type="checkbox" id="autohealEnabled" ${botSettings.autoheal?.enabled ? 'checked' : ''}> Autoheal</label>
                                 <div style="display:flex; align-items:center; gap:5px;">
                                     <label style="color:#e91e63; font-weight:bold; display:flex; align-items:center; gap:5px; cursor: pointer; margin:0;"><input type="checkbox" id="autopotEnabled" ${botSettings.autopot?.enabled ? 'checked' : ''}> Auto Poty</label>
-                                    <span id="btnAutoPotSettings" style="cursor:pointer; font-size:12px; filter: grayscale(20%); transition: 0.2s;" title="Ustawienia Auto-PotĂłw">âš™ď¸Ź</span>
+                                    <span id="btnAutoPotSettings" style="cursor:pointer; font-size:12px; filter: grayscale(20%); transition: 0.2s;" title="Ustawienia Auto-Potów">Opcje</span>
                                 </div>
                             </div>
                             <label style="color:#a99a75; font-size:10px; display:flex; align-items:center; gap:5px; margin:0;">Od ilu %: <input type="number" id="autohealThreshold" value="${botSettings.autoheal?.threshold ?? 80}" min="1" max="99" style="width:35px; padding:2px; font-size:10px; text-align:center; background:#000; color:#fff; border:1px solid #444;"></label>
                         </div>
                         <div id="autopotSettingsPanel" style="display:none; background:rgba(0,0,0,0.5); padding:6px; border:1px solid #e91e63; border-radius:3px; margin-bottom:8px;">
-                            <label style="color:#e0d8c0; font-size:10px; display:flex; align-items:center; justify-content:space-between; margin:0;">IloĹ›Ä‡ stakĂłw do kupienia (1 stak = 15 szt): <input type="number" id="autopotStacks" value="${botSettings.autopot?.stacks ?? 14}" min="1" max="50" style="width:40px; padding:2px; font-size:10px; text-align:center; background:#000; color:#fff; border:1px solid #444;"></label>
+                            <label style="color:#e0d8c0; font-size:10px; display:flex; align-items:center; justify-content:space-between; margin:0;">Ilość staków do kupienia (1 stak = 15 szt): <input type="number" id="autopotStacks" value="${botSettings.autopot?.stacks ?? 14}" min="1" max="50" style="width:40px; padding:2px; font-size:10px; text-align:center; background:#000; color:#fff; border:1px solid #444;"></label>
                         </div>
                         <div style="display:flex; gap:5px;">
-                            <div style="flex:1;"><label style="color:#a99a75; font-size:9px; display:block; margin-bottom:2px;">Nigdy nie uĹĽywaj przedmiotĂłw:</label><textarea id="autohealIgnore" style="width:100%; height:50px; background:#0f0f0f; color:#e0d8c0; border:1px solid #4a3f2b; font-size:9px; resize:none;">${botSettings.autoheal?.ignoreItems || ""}</textarea></div>
+                            <div style="flex:1;"><label style="color:#a99a75; font-size:9px; display:block; margin-bottom:2px;">Nigdy nie używaj przedmiotów:</label><textarea id="autohealIgnore" style="width:100%; height:50px; background:#0f0f0f; color:#e0d8c0; border:1px solid #4a3f2b; font-size:9px; resize:none;">${botSettings.autoheal?.ignoreItems || ""}</textarea></div>
                             <div style="flex:1;"><label style="color:#a99a75; font-size:9px; display:block; margin-bottom:2px;">Przedmioty niezidentyfikowane:</label><textarea id="autohealUnid" style="width:100%; height:50px; background:#0f0f0f; color:#e0d8c0; border:1px solid #4a3f2b; font-size:9px; resize:none;">${botSettings.autoheal?.unidItems || ""}</textarea></div>
                         </div>
                         <div style="border-top:1px solid #333; margin-top:6px; padding-top:6px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:4px;">
-                            <label style="color:#ffb300; font-weight:bold; display:flex; align-items:center; gap:5px; cursor: pointer; margin:0;"><input type="checkbox" id="autosellEnabled" ${botSettings.autosell?.enabled ? 'checked' : ''}> Auto-SprzedaĹĽ</label>
+                            <label style="color:#ffb300; font-weight:bold; display:flex; align-items:center; gap:5px; cursor: pointer; margin:0;"><input type="checkbox" id="autosellEnabled" ${botSettings.autosell?.enabled ? 'checked' : ''}> Auto-sprzedaż</label>
                             <div style="display:flex; align-items:center; gap:5px;">
                               <span style="color:#a99a75; font-size:10px; margin:0;">Wolne miejsce: <b id="autosellCapacityDisplay" style="color:#4caf50;">?</b></span>
-                                <label style="color:#e0d8c0; font-size:10px; display:flex; align-items:center; gap:3px; cursor:pointer; margin:0 4px;" title="Zmusza bota do sprzedawania wyĹ‚Ä…cznie u Tunii">
+                                <label style="color:#e0d8c0; font-size:10px; display:flex; align-items:center; gap:3px; cursor:pointer; margin:0 4px;" title="Zmusza bota do sprzedawania wyłącznie u Tunii">
                                     <input type="checkbox" id="autosellOnlyTunia" ${botSettings.autosell?.onlyTunia ? 'checked' : ''}> Tunia
                                 </label>
-                                <button id="btnForceSell" class="btn-sepia" style="background:#e65100; font-weight:bold; padding:2px 6px; border-color:#bf360c;">đźŹ OPRĂ“Ĺ»NIJ TERAZ</button>
+                                <button id="btnForceSell" class="btn-sepia" style="background:#e65100; font-weight:bold; padding:2px 6px; border-color:#bf360c;">Opróżnij teraz</button>
                             </div>
                         </div>
                     </div>
-                 <div class="accordion-header" id="accAlerts" onclick="toggleSettingsAcc('accAlerts')" style="background: rgba(33, 150, 243, 0.2); border-color: #2196f3; color: #2196f3; margin-top: 5px; margin-bottom: 0;">â–Ľ ALARMY I POWIADOMIENIA</div>
+                 <div class="accordion-header" id="accAlerts" onclick="toggleSettingsAcc('accAlerts')" style="background: rgba(33, 150, 243, 0.2); border-color: #2196f3; color: #2196f3; margin-top: 5px; margin-bottom: 0;">Alarmy i powiadomienia</div>
                     <div id="accAlertsContent" style="display:none; padding: 8px; background: rgba(0,0,0,0.3); border: 1px solid #2196f3; border-top: none; margin-bottom: 5px;">
                         <div style="display:flex; flex-direction:column; gap:6px;">
-                            <button id="btnOpenBrowserAlertsModule" class="btn-sepia" style="background:#ff9800; border-color:#f57c00; width:100%; padding:6px; font-weight:bold; font-size:11px;">đź”” POWIADOMIENIA PRZEGLÄ„DARKI</button>
-                            <button id="btnOpenDiscordModule" class="btn-sepia" style="background:#5865F2; border-color:#4752C4; width:100%; padding:6px; font-weight:bold; font-size:11px;">đź’¬ KONFIGURACJA DISCORD</button>
+                            <button id="btnOpenBrowserAlertsModule" class="btn-sepia" style="background:#ff9800; border-color:#f57c00; width:100%; padding:6px; font-weight:bold; font-size:11px;">Powiadomienia przeglądarki</button>
+                            <button id="btnOpenDiscordModule" class="btn-sepia" style="background:#5865F2; border-color:#4752C4; width:100%; padding:6px; font-weight:bold; font-size:11px;">Konfiguracja Discord</button>
                         </div>
                     </div>
 
-                    <div class="accordion-header" id="accExpRules" onclick="toggleSettingsAcc('accExpRules')" style="background: rgba(156, 39, 176, 0.2); border-color: #9c27b0; color: #ba68c8; margin-top: 5px; margin-bottom: 0;">â–Ľ ZASADY WALKI I BEZPIECZEĹSTWO</div>
+                    <div class="accordion-header" id="accExpRules" onclick="toggleSettingsAcc('accExpRules')" style="background: rgba(156, 39, 176, 0.2); border-color: #9c27b0; color: #ba68c8; margin-top: 5px; margin-bottom: 0;">Zasady walki i bezpieczeństwo</div>
                     <div id="accExpRulesContent" style="display:none; padding: 8px; background: rgba(0,0,0,0.3); border: 1px solid #9c27b0; border-top: none; margin-bottom: 5px;">
-                        <label style="color:#a99a75; font-size:10px; margin-bottom:0; margin-top:2px;">PrzedziaĹ‚ poziomowy (Automatyczny +1 przy awansie):</label>
+                        <label style="color:#a99a75; font-size:10px; margin-bottom:0; margin-top:2px;">Przedział poziomowy (automatyczny +1 przy awansie):</label>
                         <div class="nav-row" style="display:grid; grid-template-columns: 1fr 1fr; gap:5px; margin-bottom:2px;">
                             <label>Min Lvl: <input type="number" id="expMinL" value="${botSettings.exp.minLvl}" style="background:#000;"></label>
                             <label>Max Lvl: <input type="number" id="expMaxL" value="${botSettings.exp.maxLvl}" style="background:#000;"></label>
                         </div>
                         <label style="color:#a99a75; font-size:10px; margin-bottom:2px; display:block;">Atakowane potwory:</label>
                         <div class="nav-row" style="display:flex; justify-content: space-around; background: #1a1a1a; border: 1px solid #333; padding: 4px; border-radius: 2px; margin-bottom:6px;">
-                            <label style="margin:0; cursor:pointer;"><input type="checkbox" id="expN" ${botSettings.exp.normal ? 'checked' : ''}> ZwykĹ‚e</label>
+                            <label style="margin:0; cursor:pointer;"><input type="checkbox" id="expN" ${botSettings.exp.normal ? 'checked' : ''}> Zwykłe</label>
                             <label style="margin:0; cursor:pointer;"><input type="checkbox" id="expE" ${botSettings.exp.elite ? 'checked' : ''}> Elity I</label>
                         </div>
                         <div style="border-top:1px solid #333; padding-top:6px; margin-top:4px;">
-                            <label style="color:#ff5252; font-size:10px; cursor:pointer; display:block; margin-bottom:4px;" title="Ucieka na 10 minut z czerwonej mapy, gdy gracz jest bliĹĽej niĹĽ 6 kratek"><input type="checkbox" id="pvpFlee" ${botSettings.exp.pvpFlee ? 'checked' : ''}> đźŹ Uciekaj z map PvP</label>
-                            <label style="color:#e040fb; font-size:10px; cursor:pointer; display:block; margin-top:4px;" title="Zezwala na uĹĽywanie zwojĂłw teleportacji z ekwipunku podczas expienia."><input type="checkbox" id="useTeleportsEq" ${botSettings.exp.useTeleportsEq ? 'checked' : ''}> đź“ś UĹĽywaj teleportĂłw z EQ (tylko w EXP)</label>
+                            <label style="color:#ff5252; font-size:10px; cursor:pointer; display:block; margin-bottom:4px;" title="Ucieka na 10 minut z czerwonej mapy, gdy gracz jest bliżej niż 6 kratek"><input type="checkbox" id="pvpFlee" ${botSettings.exp.pvpFlee ? 'checked' : ''}> Uciekaj z map PvP</label>
+                            <label style="color:#e040fb; font-size:10px; cursor:pointer; display:block; margin-top:4px;" title="Zezwala na używanie zwojów teleportacji z ekwipunku podczas expienia."><input type="checkbox" id="useTeleportsEq" ${botSettings.exp.useTeleportsEq ? 'checked' : ''}> Używaj teleportów z EQ (tylko w EXP)</label>
                         </div>
                     </div>
-                    <div class="accordion-header" id="accRoute" onclick="toggleSettingsAcc('accRoute')" style="background: rgba(0, 150, 136, 0.2); border-color: #009688; color: #009688; margin-top: 5px; margin-bottom: 0;">â–Ľ TRASA EXPOWISKA (SMART-ROAM)</div>
+                    <div class="accordion-header" id="accRoute" onclick="toggleSettingsAcc('accRoute')" style="background: rgba(0, 150, 136, 0.2); border-color: #009688; color: #009688; margin-top: 5px; margin-bottom: 0;">Trasa expowiska</div>
                     <div id="accRouteContent" style="display:none; padding: 8px; background: rgba(0,0,0,0.3); border: 1px solid #009688; border-top: none; margin-bottom: 5px;">
-                        <label style="color:#00e5ff; font-size:10px; cursor:pointer; font-weight:bold; margin-bottom:6px; display:block;"><input type="checkbox" id="autoChangeExpRoute" ${botSettings.exp.autoChangeRoute ? 'checked' : ''}> đź”„ Automatyczna zmiana Expowiska</label>
+                        <label style="color:#00e5ff; font-size:10px; cursor:pointer; font-weight:bold; margin-bottom:6px; display:block;"><input type="checkbox" id="autoChangeExpRoute" ${botSettings.exp.autoChangeRoute ? 'checked' : ''}> Automatyczna zmiana expowiska</label>
                         <input type="hidden" id="expRange" value="999">
-                       <label style="color:#a99a75; font-size:11px; margin-top:2px; display:flex; justify-content:space-between; align-items:center;">KolejnoĹ›Ä‡ map: <div style="display:flex; gap:8px;"><span onclick="window.optimizeExpRoute()" style="color:#00e5ff; cursor:pointer; font-weight:bold;" title="Automatycznie uĹ‚ĂłĹĽ i poĹ‚Ä…cz mapy w pÄ™tlÄ™">đź”€ Optymalizuj</span><span onclick="window.clearExpMaps()" style="color:#e53935; cursor:pointer; font-weight:bold;" title="WyczyĹ›Ä‡ caĹ‚Ä… trasÄ™">đź—‘ď¸Ź WyczyĹ›Ä‡</span></div></label>
+                       <label style="color:#a99a75; font-size:11px; margin-top:2px; display:flex; justify-content:space-between; align-items:center;">Kolejność map: <div style="display:flex; gap:8px;"><span onclick="window.optimizeExpRoute()" style="color:#00e5ff; cursor:pointer; font-weight:bold;" title="Automatycznie ułóż i połącz mapy w pętlę">Optymalizuj</span><span onclick="window.clearExpMaps()" style="color:#e53935; cursor:pointer; font-weight:bold;" title="Wyczyść całą trasę">Wyczyść</span></div></label>
                         <div id="expMapList" style="border:1px solid #3a3020; background:#000; overflow-y:auto; min-height:80px; max-height:160px; padding:2px;"></div>
                         <div style="display:flex; gap:4px; margin-top:6px;">
-                            <button id="btnOpenExpBase" class="btn-sepia" style="flex:1; padding:6px; background:#00838f;">đź”– BAZA EXPOWISK</button>
-                            <button id="btnOpenRecommendedExp" class="btn-sepia" style="flex:1; padding:6px; background:#4caf50;">â­ POLECANE</button>
+                            <button id="btnOpenExpBase" class="btn-sepia" style="flex:1; padding:6px; background:#00838f;">Baza expowisk</button>
+                            <button id="btnOpenRecommendedExp" class="btn-sepia" style="flex:1; padding:6px; background:#4caf50;">Polecane</button>
                         </div>
-                        <button id="btnOpenInternalMap" class="btn-sepia" style="width:100%; margin-top:5px; padding:6px; background:#263238; border-color:#00acc1; color:#e0f7fa;" onclick="window.openInternalMapGraph()">đź§­ MAPA TRASY I PRZEJĹšÄ†</button>
+                        <button id="btnOpenInternalMap" class="btn-sepia" style="width:100%; margin-top:5px; padding:6px; background:#263238; border-color:#00acc1; color:#e0f7fa;" onclick="window.openInternalMapGraph()">Mapa trasy i przejść</button>
                     </div>
 
-                    <button id="btnStartExp" class="btn btn-go-sepia" style="margin-top:auto; padding: 6px; font-size: 12px; border: 1px solid #4caf50; color: #4caf50; font-weight:bold;">â–¶ START</button>
+                    <button id="btnStartExp" class="btn btn-go-sepia" style="margin-top:auto; padding: 6px; font-size: 12px; border: 1px solid #4caf50; color: #4caf50; font-weight:bold;">START</button>
                 </div>
                 <div id="teleportsContainer" style="display:none; flex-direction:column; flex:1; min-height:0; padding-top:4px; gap:6px;">
-                    <button id="btnOpenTeleports" class="btn btn-go-sepia" style="padding:6px; background:#00838f; border-color:#00acc1; font-weight:bold; color:white;">đźš€ ZARZÄ„DZAJ TELEPORTAMI</button>
-                    <button id="btnShowRecommendedEq" class="btn-sepia" style="padding:6px; background:#4caf50; font-weight:bold;">đźŽ’ POLECANY EKWIPUNEK</button>
-                    <button id="btnShowPotions" class="btn-sepia" style="padding:6px; background:#d81b60; color:white; font-weight:bold;">đź§Ş MIKSTURY I LECZENIE</button>
-                    <button id="btnToggleShops" class="btn-sepia" style="padding:6px; background:#e65100; font-weight:bold;">đź›’ WYSZUKIWARKA SKLEPĂ“W</button>
-                    <button id="btnStopWalk" class="btn-sepia" style="display:none; padding:6px; background:#d32f2f; color:white; font-weight:bold; border-color:#b71c1c;">đź›‘ ZATRZYMAJ RUCH</button>
+                    <button id="btnOpenTeleports" class="btn btn-go-sepia" style="padding:6px; background:#00838f; border-color:#00acc1; font-weight:bold; color:white;">Zarządzaj teleportami</button>
+                    <button id="btnShowRecommendedEq" class="btn-sepia" style="padding:6px; background:#4caf50; font-weight:bold;">Polecany ekwipunek</button>
+                    <button id="btnShowPotions" class="btn-sepia" style="padding:6px; background:#d81b60; color:white; font-weight:bold;">Mikstury i leczenie</button>
+                    <button id="btnToggleShops" class="btn-sepia" style="padding:6px; background:#e65100; font-weight:bold;">Wyszukiwarka sklepów</button>
+                    <button id="btnStopWalk" class="btn-sepia" style="display:none; padding:6px; background:#d32f2f; color:white; font-weight:bold; border-color:#b71c1c;">Zatrzymaj ruch</button>
                     <div id="heroTeleportsGUI" style="display:none; flex-direction:column; flex:1; overflow-y:auto; background:#141414; border:1px solid #3a3020; padding:4px;"></div>
                     <div id="recommendedEqList" style="display:none; flex-direction:column; flex:1; border:1px solid #3a3020; background:#141414; padding:4px; resize:vertical; overflow-y:auto; min-height:150px;"></div>
                     <div id="potionsList" style="display:none; flex-direction:column; flex:1; border:1px solid #3a3020; background:#141414; padding:4px; resize:vertical; overflow-y:auto; min-height:150px;"></div>
                     <div id="shopsSearchWrapper" style="display:none; flex-direction:column; flex:1; border:1px solid #3a3020; background:#141414; padding:4px; resize:vertical; overflow-y:auto; min-height:150px;">
                         <input type="text" id="shopSearchInput" placeholder="Szukaj NPC, mapy lub przedmiotu..." style="width:100%; padding:5px; background:#000; color:#d4af37; border:1px solid #333; margin-bottom:5px; box-sizing:border-box;">
                         <div id="shopsListOutput" style="flex:1; overflow-y:auto;">
-                            <span style="color:#777; font-size:10px; text-align:center; display:block;">Wpisz minimum 2 znaki, aby wyszukaÄ‡...</span>
+                            <span style="color:#777; font-size:10px; text-align:center; display:block;">Wpisz minimum 2 znaki, aby wyszukać...</span>
                         </div>
                     </div>
                 </div>
@@ -4910,75 +4975,91 @@ function initGUI() {
         `;
         document.body.appendChild(mainGui);
 
-        // --- OKNO GĹĂ“WNYCH USTAWIEĹ ---
+        // --- OKNO GŁÓWNYCH USTAWIEŃ ---
         const settingsGui = document.createElement('div'); settingsGui.id = 'heroSettingsGUI'; settingsGui.className = 'hero-window'; settingsGui.style.display = 'none';
         settingsGui.innerHTML = `
-            <div class="gui-header">âš™ď¸Ź Opcje & SkrĂłty <button class="btn-close" onclick="document.getElementById('heroSettingsGUI').style.display='none'">âś–</button></div>
+            <div class="gui-header">Opcje i skróty <button class="btn-close" onclick="document.getElementById('heroSettingsGUI').style.display='none'">x</button></div>
             <div class="gui-content">
-                <div class="accordion-header" id="accHuman" onclick="toggleSettingsAcc('accHuman')">â–Ľ HUMANIZACJA ATAKU & RADARU</div>
+                <div class="accordion-header" id="accHuman" onclick="toggleSettingsAcc('accHuman')">Humanizacja ataku i radaru</div>
                 <div id="accHumanContent" style="display:block; padding: 5px; background: rgba(0,0,0,0.2); border: 1px solid #333; margin-bottom:10px;">
                     <div class="nav-row"><label>Reakcja po wykryciu moba (Min/Max ms):</label><div style="display:flex;gap:4px;"><input type="number" id="inpReactionMin" value="${botSettings.reactionMin}"><input type="number" id="inpReactionMax" value="${botSettings.reactionMax}"></div></div>
-                    <div class="nav-row"><label>OpĂłĹşnienie ataku po dotarciu (Min/Max ms):</label><div style="display:flex;gap:4px;"><input type="number" id="inpAttackDelayMin" value="${botSettings.attackDelayMin}"><input type="number" id="inpAttackDelayMax" value="${botSettings.attackDelayMax}"></div></div>
+                    <div class="nav-row"><label>Opóźnienie ataku po dotarciu (Min/Max ms):</label><div style="display:flex;gap:4px;"><input type="number" id="inpAttackDelayMin" value="${botSettings.attackDelayMin}"><input type="number" id="inpAttackDelayMax" value="${botSettings.attackDelayMax}"></div></div>
                 </div>
 
-                <div class="accordion-header" id="accMove" onclick="toggleSettingsAcc('accMove')">â–¶ HUMANIZACJA RUCHU</div>
+                <div class="accordion-header" id="accMove" onclick="toggleSettingsAcc('accMove')">Humanizacja ruchu</div>
                 <div id="accMoveContent" style="display:none; padding: 5px; background: rgba(0,0,0,0.2); border: 1px solid #333; margin-bottom:10px;">
-                    <div class="nav-row"><label>Reakcja na zaĹ‚adowanie mapy (Min / Max ms):</label><div style="display:flex;gap:4px;"><input type="number" id="inpLoadMin" value="${botSettings.mapLoadMin}"><input type="number" id="inpLoadMax" value="${botSettings.mapLoadMax}"></div></div>
+                    <div class="nav-row"><label>Reakcja na załadowanie mapy (Min / Max ms):</label><div style="display:flex;gap:4px;"><input type="number" id="inpLoadMin" value="${botSettings.mapLoadMin}"><input type="number" id="inpLoadMax" value="${botSettings.mapLoadMax}"></div></div>
                     <div class="nav-row"><label>Czekaj na respie (Min / Max ms):</label><div style="display:flex;gap:4px;"><input type="number" id="inpWaitMin" value="${botSettings.waitMin}"><input type="number" id="inpWaitMax" value="${botSettings.waitMax}"></div><div style="font-size:9px;color:#777;">* Czas stania w miejscu po dotarciu do respu.</div></div>
-                    <div class="nav-row"><label>SzybkoĹ›Ä‡ krokĂłw pingu (Min / Max ms):</label><div style="display:flex;gap:4px;"><input type="number" id="inpStepMin" value="${botSettings.stepMin}"><input type="number" id="inpStepMax" value="${botSettings.stepMax}"></div></div>
-                    <div class="nav-row"><label>Anti-Lag bota EXP (Min / Max ms):</label><div style="display:flex;gap:4px;"><input type="number" id="inpExpAntiLagMin" value="${botSettings.expAntiLagMin || 1500}"><input type="number" id="inpExpAntiLagMax" value="${botSettings.expAntiLagMax || 2500}"></div><div style="font-size:9px;color:#777;">* Czas stania w miejscu zanim bot uzna, ĹĽe siÄ™ zaciÄ…Ĺ‚ i kliknie ponownie.</div></div>
+                    <div class="nav-row"><label>Szybkość kroków pingu (Min / Max ms):</label><div style="display:flex;gap:4px;"><input type="number" id="inpStepMin" value="${botSettings.stepMin}"><input type="number" id="inpStepMax" value="${botSettings.stepMax}"></div></div>
+                    <div class="nav-row"><label>Anti-Lag bota EXP (Min / Max ms):</label><div style="display:flex;gap:4px;"><input type="number" id="inpExpAntiLagMin" value="${botSettings.expAntiLagMin || 1500}"><input type="number" id="inpExpAntiLagMax" value="${botSettings.expAntiLagMax || 2500}"></div><div style="font-size:9px;color:#777;">* Czas stania w miejscu zanim bot uzna, że się zaciął i kliknie ponownie.</div></div>
                 </div>
 
-                <div class="nav-row"><label>ZasiÄ™g widocznoĹ›ci (DomyĹ›lnie 7):</label><input type="number" id="inpVisionRange" value="${botSettings.visionRange}" min="1" max="15"></div>
-                <div class="nav-row"><label>SkrĂłt klawiszowy (Chowaj/PokaĹĽ bota):</label><input type="text" id="inpToggleKey" value="${botSettings.toggleKey || 'Kliknij i wciĹ›nij klawisz...'}" readonly style="cursor:pointer; text-align:center;"></div>
+                <div class="nav-row"><label>Zasięg widoczności (Domyślnie 7):</label><input type="number" id="inpVisionRange" value="${botSettings.visionRange}" min="1" max="15"></div>
+                <div class="nav-row"><label>Skrót klawiszowy (Chowaj/Pokaż bota):</label><input type="text" id="inpToggleKey" value="${botSettings.toggleKey || 'Kliknij i wciśnij klawisz...'}" readonly style="cursor:pointer; text-align:center;"></div>
 
               <div style="display:flex; gap:4px;">
-                    <button id="btnSaveSettings" class="btn btn-go-sepia" style="flex:1; padding:6px 2px; font-size:9px;">đź’ľ ZAPISZ OPCJE</button>
-                    <button id="btnExportFile" class="btn btn-sepia" style="flex:1; padding:6px 2px; font-size:9px; background:#00838f; border-color:#00acc1;" title="Zapisuje bazÄ™ do pliku na dysk">đź“Ą POBIERZ PLIK</button>
-                    <button id="btnImportFile" class="btn btn-sepia" style="flex:1; padding:6px 2px; font-size:9px; background:#e65100; border-color:#ef6c00;" title="Wczytuje bazÄ™ z pliku">đź“‚ WGRAJ PLIK</button>
+                    <button id="btnSaveSettings" class="btn btn-go-sepia" style="flex:1; padding:6px 2px; font-size:9px;">đź’ľ Zapisz opcje</button>
+                    <button id="btnExportFile" class="btn btn-sepia" style="flex:1; padding:6px 2px; font-size:9px; background:#00838f; border-color:#00acc1;" title="Zapisuje bazę do pliku na dysk">📥 Pobierz plik</button>
+                    <button id="btnImportFile" class="btn btn-sepia" style="flex:1; padding:6px 2px; font-size:9px; background:#e65100; border-color:#ef6c00;" title="Wczytuje bazę z pliku">📂 Wgraj plik</button>
                 </div>
         `;
         document.body.appendChild(settingsGui);
 
-        // --- ZUPEĹNIE NOWY MODUĹ DISCORDA ---
+        // --- ZUPEŁNIE NOWY MODUŁ DISCORDA ---
         const discordGui = document.createElement('div'); discordGui.id = 'discordSettingsGUI'; discordGui.className = 'hero-window'; discordGui.style.display = 'none';
         discordGui.innerHTML = `
-            <div class="gui-header" style="color:#5865F2;">đź’¬ Konfiguracja Discorda <button class="btn-close" onclick="document.getElementById('discordSettingsGUI').style.display='none'">âś–</button></div>
+            <div class="gui-header" style="color:#5865F2;">💬 Konfiguracja Discorda <button class="btn-close" onclick="document.getElementById('discordSettingsGUI').style.display='none'">✖</button></div>
             <div class="gui-content" style="gap:8px;">
                 <div style="background:#1a1a1a; padding:6px; border:1px solid #444; border-radius:3px;">
-                    <p style="margin:0 0 5px 0; font-size:10px; color:#aaa; text-align:justify;">1. StwĂłrz prywatny serwer na Discordzie.<br>2. WejdĹş w Ustawienia kanaĹ‚u -> Integracje -> Tworzenie Webhooka.<br>3. Skopiuj <b>URL Webhooka</b> i wklej go poniĹĽej. <a href="https://support.discord.com/hc/pl/articles/228383668-Wst%C4%99p-do-Webhook%C3%B3w" target="_blank" style="color:#5865F2;">[Instrukcja]</a></p>
+                    <p style="margin:0 0 5px 0; font-size:10px; color:#aaa; text-align:justify;">1. Stwórz prywatny serwer na Discordzie.<br>2. Wejdź w Ustawienia kanału -> Integracje -> Tworzenie Webhooka.<br>3. Skopiuj <b>URL Webhooka</b> i wklej go poniżej. <a href="https://support.discord.com/hc/pl/articles/228383668-Wst%C4%99p-do-Webhook%C3%B3w" target="_blank" style="color:#5865F2;">[Instrukcja]</a></p>
                     <input type="text" id="discordWebhookUrl" placeholder="https://discord.com/api/webhooks/..." value="${botSettings.discord?.url || ''}" style="width:100%; padding:5px; font-size:10px; background:#0f0f0f; color:#fff; border:1px solid #5865F2; border-radius:2px; box-sizing:border-box;">
                 </div>
 
                 <div style="background:#1a1a1a; padding:6px; border:1px solid #444; border-radius:3px;">
-                    <p style="margin:0 0 5px 0; font-size:10px; color:#aaa;">Oznaczanie na telefonie (Opcjonalne):<br>Aby dostaÄ‡ powiadomienie Push z dzwiÄ™kiem tak jak przy wiadomoĹ›ci DM, wklej tu swĂłj <b>ID UĹĽytkownika Discord</b>.</p>
+                    <p style="margin:0 0 5px 0; font-size:10px; color:#aaa;">Oznaczanie na telefonie (Opcjonalne):<br>Aby dostać powiadomienie Push z dzwiękiem tak jak przy wiadomości DM, wklej tu swój <b>ID Użytkownika Discord</b>.</p>
                     <input type="text" id="discordUserId" placeholder="Np. 123456789012345678" value="${botSettings.discord?.userId || ''}" style="width:100%; padding:5px; font-size:10px; background:#0f0f0f; color:#fff; border:1px solid #333; border-radius:2px; box-sizing:border-box;">
                 </div>
 
                 <div style="border-top:1px solid #444; padding-top:8px;">
                     <label style="color:#e0d8c0; font-size:11px; display:flex; align-items:center; gap:5px; margin-bottom:5px; cursor:pointer;"><input type="checkbox" id="discordAlert_Hero" ${botSettings.discord?.alerts?.hero ? 'checked' : ''}> Powiadomienia z Radaru (Herosi/E2)</label>
                     <label style="color:#e0d8c0; font-size:11px; display:flex; align-items:center; gap:5px; margin-bottom:5px; cursor:pointer;"><input type="checkbox" id="discordAlert_Player" ${botSettings.discord?.alerts?.player ? 'checked' : ''}> Powiadomienia o graczach na mapie</label>
-                    <label style="color:#e0d8c0; font-size:11px; display:flex; align-items:center; gap:5px; margin-bottom:5px; cursor:pointer;"><input type="checkbox" id="discordAlert_Chat" ${botSettings.discord?.alerts?.chat ? 'checked' : ''}> Prywatne wiadomoĹ›ci na czacie (DM)</label>
-                    <label style="color:#ff5252; font-size:11px; font-weight:bold; display:flex; align-items:center; gap:5px; margin-bottom:5px; cursor:pointer;"><input type="checkbox" id="discordAlert_Captcha" ${botSettings.discord?.alerts?.captcha ? 'checked' : ''}> đźš¨ ALARM ZAPADKI (BARDZO WAĹ»NE)</label>
+                    <label style="color:#e0d8c0; font-size:11px; display:flex; align-items:center; gap:5px; margin-bottom:5px; cursor:pointer;"><input type="checkbox" id="discordAlert_Chat" ${botSettings.discord?.alerts?.chat ? 'checked' : ''}> Prywatne wiadomości na czacie (DM)</label>
+                    <label style="color:#ff5252; font-size:11px; font-weight:bold; display:flex; align-items:center; gap:5px; margin-bottom:5px; cursor:pointer;"><input type="checkbox" id="discordAlert_Captcha" ${botSettings.discord?.alerts?.captcha ? 'checked' : ''}> 🚨 ALARM ZAPADKI (BARDZO WAŻNE)</label>
                 </div>
 
-                <button id="btnSaveDiscord" class="btn-sepia" style="background:#5865F2; border-color:#4752C4; width:100%; padding:8px; margin-top:auto;">đź’ľ ZAPISZ DISCORDA I WYĹšLIJ TEST</button>
+                <button id="btnSaveDiscord" class="btn-sepia" style="background:#5865F2; border-color:#4752C4; width:100%; padding:8px; margin-top:auto;">💾 ZAPISZ DISCORDA I WYŚLIJ TEST</button>
             </div>
         `;
         document.body.appendChild(discordGui);
 
         window.toggleSettingsAcc = function(id) {
-            let h = document.getElementById(id);
-            let c = document.getElementById(id+'Content');
-            let isHidden = c.style.display === 'none';
+            const h = document.getElementById(id);
+            const c = document.getElementById(id + 'Content');
+            if (!h || !c) {
+                console.warn('[Margoneuro EXP] Brak sekcji accordion:', id);
+                return;
+            }
+
+            const sectionNames = {
+                accBerserk: 'Kieszonkowy Berserk',
+                accAutoheal: 'Autoheal i auto-sprzedaż',
+                accAlerts: 'Alarmy i powiadomienia',
+                accExpRules: 'Zasady walki i bezpieczeństwo',
+                accRoute: 'Trasa expowiska',
+                accHuman: 'Humanizacja ataku i radaru',
+                accMove: 'Humanizacja ruchu'
+            };
+            const sectionName = sectionNames[id] || h.innerText.replace(/^[>v]\s*/, '').trim();
+            console.log(`[Margoneuro EXP] Kliknięto sekcję: ${sectionName}`);
+            const isHidden = c.style.display === 'none' || !c.style.display;
             c.style.display = isHidden ? 'block' : 'none';
-            h.innerText = (isHidden ? 'â–Ľ ' : 'â–¶ ') + h.innerText.replace(/^[â–Ľâ–¶]\s*/, '').trim();
+            h.innerText = `${isHidden ? 'v' : '>'} ${sectionName}`;
         };
 
         const gatewaysGui = document.createElement('div'); gatewaysGui.id = 'heroGatewaysGUI'; gatewaysGui.className = 'hero-window'; gatewaysGui.style.display = 'none';
         gatewaysGui.innerHTML = `
-            <div class="gui-header">đź—ď¸Ź Baza PrzejĹ›Ä‡ <button class="btn-close" onclick="document.getElementById('heroGatewaysGUI').style.display='none'">âś–</button></div>
-            <div class="gui-content"><button id="btnScanGateways" class="btn btn-sepia" style="margin-bottom:5px;">đź”Ť SKANUJ OBECNÄ„ MAPÄ</button><div id="gatewaysListContainer"></div></div>
+            <div class="gui-header">🗃️ Baza Przejść <button class="btn-close" onclick="document.getElementById('heroGatewaysGUI').style.display='none'">✖</button></div>
+            <div class="gui-content"><button id="btnScanGateways" class="btn btn-sepia" style="margin-bottom:5px;">🔍 SKANUJ OBECNĄ MAPĘ</button><div id="gatewaysListContainer"></div></div>
         `;
         document.body.appendChild(gatewaysGui);
 
@@ -5004,7 +5085,7 @@ function initGUI() {
         goToGui.style.maxHeight = '560px';
         goToGui.style.resize = 'both';
         goToGui.innerHTML = `
-            <div class="gui-header">âžˇ IdĹş do mapy <button class="btn-close" onclick="document.getElementById('heroGoToGUI').style.display='none'">âś–</button></div>
+            <div class="gui-header">➡ Idź do mapy <button class="btn-close" onclick="document.getElementById('heroGoToGUI').style.display='none'">✖</button></div>
             <div class="gui-content" style="display:flex; flex-direction:column; height:100%;">
                 <input type="text" id="inpGoToSearch" placeholder="Szukaj mapy..." style="width:100%; padding:6px; background:#0f0f0f; color:#e0d8c0; border:1px solid #4a3f2b; border-radius:2px; outline:none; font-size:11px; margin-bottom:8px; box-sizing:border-box;">
                 <div id="goToMapsListContainer" style="overflow-y:auto; flex-grow:1; display:flex; flex-direction:column; gap:2px; border:1px solid #3a3020; background:#141414; padding:2px;"></div>
@@ -5022,7 +5103,7 @@ function initGUI() {
         expBaseGui.style.width = '320px';
         expBaseGui.style.maxHeight = '560px';
         expBaseGui.innerHTML = `
-            <div class="gui-header">đź”– Baza Expowisk <button class="btn-close" onclick="document.getElementById('heroExpBaseGUI').style.display='none'">âś–</button></div>
+            <div class="gui-header">🔖 Baza Expowisk <button class="btn-close" onclick="document.getElementById('heroExpBaseGUI').style.display='none'">✖</button></div>
             <div class="gui-content" style="display:flex; flex-direction:column; height:100%;">
                 <div id="expProfilesList" style="flex:1; border:1px solid #3a3020; background:#000; overflow-y:auto; padding:2px;"></div>
             </div>
@@ -5038,11 +5119,11 @@ function initGUI() {
         expRecGui.style.width = '320px';
         expRecGui.style.maxHeight = '560px';
         expRecGui.innerHTML = `
-            <div class="gui-header">â­ Polecane Expowiska <button class="btn-close" onclick="document.getElementById('heroExpRecGUI').style.display='none'">âś–</button></div>
+            <div class="gui-header">⭐ Polecane Expowiska <button class="btn-close" onclick="document.getElementById('heroExpRecGUI').style.display='none'">✖</button></div>
             <div class="gui-content" style="display:flex; flex-direction:column; height:100%;">
                 <div style="font-size:10px; color:#a99a75; margin-bottom:5px;">Wybrane dla Twojego poziomu (od -5 do +15):</div>
                 <div id="expRecList" style="flex:1; border:1px solid #3a3020; background:#141414; overflow-y:auto; padding:4px; display:flex; flex-direction:column; gap:4px;"></div>
-                <button id="btnAddSelectedRec" class="btn btn-go-sepia" style="margin-top:5px; padding:6px; font-weight:bold; color:#4caf50;">âž• DODAJ ZAZNACZONE DO TRASY</button>
+                <button id="btnAddSelectedRec" class="btn btn-go-sepia" style="margin-top:5px; padding:6px; font-weight:bold; color:#4caf50;">➕ DODAJ ZAZNACZONE DO TRASY</button>
             </div>
         `;
         document.body.appendChild(expRecGui);
@@ -5057,11 +5138,11 @@ function initGUI() {
         internalMapGui.style.height = '500px';
         internalMapGui.style.resize = 'both';
         internalMapGui.innerHTML = `
-            <div class="gui-header">đź§­ Mapa trasy i pamiÄ™ci przejĹ›Ä‡ <button class="btn-close" onclick="document.getElementById('heroInternalMapGUI').style.display='none'">âś–</button></div>
+            <div class="gui-header">🧭 Mapa trasy i pamięci przejść <button class="btn-close" onclick="document.getElementById('heroInternalMapGUI').style.display='none'">✖</button></div>
             <div class="gui-content" style="gap:8px;">
                 <div style="display:flex; gap:6px; align-items:center;">
                     <input type="text" id="internalMapSearch" placeholder="Szukaj mapy..." style="flex:1; padding:6px; background:#0f0f0f; color:#e0d8c0; border:1px solid #4a3f2b; border-radius:2px; font-size:11px;">
-                    <button class="btn-sepia" style="padding:6px 8px;" onclick="window.renderInternalMapGraph(window.__internalSelectedMap, true)">OdĹ›wieĹĽ</button>
+                    <button class="btn-sepia" style="padding:6px 8px;" onclick="window.renderInternalMapGraph(window.__internalSelectedMap, true)">Odśwież</button>
                 </div>
                 <div id="internalMapSummary" style="font-size:10px; color:#a99a75;"></div>
                 <div class="internal-map-layout">
@@ -5072,6 +5153,7 @@ function initGUI() {
         `;
         document.body.appendChild(internalMapGui);
 
+        console.log('[Margoneuro UI] Podpinam event listenery');
         setupModals(); setupMultiDrag(); setupGearDrag(); setupLogic();
     }
 
@@ -5086,44 +5168,44 @@ function initGUI() {
 
     function handleGlobalKeydown(e) { if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return; if (botSettings.toggleKey && e.code === botSettings.toggleKey) { window.toggleMainVisibility(); } }
 
-// --- MODUĹ: POWIADOMIENIA PRZEGLÄ„DARKI ---
+// --- MODUŁ: POWIADOMIENIA PRZEGLĄDARKI ---
         const browserAlertsGui = document.createElement('div'); browserAlertsGui.id = 'browserAlertsSettingsGUI'; browserAlertsGui.className = 'hero-window'; browserAlertsGui.style.display = 'none'; browserAlertsGui.style.top = '60px'; browserAlertsGui.style.left = '400px'; browserAlertsGui.style.width = '320px';
         browserAlertsGui.innerHTML = `
-            <div class="gui-header" style="color:#ff9800;">đź”” Powiadomienia PrzeglÄ…darki <button class="btn-close" onclick="document.getElementById('browserAlertsSettingsGUI').style.display='none'">âś–</button></div>
+            <div class="gui-header" style="color:#ff9800;">🔔 Powiadomienia Przeglądarki <button class="btn-close" onclick="document.getElementById('browserAlertsSettingsGUI').style.display='none'">✖</button></div>
             <div class="gui-content" style="gap:8px;">
                 <label style="color:#ff5252; font-size:11px; cursor:pointer; font-weight:bold;"><input type="checkbox" id="captchaAlert" ${botSettings.exp.captchaAlert ? 'checked' : ''}> đźš¨ Wybudzanie Alarmem Captcha</label>
                 <div style="border-top:1px solid #333; padding-top:6px;">
-                    <label style="color:#ffb300; font-size:11px; cursor:pointer; font-weight:bold;"><input type="checkbox" id="playerAlert" ${botSettings.exp.playerAlert ? 'checked' : ''}> đź‘ď¸Ź Alarm na Graczy</label>
+                    <label style="color:#ffb300; font-size:11px; cursor:pointer; font-weight:bold;"><input type="checkbox" id="playerAlert" ${botSettings.exp.playerAlert ? 'checked' : ''}> 👁️ Alarm na Graczy</label>
                     <label style="color:#e0d8c0; font-size:10px; cursor:pointer; padding-left:20px; margin-top:3px;"><input type="checkbox" id="playerAlertStopBot" ${botSettings.exp.playerAlertStopBot ? 'checked' : ''}> Zatrzymuj bota przy wykryciu</label>
                 </div>
                 <div style="border-top:1px solid #333; padding-top:6px;">
                     <label style="color:#e040fb; font-size:11px; cursor:pointer; font-weight:bold;"><input type="checkbox" id="chatAlert" ${botSettings.exp.chatAlert ? 'checked' : ''}> đź“© Alarm Czat (Prywatne)</label>
-                    <label style="color:#e0d8c0; font-size:10px; cursor:pointer; padding-left:20px; margin-top:3px;"><input type="checkbox" id="chatAlertStopBot" ${botSettings.exp.chatAlertStopBot ? 'checked' : ''}> Zatrzymuj bota przy wiadomoĹ›ci</label>
+                    <label style="color:#e0d8c0; font-size:10px; cursor:pointer; padding-left:20px; margin-top:3px;"><input type="checkbox" id="chatAlertStopBot" ${botSettings.exp.chatAlertStopBot ? 'checked' : ''}> Zatrzymuj bota przy wiadomości</label>
                 </div>
             </div>
         `;
         document.body.appendChild(browserAlertsGui);
 
-        // --- MODUĹ: DISCORD WEBHOOK ---
+        // --- MODUŁ: DISCORD WEBHOOK ---
         const discordGui = document.createElement('div'); discordGui.id = 'discordSettingsGUI'; discordGui.className = 'hero-window'; discordGui.style.display = 'none';
         discordGui.innerHTML = `
-            <div class="gui-header" style="color:#5865F2;">đź’¬ Konfiguracja Discorda <button class="btn-close" onclick="document.getElementById('discordSettingsGUI').style.display='none'">âś–</button></div>
+            <div class="gui-header" style="color:#5865F2;">💬 Konfiguracja Discorda <button class="btn-close" onclick="document.getElementById('discordSettingsGUI').style.display='none'">✖</button></div>
             <div class="gui-content" style="gap:8px;">
                 <div style="background:#1a1a1a; padding:6px; border:1px solid #444; border-radius:3px;">
-                    <p style="margin:0 0 5px 0; font-size:10px; color:#aaa; text-align:justify;">StwĂłrz Webhook na swoim prywatnym serwerze (Integracje kanaĹ‚u). <a href="https://support.discord.com/hc/pl/articles/228383668-Wst%C4%99p-do-Webhook%C3%B3w" target="_blank" style="color:#5865F2;">[Instrukcja]</a></p>
+                    <p style="margin:0 0 5px 0; font-size:10px; color:#aaa; text-align:justify;">Stwórz Webhook na swoim prywatnym serwerze (Integracje kanału). <a href="https://support.discord.com/hc/pl/articles/228383668-Wst%C4%99p-do-Webhook%C3%B3w" target="_blank" style="color:#5865F2;">[Instrukcja]</a></p>
                     <input type="text" id="discordWebhookUrl" placeholder="Wklej URL Webhooka..." value="${botSettings.discord?.url || ''}" style="width:100%; padding:5px; font-size:10px; background:#0f0f0f; color:#fff; border:1px solid #5865F2; border-radius:2px; box-sizing:border-box;">
                 </div>
                 <div style="background:#1a1a1a; padding:6px; border:1px solid #444; border-radius:3px;">
-                    <p style="margin:0 0 5px 0; font-size:10px; color:#aaa;">(Opcjonalnie) Wpisz swĂłj <b>ID UĹĽytkownika Discord</b>, aby bot wysyĹ‚aĹ‚ Ci powiadomienie Push z wibracjÄ… na telefon (Ping):</p>
+                    <p style="margin:0 0 5px 0; font-size:10px; color:#aaa;">(Opcjonalnie) Wpisz swój <b>ID Użytkownika Discord</b>, aby bot wysyłał Ci powiadomienie Push z wibracją na telefon (Ping):</p>
                     <input type="text" id="discordUserId" placeholder="Np. 123456789012345678" value="${botSettings.discord?.userId || ''}" style="width:100%; padding:5px; font-size:10px; background:#0f0f0f; color:#fff; border:1px solid #333; border-radius:2px; box-sizing:border-box;">
                 </div>
                 <div style="border-top:1px solid #444; padding-top:8px;">
                     <div style="margin-bottom:6px; background:#111; border:1px solid #333; padding:4px; border-radius:3px;">
-                        <label style="color:#d4af37; font-size:11px; font-weight:bold; cursor:pointer;"><input type="checkbox" id="discordAlert_Hero" ${botSettings.discord?.alerts?.hero ? 'checked' : ''}> đź‰ Radar (Herosi/E2)</label>
+                        <label style="color:#d4af37; font-size:11px; font-weight:bold; cursor:pointer;"><input type="checkbox" id="discordAlert_Hero" ${botSettings.discord?.alerts?.hero ? 'checked' : ''}> 🐉 Radar (Herosi/E2)</label>
                         <div style="padding-left:20px; margin-top:3px;"><label style="color:#aaa; font-size:10px; cursor:pointer;"><input type="checkbox" id="discordStop_Hero" ${botSettings.discord?.stop?.hero !== false ? 'checked' : ''}> Zatrzymuj bota (Zalecane)</label></div>
                     </div>
                     <div style="margin-bottom:6px; background:#111; border:1px solid #333; padding:4px; border-radius:3px;">
-                        <label style="color:#ffb300; font-size:11px; font-weight:bold; cursor:pointer;"><input type="checkbox" id="discordAlert_Player" ${botSettings.discord?.alerts?.player ? 'checked' : ''}> đź‘ď¸Ź Gracze na mapie</label>
+                        <label style="color:#ffb300; font-size:11px; font-weight:bold; cursor:pointer;"><input type="checkbox" id="discordAlert_Player" ${botSettings.discord?.alerts?.player ? 'checked' : ''}> 👁️ Gracze na mapie</label>
                         <div style="padding-left:20px; margin-top:3px;"><label style="color:#aaa; font-size:10px; cursor:pointer;"><input type="checkbox" id="discordStop_Player" ${botSettings.discord?.stop?.player ? 'checked' : ''}> Zatrzymuj bota</label></div>
                     </div>
                     <div style="margin-bottom:6px; background:#111; border:1px solid #333; padding:4px; border-radius:3px;">
@@ -5235,9 +5317,9 @@ function setOnChange(id, handler) {
 }
 
     function setupLogic() {
-        console.log('[Margoneuro] Podpinam przyciski EXP');
+        console.log('[Margoneuro EXP] Podpinam przyciski EXP');
 
-     // ZAKĹADKI (TABS) - POPRAWIONE BEZPIECZNE PRZEĹÄ„CZANIE
+     // ZAKŁADKI (TABS) - POPRAWIONE BEZPIECZNE PRZEŁĄCZANIE
        const tabs = ['hero', 'e2', 'kolosy', 'exp', 'teleports'];
        tabs.forEach(tab => {
            let toggle = document.getElementById(tab + 'ModeToggle');
@@ -5253,7 +5335,7 @@ function setOnChange(id, handler) {
                    let expC = document.getElementById('expContainer'); if(expC) expC.style.display = tab === 'exp' ? 'flex' : 'none';
                    let tpC = document.getElementById('teleportsContainer'); if(tpC) tpC.style.display = tab === 'teleports' ? 'flex' : 'none';
 
-                   // Radar widoczny TYLKO w zakĹ‚adce Herosi
+                   // Radar widoczny TYLKO w zakładce Herosi
                    let radarW = document.getElementById('radarControlsWrapper'); if(radarW) radarW.style.display = (tab === 'hero') ? 'block' : 'none';
 
                    activeBossTarget = null;
@@ -5282,13 +5364,13 @@ if (btnExp) {
                 window.margoneuroStoppedManually = false;
                 window.expRunId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2,6)}`;
             window.expCycleId = 0;
-            this.innerHTML = "âŹą STOP";
+            this.innerHTML = "⏹ STOP";
             this.style.borderColor = "#f44336";
             this.style.color = "#f44336";
 
-            // BEZWZGLÄDNY RESET BLOKAD RUCHU
+            // BEZWZGLĘDNY RESET BLOKAD RUCHU
 
-            // BEZWZGLÄDNY RESET BLOKAD RUCHU
+            // BEZWZGLĘDNY RESET BLOKAD RUCHU
             window.isRushing = false;
             window.isRushingToShop = false;
             if (window.autoSellState) window.autoSellState.active = false;
@@ -5321,7 +5403,7 @@ expEmptyScans = 0;
         } else {
             if (!window.__stoppingForCaptcha) window.margoneuroStoppedManually = true;
             window.expRunId = null;
-            this.innerHTML = "â–¶ START";
+            this.innerHTML = "▶ START";
             this.style.borderColor = "#4caf50";
             this.style.color = "#4caf50";
             // TWARDE ZATRZYMANIE BOTA I POSTACI
@@ -5337,7 +5419,7 @@ expEmptyScans = 0;
     });
 }
 
-        // ZAPISYWANIE USTAWIEĹ EXP I REAGOWANIE NA ZMIANY
+        // ZAPISYWANIE USTAWIEŃ EXP I REAGOWANIE NA ZMIANY
 
         document.getElementById('expMinL').onchange = (e) => { botSettings.exp.minLvl = parseInt(e.target.value) || 1; saveSettings(); if(botSettings.exp.useAggro) window.toggleNativeAggroVisuals(true); };
 
@@ -5350,7 +5432,7 @@ expEmptyScans = 0;
         document.getElementById('expE').onchange = (e) => { botSettings.exp.elite = e.target.checked; saveSettings(); };
 
 
-// Inicjalizacja braku zmiennej, jeĹ›li to pierwszy start z nowÄ… aktualizacjÄ…
+// Inicjalizacja braku zmiennej, jeśli to pierwszy start z nową aktualizacją
 if (!botSettings.berserk) {
             botSettings.berserk = { enabled: false, userEnabled: false, common: true, e1: false, e2: false, hero: false, minLvlOffset: -20, maxLvlOffset: 100, disableBerserkOnStop: false };
             saveSettings();
@@ -5359,7 +5441,7 @@ if (!botSettings.berserk) {
         if (botSettings.berserk.disableBerserkOnStop === undefined) botSettings.berserk.disableBerserkOnStop = false;
         if (window.RouteCombatFSM) window.RouteCombatFSM.syncFromSettings();
 
-        if (!botSettings.autoheal) { botSettings.autoheal = { enabled: false, threshold: 80, ignoreItems: "Zielona pietruszka\nKandyzowane wisienki w cukrze", unidItems: "Czarna perĹ‚a ĹĽycia" }; saveSettings(); }
+        if (!botSettings.autoheal) { botSettings.autoheal = { enabled: false, threshold: 80, ignoreItems: "Zielona pietruszka\nKandyzowane wisienki w cukrze", unidItems: "Czarna perła życia" }; saveSettings(); }
         if (!botSettings.autopot) { botSettings.autopot = { enabled: false, stacks: 14 }; saveSettings(); }
         if (botSettings.exp.autoChangeRoute === undefined) { botSettings.exp.autoChangeRoute = false; saveSettings(); }
       if (botSettings.exp.captchaAlert === undefined) { botSettings.exp.captchaAlert = true; saveSettings(); }
@@ -5381,7 +5463,7 @@ bindChange('useTeleportsEq', (e) => { botSettings.exp.useTeleportsEq = e.target.
         bindChange('chatAlert', (e) => { botSettings.exp.chatAlert = e.target.checked; saveSettings(); if (e.target.checked && Notification.permission !== "granted") Notification.requestPermission(); });
         bindChange('chatAlertStopBot', (e) => { botSettings.exp.chatAlertStopBot = e.target.checked; saveSettings(); });
 
-        // PRZYCISKI OTWIERAJÄ„CE MENU POWIADOMIEĹ
+        // PRZYCISKI OTWIERAJĄCE MENU POWIADOMIEŃ
         bindClick('btnOpenBrowserAlertsModule', () => {
             let p = document.getElementById('browserAlertsSettingsGUI');
             p.style.display = p.style.display === 'none' ? 'flex' : 'none';
@@ -5413,10 +5495,10 @@ bindChange('useTeleportsEq', (e) => { botSettings.exp.useTeleportsEq = e.target.
             saveSettings();
 
             if(botSettings.discord.enabled) {
-                window.sendDiscordWebhook("đźź˘ MARGONEURO ZSYNCHRONIZOWANE", "Powiadomienia Discord zostaĹ‚y skonfigurowane poprawnie i dziaĹ‚ajÄ… niezaleĹĽnie od przeglÄ…darki!\nOd teraz to okno jest gotowe do odbierania sygnaĹ‚Ăłw.", 5763719);
-                heroAlert("Ustawienia Discord zostaĹ‚y zapisane.\nWysĹ‚ano wiadomoĹ›Ä‡ testowÄ… na TwĂłj kanaĹ‚!");
+                window.sendDiscordWebhook("🟢 MARGONEURO ZSYNCHRONIZOWANE", "Powiadomienia Discord zostały skonfigurowane poprawnie i działają niezależnie od przeglądarki!\nOd teraz to okno jest gotowe do odbierania sygnałów.", 5763719);
+                heroAlert("Ustawienia Discord zostały zapisane.\nWysłano wiadomość testową na Twój kanał!");
             } else {
-                heroAlert("Ustawienia zapisane (Webhook wyĹ‚Ä…czony ze wzglÄ™du na pusty link).");
+                heroAlert("Ustawienia zapisane (Webhook wyłączony ze względu na pusty link).");
             }
         });
 
@@ -5424,19 +5506,19 @@ bindChange('useTeleportsEq', (e) => { botSettings.exp.useTeleportsEq = e.target.
         bindChange('autopotEnabled', (e) => { botSettings.autopot.enabled = e.target.checked; saveSettings(); });
         bindChange('autohealThreshold', (e) => { botSettings.autoheal.threshold = parseInt(e.target.value) || 80; saveSettings(); });
         bindChange('autopotStacks', (e) => { botSettings.autopot.stacks = parseInt(e.target.value) || 14; saveSettings(); });
-       // Natychmiastowa reakcja po klikniÄ™ciu "Automatyczna zmiana Expowiska"
+        // Natychmiastowa reakcja po kliknięciu "Automatyczna zmiana Expowiska"
         bindChange('autoChangeExpRoute', (e) => {
             botSettings.exp.autoChangeRoute = e.target.checked;
             saveSettings();
             if (e.target.checked) {
                 if (typeof window.checkAndLoadBestExpProfile === 'function') window.checkAndLoadBestExpProfile(true);
             } else {
-                // JeĹ›li odznaczamy - czyĹ›cimy trasÄ™ z automatu
+                // Jeśli odznaczamy - czyścimy trasę z automatu
                 if (typeof window.clearExpMaps === 'function') window.clearExpMaps();
-                if (window.logExp) window.logExp("đź—‘ď¸Ź WyĹ‚Ä…czono auto-zmianÄ™. Trasa zostaĹ‚a wyczyszczona.", "#e53935");
+                if (window.logExp) window.logExp("🗑️ Wyłączono auto-zmianę. Trasa została wyczyszczona.", "#e53935");
             }
 
-            // Wymuszone odĹ›wieĹĽenie UI natychmiast po klikniÄ™ciu!
+            // Wymuszone odświeżenie UI natychmiast po kliknięciu!
             setTimeout(() => {
                 if (typeof window.renderExpMaps === 'function') window.renderExpMaps();
             }, 100);
@@ -5447,14 +5529,14 @@ bindChange('useTeleportsEq', (e) => { botSettings.exp.useTeleportsEq = e.target.
             p.style.display = p.style.display === 'none' ? 'block' : 'none';
         });
 
-// PÄ™tla milczÄ…cego Ĺ‚adownia profili (dla Auto-Expowiska)
+// Pętla milczącego ładownia profili (dla Auto-Expowiska)
         window.autoLoadExpProfile = function(index) {
             let p = botSettings.expProfiles[index];
            if(p) {
                 botSettings.exp.activeProfileName = p.name;
                 botSettings.exp.mapOrder = [...p.maps];
 
-                // AUTOMATYCZNA OPTYMALIZACJA PO ZAĹADOWANIU NOWEJ BAZY
+                // AUTOMATYCZNA OPTYMALIZACJA PO ZAŁADOWANIU NOWEJ BAZY
                 if (typeof window.optimizeExpRoute === 'function') window.optimizeExpRoute(true);
 
                 localStorage.setItem('exp_map_order_v64', JSON.stringify(botSettings.exp.mapOrder));
@@ -5476,7 +5558,7 @@ bindChange('useTeleportsEq', (e) => { botSettings.exp.useTeleportsEq = e.target.
             }
         };
 
-        // Algorytm sztucznej inteligencji: Zmienia expowisko na najlepsze moĹĽliwe
+        // Algorytm sztucznej inteligencji: Zmienia expowisko na najlepsze możliwe
         window.checkAndLoadBestExpProfile = function(forceLoad = false) {
             if (!botSettings.exp.autoChangeRoute || !botSettings.expProfiles) return;
             if (typeof Engine === 'undefined' || !Engine.hero || !Engine.hero.d || !Engine.hero.d.lvl) return;
@@ -5512,10 +5594,10 @@ bindChange('useTeleportsEq', (e) => { botSettings.exp.useTeleportsEq = e.target.
             }
         };
 
-        // Natychmiastowa reakcja po klikniÄ™ciu "Automatyczna zmiana Expowiska"
-        let chkAutoChange = document.getElementById('autoChangeExpRoute');
+        // Natychmiastowa reakcja po kliknięciu "Automatyczna zmiana Expowiska"
+        const chkAutoChange = document.getElementById('autoChangeExpRoute');
         if (chkAutoChange) {
-            // Sklonowanie przycisku kasuje wszystkie stare eventy, by nie byĹ‚o podwĂłjnych logĂłw!
+            // Sklonowanie przycisku kasuje wszystkie stare eventy, by nie było podwójnych logów!
             let newChk = chkAutoChange.cloneNode(true);
             chkAutoChange.parentNode.replaceChild(newChk, chkAutoChange);
 
@@ -5528,7 +5610,7 @@ bindChange('useTeleportsEq', (e) => { botSettings.exp.useTeleportsEq = e.target.
                 } else {
                     if (typeof window.clearExpMaps === 'function') window.clearExpMaps();
 
-                    let logMsg = "đź—‘ď¸Ź WyĹ‚Ä…czono auto-zmianÄ™. Trasa zostaĹ‚a wyczyszczona.";
+                    let logMsg = "🗑️ Wyłączono auto-zmianę. Trasa została wyczyszczona.";
                     if (window._lastExpLog !== logMsg || Date.now() - (window._lastExpLogTime || 0) > 2000) {
                         if (window.logExp) window.logExp(logMsg, "#e53935");
                         window._lastExpLog = logMsg;
@@ -5536,7 +5618,7 @@ bindChange('useTeleportsEq', (e) => { botSettings.exp.useTeleportsEq = e.target.
                     }
                 }
 
-                // Wymuszone odĹ›wieĹĽenie okna od razu po akcji
+                // Wymuszone odświeżenie okna od razu po akcji
                 if (typeof window.renderExpMaps === 'function') window.renderExpMaps();
             });
         }
@@ -5547,11 +5629,11 @@ bindChange('useTeleportsEq', (e) => { botSettings.exp.useTeleportsEq = e.target.
             const activeNow = !!(botSettings?.berserk?.enabled || Engine?.settings?.d?.fight_auto_solo);
             chk.checked = desiredAuto;
             chk.title = desiredAuto
-                ? (activeNow ? 'Berserk aktywny' : 'Berserk auto-aktywny (chwilowo OFF poza EXP/trasÄ…)')
-                : 'Berserk wyĹ‚Ä…czony';
+                ? (activeNow ? 'Berserk aktywny' : 'Berserk auto-aktywny (chwilowo OFF poza EXP/trasą)')
+                : 'Berserk wyłączony';
         }
 
-        // Nowa, ostateczna funkcja do wysyĹ‚ania komend natywnego Berserka bezpoĹ›rednio do gry
+        // Nowa, ostateczna funkcja do wysyłania komend natywnego Berserka bezpośrednio do gry
         window.updateServerBerserk = function() {
             if (typeof window._g !== 'function') return;
             let b = botSettings.berserk;
@@ -5569,8 +5651,8 @@ bindChange('useTeleportsEq', (e) => { botSettings.exp.useTeleportsEq = e.target.
 
             if (window._lastBerserkLogState !== b.enabled) {
                 window._lastBerserkLogState = b.enabled;
-                if (b.enabled && typeof window.logExp === 'function') window.logExp("âš”ď¸Ź Aktywowano serwerowego Kieszonkowego Berserka!", "#ff9800");
-                else if (typeof window.logExp === 'function') window.logExp("đź›ˇď¸Ź WyĹ‚Ä…czono Kieszonkowego Berserka.", "#ff9800");
+                if (b.enabled && typeof window.logExp === 'function') window.logExp("⚔️ Aktywowano serwerowego Kieszonkowego Berserka!", "#ff9800");
+                else if (typeof window.logExp === 'function') window.logExp("🛡️ Wyłączono Kieszonkowego Berserka.", "#ff9800");
             }
 
             if (!botSettings.autosell) { botSettings.autosell = { enabled: false, maxCapacity: 42 }; saveSettings(); }
@@ -5611,7 +5693,7 @@ bindChange('useTeleportsEq', (e) => { botSettings.exp.useTeleportsEq = e.target.
         bindChange('berserkMaxLvl', (e) => { botSettings.berserk.maxLvlOffset = parseInt(e.target.value, 10) || 100; saveSettings(); if (typeof window.updateServerBerserk === 'function') window.updateServerBerserk(); });
         bindChange('berserkMinLvl', (e) => { botSettings.berserk.minLvlOffset = -(parseInt(e.target.value, 10) || 20); saveSettings(); if (typeof window.updateServerBerserk === 'function') window.updateServerBerserk(); });
 
-// ZAPISYWANIE USTAWIEĹ EXP
+// ZAPISYWANIE USTAWIEŃ EXP
 setOnChange('expMinL', (e) => {
     botSettings.exp.minLvl = parseInt(e.target.value, 10) || 1;
     saveSettings();
@@ -5749,23 +5831,23 @@ selHero.addEventListener('change', (e) => {
         document.getElementById('chkRadar').addEventListener('change', (e) => { botSettings.radarEnabled = e.target.checked; saveSettings(); });
 
         document.getElementById('chkAutoAttack').addEventListener('change', (e) => { botSettings.autoAttack = e.target.checked; saveSettings(); });
-// --- NAPRAWA PRZEZROCZYSTOĹšCI (NOWA METODA RGBA - CZYTELNY TEKST) ---
+// --- NAPRAWA PRZEZROCZYSTOŚCI (NOWA METODA RGBA - CZYTELNY TEKST) ---
         function updateWindowsBackground(opacityValue) {
             document.querySelectorAll('.hero-window').forEach(w => {
-                // Usuwamy starÄ… metodÄ™ (na wszelki wypadek)
+                // Usuwamy starą metodę (na wszelki wypadek)
                 w.style.opacity = '1';
-                // Wymuszamy peĹ‚nÄ… czytelnoĹ›Ä‡ tekstu
+                // Wymuszamy pełną czytelność tekstu
                 w.style.color = '#ffffff';
 
-                // Ustawiamy przezroczystoĹ›Ä‡ TYLKO dla tĹ‚a (uĹĽywamy rgba)
-                // ZakĹ‚adamy podstawowy kolor okna jako ciemnoszary: #202020 (czyli 32, 32, 32 w RGB)
+                // Ustawiamy przezroczystość TYLKO dla tła (używamy rgba)
+                // Zakładamy podstawowy kolor okna jako ciemnoszary: #202020 (czyli 32, 32, 32 w RGB)
                 w.style.backgroundColor = `rgba(32, 32, 32, ${opacityValue})`;
             });
         }
 
         let opacitySlider = document.getElementById('sliderOpacity');
         if (opacitySlider) {
-            // Wczytanie z pamiÄ™ci przy starcie (domyĹ›lnie 0.95, czyli prawie peĹ‚ne)
+            // Wczytanie z pamięci przy starcie (domyślnie 0.95, czyli prawie pełne)
             let savedOpacity = localStorage.getItem('hero_opacity_v64') || 0.95;
             opacitySlider.value = savedOpacity;
             updateWindowsBackground(savedOpacity);
@@ -5780,7 +5862,7 @@ selHero.addEventListener('change', (e) => {
 
 
 
-      // --- MODUĹ EXPORTU / IMPORTU DO PLIKU ---
+      // --- MODUŁ EXPORTU / IMPORTU DO PLIKU ---
         let keysToSave = ['hero_global_gateways_v20', 'hero_map_order_v20', 'hero_settings_db_v64', 'exp_profiles_v64_4', 'hero_boss_coords_v64', 'hero_teleports_by_nick_v64'];
 
         let btnExport = document.getElementById('btnExportFile');
@@ -5802,14 +5884,14 @@ selHero.addEventListener('change', (e) => {
                 document.body.removeChild(a);
                 URL.revokeObjectURL(url);
 
-                heroAlert("âś… Plik z zapisanÄ… pamiÄ™ciÄ… bota zostaĹ‚ pomyĹ›lnie wygenerowany i pobrany na TwĂłj komputer!");
+                heroAlert("✅ Plik z zapisaną pamięcią bota został pomyślnie wygenerowany i pobrany na Twój komputer!");
             });
         }
 
         let btnImport = document.getElementById('btnImportFile');
         if (btnImport) {
             btnImport.addEventListener('click', () => {
-                // WywoĹ‚anie systemowego okna wyboru pliku
+                // Wywołanie systemowego okna wyboru pliku
                 let input = document.createElement('input');
                 input.type = 'file';
                 input.accept = '.json';
@@ -5822,10 +5904,10 @@ selHero.addEventListener('change', (e) => {
                         try {
                             let parsed = JSON.parse(ev.target.result);
                             for(let k in parsed) { localStorage.setItem(k, parsed[k]); }
-                            heroAlert("âś… Sukces! Odczytano plik i zainstalowano nowÄ… bazÄ™!\nZaraz nastÄ…pi automatyczne odĹ›wieĹĽenie gry...");
+                            heroAlert("✅ Sukces! Odczytano plik i zainstalowano nową bazę!\nZaraz nastąpi automatyczne odświeżenie gry...");
                             setTimeout(() => window.location.reload(), 2500);
                         } catch(err) {
-                            heroAlert("âťŚ BĹ‚Ä…d: Wybrany plik jest uszkodzony lub nie naleĹĽy do bota MargoNeuro!");
+                            heroAlert("❌ Błąd: Wybrany plik jest uszkodzony lub nie należy do bota MargoNeuro!");
                         }
                     };
                     reader.readAsText(file);
@@ -5859,7 +5941,7 @@ selHero.addEventListener('change', (e) => {
 
 
 
-            // Nowa linijka zapisujÄ…ca Anty-Lag!
+            // Nowa linijka zapisująca Anty-Lag!
 
             botSettings.expAntiLagMin = parseInt(document.getElementById('inpExpAntiLagMin').value) || 1500;
 
@@ -5869,20 +5951,20 @@ selHero.addEventListener('change', (e) => {
 
             saveSettings();
 
-            heroAlert("Ustawienia zostaĹ‚y zapisane.");
+            heroAlert("Ustawienia zostały zapisane.");
 
         });
 
 
 
-        document.getElementById('btnResetRoute').addEventListener('click', () => { heroConfirm("ZresetowaÄ‡ pÄ™tlÄ™ i zaczÄ…Ä‡ od nowa?", (res) => { if(res) { checkedMapsThisSession.clear(); saveCheckedMaps(); currentRouteIndex = -1; sessionStorage.removeItem('hero_route_index'); autoDetectEngineData(); updateUI(); }}); });
+        document.getElementById('btnResetRoute').addEventListener('click', () => { heroConfirm("Zresetować pętlę i zacząć od nowa?", (res) => { if(res) { checkedMapsThisSession.clear(); saveCheckedMaps(); currentRouteIndex = -1; sessionStorage.removeItem('hero_route_index'); autoDetectEngineData(); updateUI(); }}); });
 
-      // --- FUNKCJE DLA PRZYCISKU "IDĹą DO" ---
+      // --- FUNKCJE DLA PRZYCISKU "IDŹ DO" ---
         function getAllKnownMaps() {
             const set = new Set();
-            // Z HerosĂłw
+            // Z Herosów
             for (const hero in heroData) { Object.keys(heroData[hero] || {}).forEach(m => set.add(m)); }
-            // Z Elit i KolosĂłw
+            // Z Elit i Kolosów
             if (typeof elityIIData !== 'undefined') elityIIData.forEach(e => (e.path || []).forEach(m => set.add(m)));
             if (typeof kolosyData !== 'undefined') kolosyData.forEach(e => (e.path || []).forEach(m => set.add(m)));
             // Z bazy bram
@@ -5901,14 +5983,14 @@ selHero.addEventListener('change', (e) => {
             const filtered = q ? allMaps.filter(m => m.toLowerCase().includes(q)) : allMaps;
 
             if (filtered.length === 0) {
-                container.innerHTML = '<div style="padding:5px; text-align:center; color:#777; font-size:10px;">Brak map w bazie speĹ‚niajÄ…cych kryteria.</div>';
+                container.innerHTML = '<div style="padding:5px; text-align:center; color:#777; font-size:10px;">Brak map w bazie spełniających kryteria.</div>';
                 return;
             }
 
             container.innerHTML = filtered.map(mapName => `
                 <div class="list-item" style="cursor:pointer; border-left: 3px solid #00acc1;" onclick="document.getElementById('heroGoToGUI').style.display='none'; rushToMap('${mapName.replace(/'/g, "\\'")}')">
                     <span style="color:#d4af37; font-weight:bold;">${mapName}</span>
-                    <span style="color:#00acc1; font-size:10px; font-weight:bold;">đźŹ BIEGNIJ</span>
+                    <span style="color:#00acc1; font-size:10px; font-weight:bold;">🏃 BIEGNIJ</span>
                 </div>
             `).join('');
         };
@@ -5918,7 +6000,7 @@ selHero.addEventListener('change', (e) => {
             btnGoToTop.addEventListener('click', () => {
                 const gui = document.getElementById('heroGoToGUI');
                 if (gui.style.display === 'none') {
-                    // Zamknij inne okna, ĹĽeby nie byĹ‚o tĹ‚oku
+                    // Zamknij inne okna, żeby nie było tłoku
                     const settings = document.getElementById('heroSettingsGUI');
                     const maps = document.getElementById('heroGatewaysGUI');
                     if (settings) settings.style.display = 'none';
@@ -5949,7 +6031,7 @@ selHero.addEventListener('change', (e) => {
 
                 if (!document.getElementById('heroModeToggle').classList.contains('active-tab')) {
 
-                    heroAlert("Dla E2 i KolosĂłw kliknij po prostu na przycisk đźŹ BIEGNIJ obok nazwy bazy.\nZaznacz je z listy, zĹ‚ap respa w kratkÄ™, a jeĹ›li boss siÄ™ pojawi - najedĹş kursorem lub zaatakuj.");
+                    heroAlert("Dla E2 i Kolosów kliknij po prostu na przycisk 🏃 BIEGNIJ obok nazwy bazy.\nZaznacz je z listy, złap respa w kratkę, a jeśli boss się pojawi - najedź kursorem lub zaatakuj.");
 
                 } else {
 
@@ -5973,7 +6055,7 @@ selHero.addEventListener('change', (e) => {
 
         window.changeMapOrder = function(oldIndex, newValue) { let hero = document.getElementById('selHero').value; if (!hero || !heroMapOrder[hero]) return; let newIndex = parseInt(newValue) - 1; let maxIndex = heroMapOrder[hero].length - 1; if (isNaN(newIndex) || newIndex < 0) newIndex = 0; if (newIndex > maxIndex) newIndex = maxIndex; if (oldIndex === newIndex) { updateUI(); return; } let item = heroMapOrder[hero].splice(oldIndex, 1)[0]; heroMapOrder[hero].splice(newIndex, 0, item); saveMapOrder(); updateUI(); };
 
-        window.removeMapFromOrder = function(index) { let hero = selHero.value; if (hero && heroMapOrder[hero]) { heroConfirm(`UsunÄ…Ä‡ mapÄ™ '${heroMapOrder[hero][index]}' ze Ĺ›cieĹĽki?`, (res) => { if (res) { heroMapOrder[hero].splice(index, 1); if(currentRouteIndex >= heroMapOrder[hero].length) currentRouteIndex = heroMapOrder[hero].length - 1; saveMapOrder(); updateUI(); } }); } };
+        window.removeMapFromOrder = function(index) { let hero = selHero.value; if (hero && heroMapOrder[hero]) { heroConfirm(`Usunąć mapę '${heroMapOrder[hero][index]}' ze ścieżki?`, (res) => { if (res) { heroMapOrder[hero].splice(index, 1); if(currentRouteIndex >= heroMapOrder[hero].length) currentRouteIndex = heroMapOrder[hero].length - 1; saveMapOrder(); updateUI(); } }); } };
 
         window.setManualRouteIndex = function(index, mapName) {
 
@@ -5983,7 +6065,7 @@ selHero.addEventListener('change', (e) => {
 
         if (currentSysMap === mapName) {
 
-            // JeĹ›li kliknÄ…Ĺ‚eĹ› mapÄ™, na ktĂłrej stoisz - po prostu zaktualizuj index
+            // Jeśli kliknąłeś mapę, na której stoisz - po prostu zaktualizuj index
 
             currentRouteIndex = index;
 
@@ -5997,11 +6079,11 @@ selHero.addEventListener('change', (e) => {
 
             updateUI();
 
-            HERO_LOG.success(`Trasa pÄ™tli ustawiona od mapy: ${mapName}`);
+            HERO_LOG.success(`Trasa pętli ustawiona od mapy: ${mapName}`);
 
         } else {
 
-            // JeĹ›li kliknÄ…Ĺ‚eĹ› innÄ… mapÄ™ - sprawdzamy, czy bot zna drogÄ™
+            // Jeśli kliknąłeś inną mapę - sprawdzamy, czy bot zna drogę
 
             let path = getShortestPath(currentSysMap, mapName, routePathOptions());
 
@@ -6009,9 +6091,9 @@ selHero.addEventListener('change', (e) => {
 
             if (path && path.length > 1) {
 
-                HERO_LOG.info(`Znaleziono drogÄ™. BiegnÄ™ na wybranÄ… mapÄ™: ${mapName}`);
+                HERO_LOG.info(`Znaleziono drogę. Biegnę na wybraną mapę: ${mapName}`);
 
-                // Ustawiamy nowy index na przyszĹ‚oĹ›Ä‡, ĹĽeby po dobiegniÄ™ciu kontynuowaĹ‚ pÄ™tlÄ™ stamtÄ…d
+                // Ustawiamy nowy index na przyszłość, żeby po dobiegnięciu kontynuował pętlę stamtąd
 
                 currentRouteIndex = index;
 
@@ -6025,7 +6107,7 @@ selHero.addEventListener('change', (e) => {
 
             } else {
 
-                HERO_LOG.warn(`Brak drogi: jesteĹ› na [${currentSysMap}], cel to [${mapName}]. Najpierw nagraj przejĹ›cia (đźŽĄ).`);
+                HERO_LOG.warn(`Brak drogi: jesteś na [${currentSysMap}], cel to [${mapName}]. Najpierw nagraj przejścia (🎥).`);
 
             }
 
@@ -6033,13 +6115,13 @@ selHero.addEventListener('change', (e) => {
 
     };
 
-        window.deleteGateway = function(sourceMap, targetMapName) { if (globalGateways[sourceMap] && globalGateways[sourceMap][targetMapName]) { heroConfirm(`UsunÄ…Ä‡ zapisane przejĹ›cie z [${sourceMap}] do [${targetMapName}]?`, (res) => { if (res) { delete globalGateways[sourceMap][targetMapName]; saveGateways(); updateUI(); } }); } };
+        window.deleteGateway = function(sourceMap, targetMapName) { if (globalGateways[sourceMap] && globalGateways[sourceMap][targetMapName]) { heroConfirm(`Usunąć zapisane przejście z [${sourceMap}] do [${targetMapName}]?`, (res) => { if (res) { delete globalGateways[sourceMap][targetMapName]; saveGateways(); updateUI(); } }); } };
 
-        window.goSinglePoint = function(x, y, requiredMap) { let currentMap = lastMapName; if (requiredMap && requiredMap !== currentMap) { return heroAlert(`BĹ‚Ä…d wejĹ›cia!\n\nTo przejĹ›cie znajduje siÄ™ fizycznie na mapie:\n[${requiredMap}]\n\nObecnie stoisz na:\n[${currentMap}]`); } if(isPatrolling || isRushing) stopPatrol(false); safeGoTo(x, y, false); };
+        window.goSinglePoint = function(x, y, requiredMap) { let currentMap = lastMapName; if (requiredMap && requiredMap !== currentMap) { return heroAlert(`Błąd wejścia!\n\nTo przejście znajduje się fizycznie na mapie:\n[${requiredMap}]\n\nObecnie stoisz na:\n[${currentMap}]`); } if(isPatrolling || isRushing) stopPatrol(false); safeGoTo(x, y, false); };
 
 
 
-        // Naprawa Scrollowania (zablokowanie kradzieĹĽy scrolla przez Margonem)
+        // Naprawa Scrollowania (zablokowanie kradzieży scrolla przez Margonem)
 
         document.querySelectorAll('.hero-window').forEach(win => {
 
@@ -6073,7 +6155,7 @@ let btnAddRec = document.getElementById('btnAddSelectedRec');
         if (btnAddRec) {
             btnAddRec.addEventListener('click', () => {
                 let checkboxes = document.querySelectorAll('.chk-rec-profile:checked');
-                if(checkboxes.length === 0) return heroAlert("Nie zaznaczono ĹĽadnego expowiska!");
+                if(checkboxes.length === 0) return heroAlert("Nie zaznaczono żadnego expowiska!");
 
                 let addedCount = 0;
                 let minL = 9999;
@@ -6099,7 +6181,7 @@ let btnAddRec = document.getElementById('btnAddSelectedRec');
                 });
 
                if(addedCount > 0) {
-                    // Wyrzucenie duplikatĂłw i automatyczne zoptymalizowanie nowej grupy map
+                    // Wyrzucenie duplikatów i automatyczne zoptymalizowanie nowej grupy map
                     botSettings.exp.mapOrder = [...new Set(botSettings.exp.mapOrder)];
                     if (typeof window.optimizeExpRoute === 'function') window.optimizeExpRoute(true);
 
@@ -6117,16 +6199,16 @@ let btnAddRec = document.getElementById('btnAddSelectedRec');
                     }
 
                     if(typeof window.renderExpMaps === 'function') window.renderExpMaps();
-                    heroAlert(`âś… PomyĹ›lnie poĹ‚Ä…czono i dodano ${addedCount} nowych map do trasy!\nZaktualizowano rĂłwnieĹĽ przedziaĹ‚ poziomowy.`);
+                    heroAlert(`✅ Pomyślnie połączono i dodano ${addedCount} nowych map do trasy!\nZaktualizowano również przedział poziomowy.`);
                     document.getElementById('heroExpRecGUI').style.display = 'none';
                 } else {
-                    heroAlert("Wybrane mapy sÄ… juĹĽ na Twojej liĹ›cie Smart-Roam.");
+                    heroAlert("Wybrane mapy są już na Twojej liście Smart-Roam.");
                 }
             });
         }
 
         // ==========================================
-        // TWARDE PODPIÄCIE MODUĹĂ“W POWIADOMIEĹ I DISCORDA
+        // TWARDE PODPIĘCIE MODUŁÓW POWIADOMIEŃ I DISCORDA
         // ==========================================
         let btnBrowserAlerts = document.getElementById('btnOpenBrowserAlertsModule');
         if (btnBrowserAlerts) {
@@ -6151,25 +6233,25 @@ let btnAddRec = document.getElementById('btnAddSelectedRec');
         if (!botSettings.discord.alerts) botSettings.discord.alerts = { hero: true, player: true, chat: true, captcha: true };
         if (!botSettings.discord.stop) botSettings.discord.stop = { hero: true, player: false, chat: false, captcha: true };
 
-        // Wymuszenie wczytania wpisanych linkĂłw do okienek
+        // Wymuszenie wczytania wpisanych linków do okienek
         let inpUrl = document.getElementById('discordWebhookUrl');
         if(inpUrl && botSettings.discord.url) inpUrl.value = botSettings.discord.url;
 
         let inpId = document.getElementById('discordUserId');
         if(inpId && botSettings.discord.userId) inpId.value = botSettings.discord.userId;
 
-        // PodpiÄ™cie w czasie rzeczywistym
+        // Podpięcie w czasie rzeczywistym
         bindInput('discordWebhookUrl', (e) => { botSettings.discord.url = e.target.value.trim(); saveSettings(); });
         bindInput('discordUserId', (e) => { botSettings.discord.userId = e.target.value.trim(); saveSettings(); });
 
-        // Twarde zapisywanie powiadomieĹ„ przeglÄ…darki
+        // Twarde zapisywanie powiadomień przeglądarki
         bindChange('captchaAlert', (e) => { botSettings.exp.captchaAlert = e.target.checked; saveSettings(); });
         bindChange('playerAlert', (e) => { botSettings.exp.playerAlert = e.target.checked; saveSettings(); });
         bindChange('playerAlertStopBot', (e) => { botSettings.exp.playerAlertStopBot = e.target.checked; saveSettings(); });
         bindChange('chatAlert', (e) => { botSettings.exp.chatAlert = e.target.checked; saveSettings(); });
         bindChange('chatAlertStopBot', (e) => { botSettings.exp.chatAlertStopBot = e.target.checked; saveSettings(); });
 
-        // Twardy przycisk zapisujÄ…cy Discorda (Klonowanie zdejmuje zepsute blokady)
+        // Twardy przycisk zapisujący Discorda (Klonowanie zdejmuje zepsute blokady)
         let btnSaveDiscord = document.getElementById('btnSaveDiscord');
         if (btnSaveDiscord) {
             let newBtnSaveDiscord = btnSaveDiscord.cloneNode(true);
@@ -6195,15 +6277,15 @@ let btnAddRec = document.getElementById('btnAddSelectedRec');
                 saveSettings();
 
                 if(botSettings.discord.enabled) {
-                    window.sendDiscordWebhook("đźź˘ MARGONEURO ZSYNCHRONIZOWANE", "Powiadomienia Discord zostaĹ‚y skonfigurowane poprawnie i dziaĹ‚ajÄ… niezaleĹĽnie od przeglÄ…darki!", 5763719);
-                    heroAlert("Ustawienia Discord zostaĹ‚y zapisane.\nWysĹ‚ano wiadomoĹ›Ä‡ testowÄ… na TwĂłj kanaĹ‚!");
+                    window.sendDiscordWebhook("🟢 MARGONEURO ZSYNCHRONIZOWANE", "Powiadomienia Discord zostały skonfigurowane poprawnie i działają niezależnie od przeglądarki!", 5763719);
+                    heroAlert("Ustawienia Discord zostały zapisane.\nWysłano wiadomość testową na Twój kanał!");
                 } else {
-                    heroAlert("Ustawienia zapisane (Webhook wyĹ‚Ä…czony ze wzglÄ™du na pusty link).");
+                    heroAlert("Ustawienia zapisane (Webhook wyłączony ze względu na pusty link).");
                 }
             });
         }
 
-    } // <--- TO JEST ZAMKNIÄCIE FUNKCJI setupLogic, KTĂ“RE SIÄ ZEPSUĹO!
+    } // <--- TO JEST ZAMKNIĘCIE FUNKCJI setupLogic, KTÓRE SIĘ ZEPSUŁO!
 
     // ==========================================
 
@@ -6231,7 +6313,7 @@ let btnAddRec = document.getElementById('btnAddSelectedRec');
 
         if (filtered.length === 0) {
 
-            container.innerHTML = '<div style="padding:5px;text-align:center;color:#777;">Brak wynikĂłw.</div>';
+            container.innerHTML = '<div style="padding:5px;text-align:center;color:#777;">Brak wyników.</div>';
 
             return;
 
@@ -6257,19 +6339,19 @@ let btnAddRec = document.getElementById('btnAddSelectedRec');
 
 
 
-// --- NAPRAWA BĹÄDU "[Brak KordĂłw]" ORAZ "BIEGU PO NITCE" ---
+// --- NAPRAWA BŁĘDU "[Brak Kordów]" ORAZ "BIEGU PO NITCE" ---
             let finalMap = boss.path[boss.path.length-1];
-            let savedInfo = `<span style="color:#777; font-size:9px;">[Brak KordĂłw]</span>`;
+            let savedInfo = `<span style="color:#777; font-size:9px;">[Brak Kordów]</span>`;
             let targetX = null;
             let targetY = null;
 
-            // 1. Priorytet: Nowa Baza (wĹ‚aĹ›ciwoĹ›Ä‡ "resp" z pliku bossy.json)
+            // 1. Priorytet: Nowa Baza (właściwość "resp" z pliku bossy.json)
             if (boss.resp && boss.resp[finalMap] && boss.resp[finalMap].length > 0) {
                 targetX = boss.resp[finalMap][0][0];
                 targetY = boss.resp[finalMap][0][1];
                 savedInfo = `<span style="color:#4caf50; font-size:9px;">[Baza: ${finalMap} - X:${targetX}, Y:${targetY}]</span>`;
             }
-       // 2. Fallback: JeĹ›li zapisaĹ‚eĹ› coĹ› sam w grze (w localStorage)
+       // 2. Fallback: Jeśli zapisałeś coś sam w grze (w localStorage)
             else if (bossSavedCoords[boss.name]) {
                 targetX = bossSavedCoords[boss.name].x;
                 targetY = bossSavedCoords[boss.name].y;
@@ -6295,7 +6377,7 @@ let btnAddRec = document.getElementById('btnAddSelectedRec');
 
                 </div>
 
-                <span style="font-size:10px; color:#a99a75;">â–Ľ</span>
+                <span style="font-size:10px; color:#a99a75;">▼</span>
 
             `;
 
@@ -6315,7 +6397,7 @@ let btnAddRec = document.getElementById('btnAddSelectedRec');
 
             let htmlPath = "";
 
-            boss.path.forEach((map, idx) => { let arrow = idx < boss.path.length - 1 ? " âžť " : ""; htmlPath += `<span style="color:#a99a75;">${map}</span>${arrow}`; });
+            boss.path.forEach((map, idx) => { let arrow = idx < boss.path.length - 1 ? " ➝ " : ""; htmlPath += `<span style="color:#a99a75;">${map}</span>${arrow}`; });
 
 
 
@@ -6343,18 +6425,18 @@ let btnAddRec = document.getElementById('btnAddSelectedRec');
 
                     <div style="display:flex; gap:4px;">
 
-                        <button style="${bStyle} background:#00838f; width:80px;" onclick="event.stopPropagation(); saveCurrentCoordsForBoss('${boss.name}')" title="Nadpisz koordynaty z bazy">đź“Ś ZAPISZ RÄCZNIE</button>
+                        <button style="${bStyle} background:#00838f; width:80px;" onclick="event.stopPropagation(); saveCurrentCoordsForBoss('${boss.name}')" title="Nadpisz koordynaty z bazy">📌 ZAPISZ RĘCZNIE</button>
 
                         ${bossSavedCoords[boss.name] ? `
 
-                            <button style="${bStyle} background:#e53935; width:30px;" onclick="event.stopPropagation(); deleteBossCoords('${boss.name}')" title="UsuĹ„ zapis uĹĽytkownika (przywrĂłci domyĹ›lnÄ… bazÄ™)">âś–</button>
+                            <button style="${bStyle} background:#e53935; width:30px;" onclick="event.stopPropagation(); deleteBossCoords('${boss.name}')" title="Usuń zapis użytkownika (przywróci domyślną bazę)">✖</button>
 
                         ` : ''}
 
                     </div>
 
                   <div style="display:flex; gap:4px;">
-                        <button style="${bStyle} background:#4e342e; width:95px;" onclick="event.stopPropagation(); window.rushToMap(${rushArgs})">đźŹ BIEG DO MAPY</button>
+                        <button style="${bStyle} background:#4e342e; width:95px;" onclick="event.stopPropagation(); window.rushToMap(${rushArgs})">🏃 BIEG DO MAPY</button>
                         ${targetX !== null ? `
                             <button style="${bStyle} background:#4caf50; width:80px;" onclick="event.stopPropagation(); window.goSinglePoint(${targetX}, ${targetY}, '${finalMap.replace(/'/g, "\\'")}')">đźŽŻ DO KORDU</button>
                         ` : ''}
@@ -6415,7 +6497,7 @@ function renderGatewaysDatabase() {
 
         if (Object.keys(currentMapGateways).length > 0) {
             count++; let headerCurrent = document.createElement('div');
-            headerCurrent.innerHTML = `<span style="color:#4caf50; font-weight:bold; font-size:11px;">đź“Ť JESTEĹš TUTAJ: ${currentSysMap}</span>`;
+            headerCurrent.innerHTML = `<span style="color:#4caf50; font-weight:bold; font-size:11px;">📍 JESTEŚ TUTAJ: ${currentSysMap}</span>`;
             headerCurrent.style.padding = "4px 5px"; headerCurrent.style.background = "rgba(76, 175, 80, 0.1)"; headerCurrent.style.border = "1px solid #4caf50"; headerCurrent.style.marginBottom = "2px"; container.appendChild(headerCurrent);
 
             if (!(window.margoWalkableMask instanceof Set)) {
@@ -6445,8 +6527,8 @@ function renderGatewaysDatabase() {
 
                 let borderColor = isReachable ? "#4caf50" : "#9e9e9e";
                 let targetColor = isReachable ? "#00acc1" : "#b0bec5";
-                let statusText = isReachable ? "âś… dostÄ™pne" : "â›” brak dojĹ›cia";
-                let titleText = isReachable ? "Biegnij tam!" : "To przejĹ›cie jest w bazie, ale Ĺ›ciana lub odlegĹ‚oĹ›Ä‡ blokuje dostÄ™p.";
+                let statusText = isReachable ? "✅ dostępne" : "⛔ brak dojścia";
+                let titleText = isReachable ? "Biegnij tam!" : "To przejście jest w bazie, ale ściana lub odległość blokuje dostęp.";
 
                 let clickAction = isReachable ? `onclick="goSinglePoint(${coords.x}, ${coords.y}, '${currentSysMap}')"` : "";
 
@@ -6461,14 +6543,14 @@ function renderGatewaysDatabase() {
                         <span style="color:#a99a75;">Ostatnia klatka: X: ${coords.x}, Y: ${coords.y}</span>
                         <span style="color:${isReachable ? '#81c784' : '#ef9a9a'};">${statusText}</span>
                     </div>
-                    <button class="icon-btn" style="padding:0 5px;" title="UsuĹ„ z bazy" onclick="deleteGateway('${currentSysMap}', '${target}')">đź—‘ď¸Ź</button>
+                    <button class="icon-btn" style="padding:0 5px;" title="Usuń z bazy" onclick="deleteGateway('${currentSysMap}', '${target}')">🗑️</button>
                 `;
 
                 container.appendChild(row);
             }
         }
 
-        let headerOther = document.createElement('div'); headerOther.innerHTML = `<span style="color:#d4af37; font-weight:bold; font-size:10px;">đź—şď¸Ź POZOSTAĹE PRZEJĹšCIA W PAMIÄCI:</span>`; headerOther.style.padding = "4px 5px"; headerOther.style.background = "#1a1a1a"; headerOther.style.marginTop = "8px"; headerOther.style.marginBottom = "4px"; container.appendChild(headerOther);
+        let headerOther = document.createElement('div'); headerOther.innerHTML = `<span style="color:#d4af37; font-weight:bold; font-size:10px;">🗺️ POZOSTAŁE PRZEJŚCIA W PAMIĘCI:</span>`; headerOther.style.padding = "4px 5px"; headerOther.style.background = "#1a1a1a"; headerOther.style.marginTop = "8px"; headerOther.style.marginBottom = "4px"; container.appendChild(headerOther);
         let otherCount = 0;
 
         for (let sourceMap in globalGateways) {
@@ -6476,44 +6558,44 @@ function renderGatewaysDatabase() {
             if (Object.keys(globalGateways[sourceMap]).length === 0) continue;
             count++; otherCount++;
 
-            let groupWrap = document.createElement('div'); groupWrap.style.marginBottom = "2px"; let header = document.createElement('div'); header.className = "accordion-header"; header.innerHTML = `â–¶ Z mapy: ${sourceMap}`; let content = document.createElement('div'); content.style.display = "none"; content.style.paddingLeft = "4px"; content.style.borderLeft = "1px solid #333"; content.style.marginBottom = "4px";
-            header.onclick = () => { let isHidden = content.style.display === "none"; content.style.display = isHidden ? "block" : "none"; header.innerHTML = `${isHidden ? 'â–Ľ' : 'â–¶'} Z mapy: ${sourceMap}`; };
+            let groupWrap = document.createElement('div'); groupWrap.style.marginBottom = "2px"; let header = document.createElement('div'); header.className = "accordion-header"; header.innerHTML = `▶ Z mapy: ${sourceMap}`; let content = document.createElement('div'); content.style.display = "none"; content.style.paddingLeft = "4px"; content.style.borderLeft = "1px solid #333"; content.style.marginBottom = "4px";
+            header.onclick = () => { let isHidden = content.style.display === "none"; content.style.display = isHidden ? "block" : "none"; header.innerHTML = `${isHidden ? '▼' : '▶'} Z mapy: ${sourceMap}`; };
 
-            for (let target in globalGateways[sourceMap]) { let coords = globalGateways[sourceMap][target]; let row = document.createElement('div'); row.className = "list-item"; row.innerHTML = `<div style="font-size:10px; color:#e0d8c0; display:flex; flex-direction:column; cursor:pointer; flex-grow:1;" onclick="goSinglePoint(${coords.x}, ${coords.y}, '${sourceMap}')" title="Musisz iĹ›Ä‡ na mapÄ™: ${sourceMap}"><span style="color:#00acc1; font-weight:bold;">DO: ${target}</span><span style="color:#a99a75;">Ostatnia klatka: X: ${coords.x}, Y: ${coords.y}</span></div><button class="icon-btn" style="padding:0 5px;" title="UsuĹ„ z bazy" onclick="deleteGateway('${sourceMap}', '${target}')">đź—‘ď¸Ź</button>`; content.appendChild(row); }
+            for (let target in globalGateways[sourceMap]) { let coords = globalGateways[sourceMap][target]; let row = document.createElement('div'); row.className = "list-item"; row.innerHTML = `<div style="font-size:10px; color:#e0d8c0; display:flex; flex-direction:column; cursor:pointer; flex-grow:1;" onclick="goSinglePoint(${coords.x}, ${coords.y}, '${sourceMap}')" title="Musisz iść na mapę: ${sourceMap}"><span style="color:#00acc1; font-weight:bold;">DO: ${target}</span><span style="color:#a99a75;">Ostatnia klatka: X: ${coords.x}, Y: ${coords.y}</span></div><button class="icon-btn" style="padding:0 5px;" title="Usuń z bazy" onclick="deleteGateway('${sourceMap}', '${target}')">🗑️</button>`; content.appendChild(row); }
             groupWrap.appendChild(header); groupWrap.appendChild(content); container.appendChild(groupWrap);
         }
 
-        if (otherCount === 0) container.innerHTML += `<div style="padding:5px; text-align:center; color:#777; font-size:10px; font-style:italic;">Brak innych przejĹ›Ä‡.</div>`;
-        if (count === 0) container.innerHTML = `<div style="padding:5px; text-align:center; color:#777; font-size:10px; font-style:italic;">Brak zapisanych przejĹ›Ä‡ w caĹ‚ej pamiÄ™ci.<br><br>WĹ‚Ä…cz Smart Memory (đźŽĄ) i graj, a same siÄ™ tu pojawiÄ…!</div>`;
+        if (otherCount === 0) container.innerHTML += `<div style="padding:5px; text-align:center; color:#777; font-size:10px; font-style:italic;">Brak innych przejść.</div>`;
+        if (count === 0) container.innerHTML = `<div style="padding:5px; text-align:center; color:#777; font-size:10px; font-style:italic;">Brak zapisanych przejść w całej pamięci.<br><br>Włącz Smart Memory (🎥) i graj, a same się tu pojawią!</div>`;
     }
 
 
 
 function scanCurrentMapForGateways() {
-        if (typeof Engine === 'undefined' || !Engine.map || !Engine.map.d) return heroAlert("BĹ‚Ä…d: Silnik gry nie jest gotowy.");
+        if (typeof Engine === 'undefined' || !Engine.map || !Engine.map.d) return heroAlert("Błąd: Silnik gry nie jest gotowy.");
         let currentMap = Engine.map.d.name;
 
         let gatewaysFound = HeroScannerModule.scanCurrentMap(currentMap, ZAKONNICY);
         let container = document.getElementById('gatewaysListContainer');
         if (!container) return;
 
-        // Grupujemy wyniki, ĹĽeby nie spamowaÄ‡ listy, gdy jedna jaskinia ma np. 5 kratek wejĹ›cia
+        // Grupujemy wyniki, żeby nie spamować listy, gdy jedna jaskinia ma np. 5 kratek wejścia
         let grouped = {};
         gatewaysFound.forEach(gw => {
             if (!grouped[gw.targetMap]) grouped[gw.targetMap] = [];
             grouped[gw.targetMap].push({x: gw.x, y: gw.y});
         });
 
-        // Wymuszamy autozapis wywoĹ‚any rÄ™cznie
+        // Wymuszamy autozapis wywołany ręcznie
         autoLearnGateways();
 
-        // CzyĹ›cimy stare wyniki wyszukiwania
+        // Czyścimy stare wyniki wyszukiwania
         let oldScans = container.querySelectorAll('.scanner-result-header, .scanner-result-item');
         oldScans.forEach(el => el.remove());
 
         let uniqueCount = Object.keys(grouped).length;
         if (uniqueCount === 0) {
-            return heroAlert("Skaner nie wykryĹ‚ ĹĽadnych nowych przejĹ›Ä‡.");
+            return heroAlert("Skaner nie wykrył żadnych nowych przejść.");
         }
 
         let header = document.createElement('div');
@@ -6531,29 +6613,29 @@ function scanCurrentMapForGateways() {
             row.innerHTML = `
                 <div style="font-size:10px; color:#e0d8c0; display:flex; flex-direction:column; cursor:pointer;" onclick="goSinglePoint(${firstGw.x}, ${firstGw.y}, '${currentMap}')">
                     <span style="color:#ffb300; font-weight:bold;">${tMap}</span>
-                    <span style="color:#a99a75;">Kratek wejĹ›cia: ${coordsList.length} (Zapisano do bazy!)</span>
+                    <span style="color:#a99a75;">Kratek wejścia: ${coordsList.length} (Zapisano do bazy!)</span>
                 </div>
                 <button class="btn-sepia" onclick="this.parentElement.remove();">UKRYJ</button>
             `;
             container.insertBefore(row, header.nextSibling);
         }
 
-        heroAlert(`Sukces!\nZeskanowano i pogrupowano wejĹ›cia.\nDodano do bazy: ${uniqueCount} kierunkĂłw (Ĺ‚Ä…cznie ${gatewaysFound.length} kratek wejĹ›cia do wylosowania przez bota).`);
+        heroAlert(`Sukces!\nZeskanowano i pogrupowano wejścia.\nDodano do bazy: ${uniqueCount} kierunków (łącznie ${gatewaysFound.length} kratek wejścia do wylosowania przez bota).`);
     }
 
     function renderCordsList(activeIndex = -1) {
 
         const container = document.getElementById('cordsListContainer'); if(!container) return; container.innerHTML = ''; let currentMap = lastMapName;
 
-        if (checkedMapsThisSession.has(currentMap)) { container.innerHTML = '<div style="padding:5px;text-align:center;color:#81c784;font-style:italic;">Mapa oznaczona jako sprawdzona (âś”). Szukam drogi dalej.</div>'; return; }
+        if (checkedMapsThisSession.has(currentMap)) { container.innerHTML = '<div style="padding:5px;text-align:center;color:#81c784;font-style:italic;">Mapa oznaczona jako sprawdzona (✔). Szukam drogi dalej.</div>'; return; }
 
-        if(currentCordsList.length === 0) { container.innerHTML = '<div style="padding:5px;text-align:center;color:#777;font-style:italic;">Brak respĂłw. PrzechodzÄ™ przez mapÄ™.</div>'; return; }
+        if(currentCordsList.length === 0) { container.innerHTML = '<div style="padding:5px;text-align:center;color:#777;font-style:italic;">Brak respów. Przechodzę przez mapę.</div>'; return; }
 
         currentCordsList.forEach((c, index) => {
 
-            const row = document.createElement('div'); let classes = "list-item"; if (index === activeIndex) classes += " active"; else if (checkedPoints.has(index)) classes += " checked"; row.className = classes; let statusIcon = checkedPoints.has(index) ? " âś”" : "";
+            const row = document.createElement('div'); let classes = "list-item"; if (index === activeIndex) classes += " active"; else if (checkedPoints.has(index)) classes += " checked"; row.className = classes; let statusIcon = checkedPoints.has(index) ? " ✔" : "";
 
-            row.innerHTML = `<span style="color:#d4af37;">${index + 1}. [${c[0]}, ${c[1]}]${statusIcon}</span><div class="buttons-wrapper"><button class="btn-sepia btn-go-sepia" onclick="goSinglePoint(${c[0]}, ${c[1]}, '${currentMap}')">IDĹą</button></div>`; container.appendChild(row);
+            row.innerHTML = `<span style="color:#d4af37;">${index + 1}. [${c[0]}, ${c[1]}]${statusIcon}</span><div class="buttons-wrapper"><button class="btn-sepia btn-go-sepia" onclick="goSinglePoint(${c[0]}, ${c[1]}, '${currentMap}')">IDŹ</button></div>`; container.appendChild(row);
 
         });
 
@@ -6573,10 +6655,10 @@ function optimizeRoute() {
         let currentSysMap = lastMapName;
         let exitGw = null;
 
-        // Poszukiwanie bramy prowadzÄ…cej do nastÄ™pnej mapy (TYLKO DO OBLICZEĹ, BEZ RUCHU!)
+        // Poszukiwanie bramy prowadzącej do następnej mapy (TYLKO DO OBLICZEŃ, BEZ RUCHU!)
         if (hero && heroMapOrder[hero] && heroMapOrder[hero].length > 0 && currentRouteIndex !== -1) {
             let mapList = heroMapOrder[hero];
-            // Ulepszenie: NastÄ™pna mapa w pÄ™tli. JeĹ›li koĹ„czymy listÄ™ (np. indeks 3 z 4), weĹş indeks 0
+            // Ulepszenie: Następna mapa w pętli. Jeśli kończymy listę (np. indeks 3 z 4), weź indeks 0
             let nextMap = mapList[(currentRouteIndex + 1) % mapList.length];
             let path = getShortestPath(currentSysMap, nextMap, routePathOptions());
 
@@ -6588,7 +6670,7 @@ function optimizeRoute() {
             }
         }
 
-        // JeĹ›li mamy wyjĹ›cie i wiÄ™cej niĹĽ 1 punkt, ustalamy ostatni punkt przed drzwiami
+        // Jeśli mamy wyjście i więcej niż 1 punkt, ustalamy ostatni punkt przed drzwiami
         if (exitGw && unvisited.length > 1) {
             let closestToExitIdx = 0;
             let minDistToExit = Infinity;
@@ -6602,7 +6684,7 @@ function optimizeRoute() {
             finalPoint = unvisited.splice(closestToExitIdx, 1)[0];
         }
 
-        // Standardowe zachĹ‚anne sortowanie z obecnego miejsca dla reszty punktĂłw
+        // Standardowe zachłanne sortowanie z obecnego miejsca dla reszty punktów
         while (unvisited.length > 0) {
             let nearestIdx = 0; let minDist = Infinity;
             for (let i = 0; i < unvisited.length; i++) {
@@ -6614,7 +6696,7 @@ function optimizeRoute() {
             cx = nextPt[0]; cy = nextPt[1];
         }
 
-        // Na koniec dodajemy "finalPoint" wyliczony obok drzwi (Teraz dziaĹ‚a zawsze na koĹ„cu kaĹĽdej mapy i pÄ™tli!)
+        // Na koniec dodajemy "finalPoint" wyliczony obok drzwi (Teraz działa zawsze na końcu każdej mapy i pętli!)
         if (finalPoint) newRoute.push(finalPoint);
 
         currentCordsList = newRoute;
@@ -6653,7 +6735,7 @@ function optimizeRoute() {
         }
     };
 
-    // KompatybilnoĹ›Ä‡ wsteczna w razie wywoĹ‚ania bez "window."
+    // Kompatybilność wsteczna w razie wywołania bez "window."
     function safeGoTo(targetX, targetY, useRandom, options = {}) {
         window.safeGoTo(targetX, targetY, useRandom, options);
     }
@@ -6667,28 +6749,28 @@ function stopPatrol(hardStop = true) {
         isRushing = false;
         window.isRushing = !!(typeof isRushing !== 'undefined' && isRushing);
         window.isRushingToShop = false;
-        window.resumePatrolAfterRush = false; // KRYTYCZNA POPRAWKA: Blokuje auto-wznawianie po rÄ™cznym zatrzymaniu!
+        window.resumePatrolAfterRush = false; // KRYTYCZNA POPRAWKA: Blokuje auto-wznawianie po ręcznym zatrzymaniu!
 
         clearTimeout(rushInterval);
         clearTimeout(smoothPatrolInterval);
 
         let btn = document.getElementById('btnStartStop');
         if (btn) {
-            btn.innerHTML = '<span class="btn-icon">â–¶</span><span>START</span>';
+            btn.innerHTML = '<span class="btn-icon">▶</span><span>START</span>';
             btn.style.color = "#4caf50";
             btn.style.borderColor = "#4caf50";
         }
 
-        // Nie czyĹ›cimy checkedPoints tutaj, ĹĽeby bot pamiÄ™taĹ‚ co sprawdziĹ‚, jeĹ›li wznowisz patrol!
+        // Nie czyścimy checkedPoints tutaj, żeby bot pamiętał co sprawdził, jeśli wznowisz patrol!
         renderCordsList(-1);
 
-        if (wasMoving && window.logHero) window.logHero("đź›‘ Zatrzymano patrol rÄ™cznie.", "#f44336");
+        if (wasMoving && window.logHero) window.logHero("🛑 Zatrzymano patrol ręcznie.", "#f44336");
 
         // TWARDE HAMOWANIE POSTACI W GRZE
         if (hardStop && typeof Engine !== 'undefined' && Engine.hero && Engine.hero.d) {
             try {
                 if (typeof Engine.hero.stop === 'function') Engine.hero.stop();
-                Engine.hero.autoGoTo({x: Engine.hero.d.x, y: Engine.hero.d.y}); // Resetuje trasÄ™ do punktu pod nogami
+                Engine.hero.autoGoTo({x: Engine.hero.d.x, y: Engine.hero.d.y}); // Resetuje trasę do punktu pod nogami
                 if (Engine.hero.d.path) Engine.hero.d.path = [];
             } catch(e) {}
         }
@@ -6698,7 +6780,7 @@ function stopPatrol(hardStop = true) {
             window.expRunId = null;
             const expBtn = document.getElementById('btnStartExp');
             if (expBtn) {
-                expBtn.innerHTML = "â–¶ START";
+                expBtn.innerHTML = "▶ START";
                 expBtn.style.borderColor = "#4caf50";
                 expBtn.style.color = "#4caf50";
             }
@@ -6713,7 +6795,7 @@ function stopPatrol(hardStop = true) {
         window.margoneuroStoppedManually = false;
         let hero = document.getElementById('selHero').value;
         let mapList = heroMapOrder[hero];
-        if (!hero) { window.logHero("BĹ‚Ä…d: Nie wybrano herosa z listy!", "#e53935"); return; }
+        if (!hero) { window.logHero("Błąd: Nie wybrano herosa z listy!", "#e53935"); return; }
 
         if (hero && mapList) {
             let currentSysMap = lastMapName;
@@ -6726,16 +6808,16 @@ function stopPatrol(hardStop = true) {
        isPatrolling = true; patrolIndex = 0; checkedPoints.clear(); heroFoundAlerted = false;
        window.isPatrolling = true;
 
-        let btn = document.getElementById('btnStartStop'); btn.innerHTML = '<span class="btn-icon">âŹą</span><span>STOP</span>'; btn.style.color = "#f44336"; btn.style.borderColor = "#f44336";
+        let btn = document.getElementById('btnStartStop'); btn.innerHTML = '<span class="btn-icon">⏹</span><span>STOP</span>'; btn.style.color = "#f44336"; btn.style.borderColor = "#f44336";
 
-        window.logHero(`RozpoczÄ™to patrol (Heros: ${hero}).`, "#4caf50");
+        window.logHero(`Rozpoczęto patrol (Heros: ${hero}).`, "#4caf50");
         executePatrolStep();
     }
 
 function executePatrolStep() {
         if (!isPatrolling) return;
 
-        // 1. ZABEZPIECZENIE: Czekamy, aĹĽ mapa siÄ™ w peĹ‚ni zaĹ‚aduje po odĹ›wieĹĽeniu
+        // 1. ZABEZPIECZENIE: Czekamy, aż mapa się w pełni załaduje po odświeżeniu
         if (typeof Engine === 'undefined' || !Engine.map || Engine.map.isLoading || !Engine.map.d.name) {
             setTimeout(executePatrolStep, 500);
             return;
@@ -6746,7 +6828,7 @@ function executePatrolStep() {
         let hero = document.getElementById('selHero').value;
         let currentSysMap = Engine.map.d.name;
 
-        // 2. JeĹ›li bot po odĹ›wieĹĽeniu/wczytaniu ma pustÄ… listÄ™ kordĂłw, a mapa nie jest sprawdzona - odzyskujemy jÄ…!
+        // 2. Jeśli bot po odświeżeniu/wczytaniu ma pustą listę kordów, a mapa nie jest sprawdzona - odzyskujemy ją!
         if (currentCordsList.length === 0 && heroData[hero] && heroData[hero][currentSysMap]) {
              if (!checkedMapsThisSession.has(currentSysMap)) {
                  currentCordsList = [...heroData[hero][currentSysMap]];
@@ -6763,7 +6845,7 @@ function executePatrolStep() {
         }
         patrolIndex = nextUnvisitedIndex;
 
-        // JeĹ›li wszystkie punkty na mapie sprawdzone LUB mapa nie ma w ogĂłle punktĂłw
+        // Jeśli wszystkie punkty na mapie sprawdzone LUB mapa nie ma w ogóle punktów
         if (patrolIndex === -1 || currentCordsList.length === 0) {
             clearTimeout(smoothPatrolInterval);
 
@@ -6776,7 +6858,7 @@ function executePatrolStep() {
             if(hero && heroMapOrder[hero] && heroMapOrder[hero].length > 0) {
                 let mapList = heroMapOrder[hero];
 
-                // --- ZAKOĹCZENIE PATROLU PO OSTATNIEJ MAPIE ---
+                // --- ZAKOŃCZENIE PATROLU PO OSTATNIEJ MAPIE ---
                 let nextRouteIndex = currentRouteIndex + 1;
 
                 if (nextRouteIndex >= mapList.length) {
@@ -6786,15 +6868,15 @@ function executePatrolStep() {
                     sessionStorage.removeItem('hero_route_index');
 
                     stopPatrol(true);
-                    if (window.logHero) window.logHero(`âś… CAĹY PATROL ZAKOĹCZONY!`, "#4caf50");
-                    if (typeof heroAlert === 'function') heroAlert("âś… Trasa Herosa sprawdzona w caĹ‚oĹ›ci! Patrol zatrzymany.");
+                    if (window.logHero) window.logHero(`✅ CAŁY PATROL ZAKOŃCZONY!`, "#4caf50");
+                    if (typeof heroAlert === 'function') heroAlert("✅ Trasa Herosa sprawdzona w całości! Patrol zatrzymany.");
                     return;
                 }
 
                 let finalDestinationMap = mapList[nextRouteIndex];
-                if (window.logHero) window.logHero(`Zmieniam mapÄ™. Obieram kurs na: [${finalDestinationMap}]`, "#00acc1");
+                if (window.logHero) window.logHero(`Zmieniam mapę. Obieram kurs na: [${finalDestinationMap}]`, "#00acc1");
 
-                // UĹĽywamy niezawodnego silnika Rush do pokonania trasy
+                // Używamy niezawodnego silnika Rush do pokonania trasy
                 if (typeof window.rushToMap === 'function') {
                     window.rushToMap(finalDestinationMap, null, null, null, true);
                     return;
@@ -6804,14 +6886,14 @@ function executePatrolStep() {
             // Awaryjny Stop
             checkedMapsThisSession.clear(); saveCheckedMaps(); currentRouteIndex = -1; sessionStorage.removeItem('hero_route_index');
             stopPatrol(true);
-            if (window.logHero) window.logHero(`âś… Koniec trasy!`, "#4caf50");
+            if (window.logHero) window.logHero(`✅ Koniec trasy!`, "#4caf50");
             return;
         }
 
         renderCordsList(patrolIndex);
         let target = currentCordsList[patrolIndex];
 
-        if (window.logHero) window.logHero(`BiegnÄ™ pod kord: [${target[0]}, ${target[1]}]`, "#d4af37");
+        if (window.logHero) window.logHero(`Biegnę pod kord: [${target[0]}, ${target[1]}]`, "#d4af37");
         safeGoTo(target[0], target[1], true);
         stuckCount = 0; clearTimeout(smoothPatrolInterval);
 
@@ -6827,7 +6909,7 @@ function executePatrolStep() {
 
         if (checkedPoints.has(patrolIndex)) {
             clearTimeout(smoothPatrolInterval);
-            if (window.logHero) window.logHero(`Kord zaliczony z zasiÄ™gu wzroku.`, "#8bc34a");
+            if (window.logHero) window.logHero(`Kord zaliczony z zasięgu wzroku.`, "#8bc34a");
             executePatrolStep();
             return;
         }
@@ -6838,7 +6920,7 @@ function executePatrolStep() {
         if (dist <= 1) {
             clearTimeout(smoothPatrolInterval);
             checkedPoints.add(patrolIndex);
-            if (window.logHero) window.logHero(`DotarĹ‚em do [${target[0]}, ${target[1]}]. Punkt czysty.`, "#8bc34a");
+            if (window.logHero) window.logHero(`Dotarłem do [${target[0]}, ${target[1]}]. Punkt czysty.`, "#8bc34a");
 
             let waitDelay = Math.floor(Math.random() * (botSettings.waitMax - botSettings.waitMin + 1)) + botSettings.waitMin;
             setTimeout(executePatrolStep, waitDelay);
@@ -6849,17 +6931,17 @@ function executePatrolStep() {
                 if (cx === lastX && cy === lastY) {
                     stuckCount++;
 
-                    // Po ~1.5 sekundy stania w miejscu ponawiamy prĂłbÄ™ klikniÄ™cia (BEZ LOSOWOĹšCI)
+                    // Po ~1.5 sekundy stania w miejscu ponawiamy próbę kliknięcia (BEZ LOSOWOŚCI)
                     if (stuckCount === 6) {
-                        if (window.logHero) window.logHero(`Ponawiam prĂłbÄ™ dojĹ›cia do [${target[0]}, ${target[1]}]...`, "#ffb300");
-                        safeGoTo(target[0], target[1], false); // false = omija losowe kratki, idzie dokĹ‚adnie w punkt!
+                        if (window.logHero) window.logHero(`Ponawiam próbę dojścia do [${target[0]}, ${target[1]}]...`, "#ffb300");
+                        safeGoTo(target[0], target[1], false); // false = omija losowe kratki, idzie dokładnie w punkt!
                     }
 
-                    // Dopiero po ~4.5 sekundach (15 tykniÄ™Ä‡) uznaje, ĹĽe fizycznie siÄ™ nie da wejĹ›Ä‡
+                    // Dopiero po ~4.5 sekundach (15 tyknięć) uznaje, że fizycznie się nie da wejść
                     if (stuckCount > 15) {
                         clearTimeout(smoothPatrolInterval);
                         checkedPoints.add(patrolIndex);
-                        if (window.logHero) window.logHero(`ZaciÄ…Ĺ‚em siÄ™! Punkt [${target[0]}, ${target[1]}] jest nieosiÄ…galny. Omijam.`, "#e53935");
+                        if (window.logHero) window.logHero(`Zaciąłem się! Punkt [${target[0]}, ${target[1]}] jest nieosiągalny. Omijam.`, "#e53935");
                         executePatrolStep();
                         return;
                     }
@@ -7010,7 +7092,7 @@ const RouteCombatFSM = {
             if (!this._disableRequestedAt) {
                 this._disableRequestedAt = now;
                 if (reason !== 'poll') {
-                    HeroLogger.emit('DEBUG', 'BERSERK_HOLD_OFF', `WstrzymujÄ™ wyĹ‚Ä…czenie berserka przez 1800ms (reason=${reason}).`, "#a99a75", { category: 'BERSERK', dedupeMs: 4000 });
+                    HeroLogger.emit('DEBUG', 'BERSERK_HOLD_OFF', `Wstrzymuję wyłączenie berserka przez 1800ms (reason=${reason}).`, "#a99a75", { category: 'BERSERK', dedupeMs: 4000 });
                 }
                 return;
             }
@@ -7086,7 +7168,7 @@ const BerserkController = {
             botSettings.berserk.enabled = !!nextState;
             saveSettings();
             if (window.updateServerBerserk) window.updateServerBerserk();
-            HeroLogger.emit('INFO', action, `${nextState ? 'WĹ‚Ä…czono' : 'WyĹ‚Ä…czono'} berserka (reason=${reason})`, "#ff9800", { category: 'BERSERK' });
+            HeroLogger.emit('INFO', action, `${nextState ? 'Włączono' : 'Wyłączono'} berserka (reason=${reason})`, "#ff9800", { category: 'BERSERK' });
         }, { retries: 2, baseDelay: 350 });
     },
     syncObservedState(reason = 'observe') {
@@ -7098,7 +7180,7 @@ const BerserkController = {
         const effectiveActive = !!(observedActive || expectedByBot);
         window.RouteCombatFSM.update({ berserkActive: effectiveActive }, `${reason}_detected`, { skipEvaluate: true });
         if (observedChanged && observedActive !== expectedByBot) {
-            HeroLogger.emit('INFO', observedActive ? 'BERSERK_DETECTED' : 'BERSERK_DETECTED_OFF', `Wykryto ${observedActive ? 'rÄ™cznie wĹ‚Ä…czonego' : 'rÄ™cznie wyĹ‚Ä…czonego'} berserka w grze.`, '#ffcc80', { category: 'BERSERK' });
+            HeroLogger.emit('INFO', observedActive ? 'BERSERK_DETECTED' : 'BERSERK_DETECTED_OFF', `Wykryto ${observedActive ? 'ręcznie włączonego' : 'ręcznie wyłączonego'} berserka w grze.`, '#ffcc80', { category: 'BERSERK' });
         }
         window.RouteCombatFSM.evaluate(reason);
     },
@@ -7118,8 +7200,8 @@ setInterval(() => {
 const MonsterMemory = {
     items: new Map(),
     keyFor(mapId, n) {
-        // POPRAWKA (EXP): Moby w Margonem NI sÄ… statyczne, wiÄ™c klucz opieramy o mapÄ™ + nick + XY.
-        // DziÄ™ki temu ten sam spawn jest Ĺ›ledzony stabilnie takĹĽe po respawnie (ID potwora moĹĽe siÄ™ zmieniaÄ‡).
+        // POPRAWKA (EXP): Moby w Margonem NI są statyczne, więc klucz opieramy o mapę + nick + XY.
+        // Dzięki temu ten sam spawn jest śledzony stabilnie także po respawnie (ID potwora może się zmieniać).
         const mapKey = normMapName(mapId);
         const stableNick = String(n.nick || n.name || 'mob').toLowerCase().trim();
         return `${mapKey}|${stableNick}:${n.x}:${n.y}`;
@@ -7174,8 +7256,8 @@ const MonsterMemory = {
         const m = this.items.get(key);
         m.failCount = (m.failCount || 0) + 1;
         m.aliveScore = Math.max(0, (m.aliveScore || 1) - 0.35);
-        // POPRAWKA (EXP): Traktujemy "znikniÄ™cie celu" jako potencjalny kill i ustawiamy cooldown respawnu.
-        // Respawn moĹĽna rÄ™cznie zmieniÄ‡ przez botSettings.exp.staticMobRespawnMs (domyĹ›lnie 20s).
+        // POPRAWKA (EXP): Traktujemy "zniknięcie celu" jako potencjalny kill i ustawiamy cooldown respawnu.
+        // Respawn można ręcznie zmienić przez botSettings.exp.staticMobRespawnMs (domyślnie 20s).
         const respawnMs = Math.max(3000, parseInt(botSettings?.exp?.staticMobRespawnMs ?? 20000, 10) || 20000);
         m.cooldownUntil = Date.now() + respawnMs + (m.failCount * 500);
         if (m.failCount >= 6) this.items.delete(key);
@@ -7267,12 +7349,12 @@ window.expDryRunSimulation = function(type = 'gate-stuck-x5') {
         if (!text) return '(pusty komunikat)';
 
         const lower = text.toLowerCase();
-        if (lower.includes('wĹ‚Ä…czono') && lower.includes('berserk')) return 'Berserk: ON';
-        if (lower.includes('wyĹ‚Ä…czono') && lower.includes('berserk')) return 'Berserk: OFF';
+        if (lower.includes('włączono') && lower.includes('berserk')) return 'Berserk: ON';
+        if (lower.includes('wyłączono') && lower.includes('berserk')) return 'Berserk: OFF';
         if (lower.includes('uruchomiono tryb automatyczny')) return 'Bot: START';
         if (lower.includes('zatrzymano tryb automatyczny')) return 'Bot: STOP';
 
-        // CzyĹ›ci techniczne prefiksy loggera typu [INFO][GENERAL][EVENT][run:x][cycle:y]
+        // Czyści techniczne prefiksy loggera typu [INFO][GENERAL][EVENT][run:x][cycle:y]
         text = text
             .replace(/^\[(DEBUG|INFO|WARN|ERROR)\](\[[A-Z_]+\]){1,5}\s*/i, '')
             .replace(/\[run:[^\]]+\]/gi, '')
@@ -7280,12 +7362,12 @@ window.expDryRunSimulation = function(type = 'gate-stuck-x5') {
             .trim();
 
         const cleanLower = text.toLowerCase();
-        if (cleanLower.includes('brama zajÄ™ta')) return 'Brama zajÄ™ta, ponawiam...';
-        if (cleanLower.includes('gaterecovery') && cleanLower.includes('krok')) return 'PrĂłbujÄ™ obejĹ›Ä‡ zajÄ™tÄ… bramÄ™.';
+        if (cleanLower.includes('brama zajęta')) return 'Brama zajęta, ponawiam...';
+        if (cleanLower.includes('gaterecovery') && cleanLower.includes('krok')) return 'Próbuję obejść zajętą bramę.';
         if (cleanLower.includes('gaterecovery') && cleanLower.includes('zablokowan')) return 'Brama chwilowo zablokowana.';
         if (cleanLower.startsWith('task:')) {
             const m = text.match(/task:\s*([a-z_]+)\s*->\s*([a-z_]+)/i);
-            if (m) return `Tryb: ${m[1].toUpperCase()} â†’ ${m[2].toUpperCase()}`;
+            if (m) return `Tryb: ${m[1].toUpperCase()} → ${m[2].toUpperCase()}`;
         }
 
         return text;
@@ -7320,7 +7402,7 @@ window.logHero = function(msg, color="#a99a75") {
 
 
 
-    // --- MAGIA: GARGONEM POCKET BERSERK (Czyste nadpisanie pamiÄ™ci) ---
+    // --- MAGIA: GARGONEM POCKET BERSERK (Czyste nadpisanie pamięci) ---
 
 
 
@@ -7336,7 +7418,7 @@ window.logHero = function(msg, color="#a99a75") {
 
 
 
-                // BezpoĹ›rednia modyfikacja pamiÄ™ci klienta (Omija serwer = brak bĹ‚Ä™dĂłw!)
+                // Bezpośrednia modyfikacja pamięci klienta (Omija serwer = brak błędów!)
 
 
 
@@ -7356,7 +7438,7 @@ window.logHero = function(msg, color="#a99a75") {
 
 
 
-                // Filtry rzadszych potworĂłw
+                // Filtry rzadszych potworów
 
 
 
@@ -7372,7 +7454,7 @@ window.logHero = function(msg, color="#a99a75") {
 
 
 
-                // Wymuszenie odĹ›wieĹĽenia ikonek nad gĹ‚owami mobĂłw ("GĹ‚Ăłwki Gargonema")
+                // Wymuszenie odświeżenia ikonek nad głowami mobów ("Główki Gargonema")
 
 
 
@@ -7408,11 +7490,11 @@ window.logHero = function(msg, color="#a99a75") {
 
 
 
-            if (state) window.logExp("âš”ď¸Ź WĹ‚Ä…czono Smart-Aggro (Zintegrowane z silnikiem).", "#ff9800");
+            if (state) window.logExp("⚔️ Włączono Smart-Aggro (Zintegrowane z silnikiem).", "#ff9800");
 
 
 
-            else window.logExp("đź›ˇď¸Ź WyĹ‚Ä…czono Smart-Aggro.", "#ff9800");
+            else window.logExp("🛡️ Wyłączono Smart-Aggro.", "#ff9800");
 
 
 
@@ -7428,7 +7510,7 @@ window.logHero = function(msg, color="#a99a75") {
 
 
 
-    // Zabezpieczenie: Silnik gry potrafi czasem resetowaÄ‡ ustawienia, przypominamy mu o nich co 2s
+    // Zabezpieczenie: Silnik gry potrafi czasem resetować ustawienia, przypominamy mu o nich co 2s
 
 
 
@@ -7531,7 +7613,7 @@ function getExpMobsFromDrawableList(hero, minL, maxL) {
                     }
                     if(isReachable) break;
                 }
-                // JeĹ›li potwĂłr nie dotyka dostÄ™pnego terenu - zignoruj go!
+                // Jeśli potwór nie dotyka dostępnego terenu - zignoruj go!
                 if (!isReachable) return false;
             }
             // ------------------------------------------------------
@@ -7556,7 +7638,7 @@ function getExpMobsFromDrawableList(hero, minL, maxL) {
             raw: n
         }))
         .sort((a, b) => {
-            // Optymalizacja Ĺ›cieĹĽki - atakujemy to co mamy najbliĹĽej w linii ataku
+            // Optymalizacja ścieżki - atakujemy to co mamy najbliżej w linii ataku
             if (a.attackDist !== b.attackDist) return a.attackDist - b.attackDist;
             return a.dystans - b.dystans;
         });
@@ -7709,8 +7791,8 @@ function normMapName(s) {
         .replace(/\u00A0/g, " ")
         .normalize("NFD")
         .replace(/[\u0300-\u036f]/g, "")
-        .replace(/Ĺ‚/g, "l")
-        .replace(/Ĺ/g, "l")
+        .replace(/ł/g, "l")
+        .replace(/Ł/g, "l")
         .replace(/\s+/g, " ")
         .trim()
         .toLowerCase();
@@ -7770,7 +7852,7 @@ function setExpBerserkState(shouldEnable) {
 
 }
 
-// Deklaracje zmiennych pamiÄ™ci ruchu (globalne dla okna)
+// Deklaracje zmiennych pamięci ruchu (globalne dla okna)
 
 window.expLastMoveTx = -1;
 
@@ -7822,7 +7904,7 @@ function markTargetIgnoredOnMap(mapName, mob, reason = 'too_hard') {
     if (!(window.expIgnoredTargetsByMap[mapKey] instanceof Map)) window.expIgnoredTargetsByMap[mapKey] = new Map();
     const ttlMs = reason === 'anti_stuck' ? 35000 : 90000;
     window.expIgnoredTargetsByMap[mapKey].set(targetKey, Date.now() + ttlMs);
-    HeroLogger.emit('INFO', 'TARGET_HARD_IGNORED_ON_MAP', `IgnorujÄ™ cel ${mob.nick || mob.id || '?'} na mapie [${mapName}] (powĂłd: ${reason}).`, "#ff8a65", { category: 'COMBAT', dedupeMs: 2500 });
+    HeroLogger.emit('INFO', 'TARGET_HARD_IGNORED_ON_MAP', `Ignoruję cel ${mob.nick || mob.id || '?'} na mapie [${mapName}] (powód: ${reason}).`, "#ff8a65", { category: 'COMBAT', dedupeMs: 2500 });
     return true;
 }
 
@@ -7969,7 +8051,7 @@ function getCurrentExpHuntMaps() {
     const profiles = Array.isArray(botSettings?.expProfiles) ? botSettings.expProfiles : [];
     const activeProfile = profiles.find(p => p?.name === activeProfileName);
 
-    // Priorytet: aktualna trasa uĹĽytkownika (mapOrder).
+    // Priorytet: aktualna trasa użytkownika (mapOrder).
     if (Array.isArray(routeMaps) && routeMaps.length > 0) {
         return [...new Set(routeMaps.filter(Boolean))];
     }
@@ -8122,7 +8204,7 @@ function pickBestExpTarget(validMobs, distMap) {
     if (window.expCurrentTargetId != null) {
         const currentGroup = groups.find(g => (g.bestTargetMob?.id || g.mobs?.[0]?.id) == window.expCurrentTargetId);
         if (currentGroup && best && (currentGroup.score <= best.score + 1.8)) {
-            best = currentGroup; // histereza przeĹ‚Ä…czania celu
+            best = currentGroup; // histereza przełączania celu
         }
     }
     return { mob: best.bestTargetMob || best.mobs[0], groupKey: best.key, group: best };
@@ -8177,7 +8259,7 @@ function hasNearbyReachableMobsForExp(maxDistance = 12) {
         if (ranga === "elite2" && !botSettings.berserk.e2) continue;
         if (ranga === "hero" && !botSettings.berserk.hero) continue;
 
-        // szukamy pola dojĹ›cia obok moba
+        // szukamy pola dojścia obok moba
         let bestDist = Infinity;
         for (let dx = -1; dx <= 1; dx++) {
             for (let dy = -1; dy <= 1; dy++) {
@@ -8279,7 +8361,7 @@ function stopRushBecauseExpMapReached(currMap, reason = 'exp_route_reached') {
     if (typeof Engine?.hero?.stop === 'function') Engine.hero.stop();
     const btn = document.getElementById('btnStartStop');
     if (btn) {
-        btn.innerHTML = '<span class="btn-icon">â–¶</span><span>START</span>';
+        btn.innerHTML = '<span class="btn-icon">▶</span><span>START</span>';
         btn.style.color = "#4caf50";
         btn.style.borderColor = "#4caf50";
     }
@@ -8349,7 +8431,7 @@ function runExpLogic() {
     window.expMapPvpCache = window.expMapPvpCache || {};
     window.expMapPvpCache[currMap] = Engine.map?.d?.pvp;
 
-    // ZarzÄ…dzanie historiÄ… map i cooldownami
+    // Zarządzanie historią map i cooldownami
     if (window.lastExpMap !== currMap) {
         if (!window.expMapHistory) window.expMapHistory = [];
         if (window.lastExpMap) {
@@ -8379,7 +8461,7 @@ function runExpLogic() {
         expLastLoggedTargetId = null;
         expLastLoggedTransitMap = null;
         if (window.expMonsterCache) window.expMonsterCache.clear();
-        HeroLogger.emit('INFO', 'MAP_CHANGE', isExpMap ? `WszedĹ‚em na expowisko [${currMap}]` : `Tranzyt przez [${currMap}]`, "#90caf9", { category: 'ROUTE' });
+        HeroLogger.emit('INFO', 'MAP_CHANGE', isExpMap ? `Wszedłem na expowisko [${currMap}]` : `Tranzyt przez [${currMap}]`, "#90caf9", { category: 'ROUTE' });
         if (window.RouteCombatFSM) {
             window.RouteCombatFSM.update({
                 running: !!window.isExping,
@@ -8400,7 +8482,7 @@ function runExpLogic() {
     const mapH = Number(Engine?.map?.d?.y) || 0;
     const isOutsideCurrentMap = (x, y) => x < 0 || y < 0 || x >= mapW || y >= mapH;
 
-    // --- PAMIÄÄ† POTWORĂ“W I FILTR RADARU ---
+    // --- PAMIĘĆ POTWORÓW I FILTR RADARU ---
     if (!window.expMonsterCache) window.expMonsterCache = new Map();
     let npcsData = typeof Engine.npcs.check === 'function' ? Engine.npcs.check() : Engine.npcs.d;
     let currentlyVisibleIds = new Set();
@@ -8411,7 +8493,7 @@ function runExpLogic() {
         mob.memoryOnly = true;
     }
     
-    // Skanowanie tego co widaÄ‡
+    // Skanowanie tego co widać
     for (let key in npcsData) {
         let n = npcsData[key]?.d || npcsData[key];
         if (!n || n.type === 4 || n.type < 2 || n.dead || n.del || n.delete) continue;
@@ -8441,7 +8523,7 @@ function runExpLogic() {
     }
 
     MonsterMemory.decay(currMap, Engine?.map?.d?.pvp === 2);
-    // Usuwanie z pamiÄ™ci mobĂłw, ktĂłre powinny byÄ‡ blisko, a ich nie ma (ktoĹ› ubiĹ‚)
+    // Usuwanie z pamięci mobów, które powinny być blisko, a ich nie ma (ktoś ubił)
     const staleDeleteRadius = isRedMapNow ? 5 : 10;
     const staleDeleteGraceMs = isRedMapNow ? 7000 : 2200;
     for (let [id, mob] of window.expMonsterCache.entries()) {
@@ -8451,7 +8533,7 @@ function runExpLogic() {
         }
     }
 
-    // Gdy chwilowo nic nie widaÄ‡, dosiewamy pamiÄ™Ä‡ widzianych mobĂłw (szczegĂłlnie waĹĽne na czerwonych mapach).
+    // Gdy chwilowo nic nie widać, dosiewamy pamięć widzianych mobów (szczególnie ważne na czerwonych mapach).
     const rememberedMobsForProbe = MonsterMemory.getLikelyAliveForMap(currMap, {
         maxAgeMs: isRedMapNow ? 120000 : 65000,
         minAliveScore: isRedMapNow ? 0.1 : 0.25
@@ -8491,7 +8573,7 @@ function runExpLogic() {
                 cacheKey,
                 x: remembered.x,
                 y: remembered.y,
-                nick: remembered.nick || 'PotwĂłr',
+                nick: remembered.nick || 'Potwór',
                 ranga: remembered.priorityClass || 'normal',
                 lvl: remembered.lvl || 0,
                 lastSeenAt: remembered.lastSeenAt || now,
@@ -8500,7 +8582,7 @@ function runExpLogic() {
         }
     }
 
-    // WybĂłr celu na podstawie Radaru (omijanie Ĺ›cian)
+    // Wybór celu na podstawie Radaru (omijanie ścian)
     let distMap = buildDistanceMapFromHero();
     let validMobs = [];
     for (let [id, mob] of window.expMonsterCache.entries()) {
@@ -8535,7 +8617,7 @@ function runExpLogic() {
             if (window.expFocusTarget.lockedUntil && now < window.expFocusTarget.lockedUntil) {
                 HeroLogger.emit('DEBUG', 'TARGET_FOCUS_LOCK', `Focus aktywny: ${locked.nick || locked.id} (${Math.max(0, Math.ceil((window.expFocusTarget.lockedUntil - now) / 1000))}s)`, "#ffcc80", { category: 'COMBAT', dedupeMs: 1700 });
             } else if (lockAge > EXP_TARGET_FOCUS_LOCK_MS) {
-                HeroLogger.emit('DEBUG', 'TARGET_FOCUS_STICKY', `Trzymam focus: ${locked.nick || locked.id} aĹĽ do zabicia.`, "#ffe082", { category: 'COMBAT', dedupeMs: 2600 });
+                HeroLogger.emit('DEBUG', 'TARGET_FOCUS_STICKY', `Trzymam focus: ${locked.nick || locked.id} aż do zabicia.`, "#ffe082", { category: 'COMBAT', dedupeMs: 2600 });
             }
         } else {
             window.expFocusTarget = null;
@@ -8559,7 +8641,7 @@ function runExpLogic() {
         window.expLastTargetNotFoundAt &&
         now - window.expLastTargetNotFoundAt < 450
     ) {
-        HeroLogger.emit('DEBUG', 'TARGET_NOT_FOUND_RECENT', `Pomijam Ĺ›wieĹĽo znikniÄ™ty cel ${target.nick || target.id}.`, "#ffb74d", { dedupeMs: 700 });
+        HeroLogger.emit('DEBUG', 'TARGET_NOT_FOUND_RECENT', `Pomijam świeżo zniknięty cel ${target.nick || target.id}.`, "#ffb74d", { dedupeMs: 700 });
         if (window.expFocusTarget && String(window.expFocusTarget.id) === String(target.id)) window.expFocusTarget = null;
         target = null;
         selectedGroupKey = null;
@@ -8569,16 +8651,16 @@ function runExpLogic() {
     expCurrentTargetId = target ? (target.id || null) : null;
 
     const berserkEnabledNow = !!(botSettings?.berserk?.enabled || Engine?.settings?.d?.fight_auto_solo);
-    // DomyĹ›lnie walczymy WYĹÄ„CZNIE na mapach z trasy expowiska.
-    // Opcja allowTransitFight jest ukrytym przeĹ‚Ä…cznikiem awaryjnym (OFF by default),
-    // aby nie biÄ‡ losowych mobĂłw na mapach tranzytowych po teleportach.
+    // Domyślnie walczymy WYŁĄCZNIE na mapach z trasy expowiska.
+    // Opcja allowTransitFight jest ukrytym przełącznikiem awaryjnym (OFF by default),
+    // aby nie bić losowych mobów na mapach tranzytowych po teleportach.
     const allowTransitFight = !!(botSettings?.exp?.allowTransitFight && botSettings?.berserk?.userEnabled && berserkEnabledNow);
     if (!isExpMap && allowTransitFight) {
         temporaryExpMode = hasNearbyReachableMobsForExp(10);
         if (temporaryExpMode) {
             const tmpKey = `${currMap}|tmp-on`;
             if (window.expTransitTempFightLogKey !== tmpKey) {
-                HeroLogger.emit('INFO', 'TRANSIT_TEMP_EXP_ON', `Tranzyt: wykryto moby w zasiÄ™gu na mapie [${currMap}] â€” tymczasowo walczÄ™.`, "#ffd54f", { category: 'ROUTE', dedupeMs: 2000 });
+                HeroLogger.emit('INFO', 'TRANSIT_TEMP_EXP_ON', `Tranzyt: wykryto moby w zasięgu na mapie [${currMap}] — tymczasowo walczę.`, "#ffd54f", { category: 'ROUTE', dedupeMs: 2000 });
                 window.expTransitTempFightLogKey = tmpKey;
             }
         }
@@ -8635,7 +8717,7 @@ function runExpLogic() {
             return;
         }
 
-        // Twardy bezpiecznik: jeĹĽeli celu nie ma albo nie ma legalnego pola podejĹ›cia (np. mob w Ĺ›cianie), pomijamy.
+        // Twardy bezpiecznik: jeżeli celu nie ma albo nie ma legalnego pola podejścia (np. mob w ścianie), pomijamy.
         if (!memoryOnlyTarget && (liveTargetMissing || liveTargetInCollision || !targetPathData?.stand)) {
             const mm = MonsterMemory.onTargetNotFound(currMap, target);
             if (window.expMonsterCache) window.expMonsterCache.delete(String(target.cacheKey ?? target.id));
@@ -8645,32 +8727,32 @@ function runExpLogic() {
             expRetargetEarliestAt = window.expLastTargetNotFoundAt + Math.floor(Math.random() * 301);
             const skipReason = liveTargetMissing
                 ? 'nie istnieje'
-                : (liveTargetInCollision ? 'poza mapÄ…/kolizja' : 'nieosiÄ…galny/Ĺ›ciana');
-            HeroLogger.emit('DEBUG', 'TARGET_UNREACHABLE_SKIP', `Pomijam cel ${target.nick || target.id} (powĂłd: ${skipReason}, cooldown=${mm?.cooldownUntil ? 'ON' : 'OFF'}).`, "#ff8a65", { category: 'COMBAT', dedupeMs: 2200 });
+                : (liveTargetInCollision ? 'poza mapą/kolizja' : 'nieosiągalny/ściana');
+            HeroLogger.emit('DEBUG', 'TARGET_UNREACHABLE_SKIP', `Pomijam cel ${target.nick || target.id} (powód: ${skipReason}, cooldown=${mm?.cooldownUntil ? 'ON' : 'OFF'}).`, "#ff8a65", { category: 'COMBAT', dedupeMs: 2200 });
             return;
         }
 
-        window.expDecisionInfo = `Cel mob: ${(target.nick || "PotwĂłr")} [${target.x},${target.y}]`;
-        const targetLogKey = getStableExpTargetKey(target) || `${target.nick || "PotwĂłr"}|${target.ranga || ""}`;
+        window.expDecisionInfo = `Cel mob: ${(target.nick || "Potwór")} [${target.x},${target.y}]`;
+        const targetLogKey = getStableExpTargetKey(target) || `${target.nick || "Potwór"}|${target.ranga || ""}`;
         if (window.logExp && expLastLoggedTargetId !== targetLogKey) {
             const rankLabel = target.ranga ? ` (${target.ranga})` : "";
-            window.logExp(`đźŽŻ PodchodzÄ™: ${target.nick || "PotwĂłr"}${rankLabel}`, "#ffd54f");
+            window.logExp(`🎯 Podchodzę: ${target.nick || "Potwór"}${rankLabel}`, "#ffd54f");
             expLastLoggedTargetId = targetLogKey;
             expLastLoggedTransitMap = null;
         }
         let exactDist = Math.max(Math.abs(hx - target.x), Math.abs(hy - target.y));
 
-        if (exactDist <= 1) { // JesteĹ›my przy celu
+        if (exactDist <= 1) { // Jesteśmy przy celu
             const targetKey = getStableExpTargetKey(target);
             if (window.expStandStillTargetKey !== targetKey) {
                 window.expStandStillTargetKey = targetKey;
                 window.expStandStillStart = now;
             }
             if (!window.expStandStillStart) window.expStandStillStart = now;
-            if (now - window.expStandStillStart > 2000) { // Berserk zaciÄ…Ĺ‚ siÄ™
+            if (now - window.expStandStillStart > 2000) { // Berserk zaciął się
                 window.expMeleeFailByTarget = window.expMeleeFailByTarget || {};
                 window.expMeleeFailByTarget[targetKey] = (window.expMeleeFailByTarget[targetKey] || 0) + 1;
-                HeroLogger.emit('DEBUG', 'ATTACK_WAIT_FOR_BERSERK', `Jestem przy celu ${target.nick || target.id} â€” czekam na autoatak berserka (prĂłba=${window.expMeleeFailByTarget[targetKey]}).`, "#ffcc80", { category: 'COMBAT', dedupeMs: 1500 });
+                HeroLogger.emit('DEBUG', 'ATTACK_WAIT_FOR_BERSERK', `Jestem przy celu ${target.nick || target.id} — czekam na autoatak berserka (próba=${window.expMeleeFailByTarget[targetKey]}).`, "#ffcc80", { category: 'COMBAT', dedupeMs: 1500 });
 
                 if (window.expMeleeFailByTarget[targetKey] >= 3) {
                     const mm = MonsterMemory.onTargetNotFound(currMap, target);
@@ -8680,7 +8762,7 @@ function runExpLogic() {
                     window.expLastTargetNotFoundAt = Date.now();
                     expLastMissingTargetId = target.id ?? target.cacheKey ?? null;
                     expRetargetEarliestAt = window.expLastTargetNotFoundAt + Math.floor(Math.random() * 301);
-                    HeroLogger.emit('DEBUG', 'ATTACK_STUCK_TARGET_SKIP', `Pomijam cel ${target.nick || target.id} po ${window.expMeleeFailByTarget[targetKey]} nieudanych prĂłbach (cooldown=${mm?.cooldownUntil ? 'ON' : 'OFF'}).`, "#ff8a65", { category: 'COMBAT', dedupeMs: 2400 });
+                    HeroLogger.emit('DEBUG', 'ATTACK_STUCK_TARGET_SKIP', `Pomijam cel ${target.nick || target.id} po ${window.expMeleeFailByTarget[targetKey]} nieudanych próbach (cooldown=${mm?.cooldownUntil ? 'ON' : 'OFF'}).`, "#ff8a65", { category: 'COMBAT', dedupeMs: 2400 });
                     window.expStandStillStart = null;
                     window.expStandStillTargetKey = null;
                     return;
@@ -8717,7 +8799,7 @@ function runExpLogic() {
             } else if (now - (approachState.anchorAt || now) > 2600) {
                 approachState.failCount = (approachState.failCount || 0) + 1;
                 approachState.anchorAt = now;
-                HeroLogger.emit('DEBUG', 'APPROACH_STUCK_RETRY', `Nie mogÄ™ dojĹ›Ä‡ do celu ${target.nick || target.id} (prĂłba=${approachState.failCount}).`, "#ffcc80", { category: 'COMBAT', dedupeMs: 1500 });
+                HeroLogger.emit('DEBUG', 'APPROACH_STUCK_RETRY', `Nie mogę dojść do celu ${target.nick || target.id} (próba=${approachState.failCount}).`, "#ffcc80", { category: 'COMBAT', dedupeMs: 1500 });
 
                 if (approachState.failCount >= 3) {
                     const mm = MonsterMemory.onTargetNotFound(currMap, target);
@@ -8727,7 +8809,7 @@ function runExpLogic() {
                     window.expLastTargetNotFoundAt = Date.now();
                     expLastMissingTargetId = target.id ?? target.cacheKey ?? null;
                     expRetargetEarliestAt = window.expLastTargetNotFoundAt + Math.floor(Math.random() * 301);
-                    HeroLogger.emit('DEBUG', 'APPROACH_STUCK_TARGET_SKIP', `Pomijam cel ${target.nick || target.id} â€” stojÄ™ w miejscu przy tym samym celu (cooldown=${mm?.cooldownUntil ? 'ON' : 'OFF'}).`, "#ff8a65", { category: 'COMBAT', dedupeMs: 2400 });
+                    HeroLogger.emit('DEBUG', 'APPROACH_STUCK_TARGET_SKIP', `Pomijam cel ${target.nick || target.id} — stoję w miejscu przy tym samym celu (cooldown=${mm?.cooldownUntil ? 'ON' : 'OFF'}).`, "#ff8a65", { category: 'COMBAT', dedupeMs: 2400 });
                     approachState.targetKey = null;
                     return;
                 }
@@ -8761,18 +8843,18 @@ function runExpLogic() {
 
     // --- TRANZYT / ZMIANA MAPY ---
     if (!isExpMap || validMobs.length === 0) {
-        // POPRAWKA (EXP): jeĹ›li na mapie nie ma ĹĽadnego ĹĽywego celu (wszystkie spawny sÄ… na cooldownie respawnu),
-        // nie czekamy sztucznie kilku skanĂłw â€” od razu zmieniamy mapÄ™.
+        // POPRAWKA (EXP): jeśli na mapie nie ma żadnego żywego celu (wszystkie spawny są na cooldownie respawnu),
+        // nie czekamy sztucznie kilku skanów — od razu zmieniamy mapę.
         const reachableRememberedCount = validMobs.filter(m => m.memoryOnly || !m.visible).length;
 
         // Bezpiecznik: po zmianie mapy tranzytowej czasem silnik "staje" bez decyzji.
-        // Po krĂłtkim timeoutcie wymuszamy ponowne obrane celu mapowego.
+        // Po krótkim timeoutcie wymuszamy ponowne obrane celu mapowego.
         if (!isExpMap && !window.isRushing && window.expMapEnteredAt && (now - window.expMapEnteredAt > 4200)) {
             const unclearedMaps = (mapsPool || []).filter(m => m && !isMapTemporarilyCleared(m));
             const nearestExpPath = getClosestExpMapPath(currMap, unclearedMaps.length ? unclearedMaps : mapsPool);
             if (nearestExpPath?.targetMap) {
                 if (window.logExp && window._lastTransitRecoverLog !== `${currMap}->${nearestExpPath.targetMap}`) {
-                    window.logExp(`đź§­ [Recovery] Tranzyt zatrzymaĹ‚ siÄ™ po zmianie mapy, ponawiam bieg do: [${nearestExpPath.targetMap}]`, "#ffb74d");
+                    window.logExp(`🧭 [Recovery] Tranzyt zatrzymał się po zmianie mapy, ponawiam bieg do: [${nearestExpPath.targetMap}]`, "#ffb74d");
                     window._lastTransitRecoverLog = `${currMap}->${nearestExpPath.targetMap}`;
                 }
                 window.rushToMap(nearestExpPath.targetMap);
@@ -8797,18 +8879,18 @@ function runExpLogic() {
 
             markMapTemporarilyCleared(currMap);
             if (window.logExp && window._lastClearedMapLog !== currMap) {
-                window.logExp(`đź§ą Mapa wyczyszczona: [${currMap}] â€” szukam kolejnego expowiska.`, "#81c784");
+                window.logExp(`🧹 Mapa wyczyszczona: [${currMap}] — szukam kolejnego expowiska.`, "#81c784");
                 window._lastClearedMapLog = currMap;
             }
         }
 
         const unclearedMaps = (mapsPool || []).filter(m => m && !isMapTemporarilyCleared(m));
         const bestTransit = pickNextUnclearedExpMap(currMap, unclearedMaps.length ? unclearedMaps : mapsPool);
-        window.expDecisionInfo = `Mapa pusta: ${currMap} -> szukam przejĹ›cia w trasie`;
+        window.expDecisionInfo = `Mapa pusta: ${currMap} -> szukam przejścia w trasie`;
         let bestTargetMap = bestTransit ? bestTransit.targetMap : null;
 
-        // JeĹ›li startujemy poza expowiskiem, dobijamy najpierw do najbliĹĽszej mapy z kolejnoĹ›ci,
-        // ale priorytetowo ignorujemy mapy Ĺ›wieĹĽo wyczyszczone.
+        // Jeśli startujemy poza expowiskiem, dobijamy najpierw do najbliższej mapy z kolejności,
+        // ale priorytetowo ignorujemy mapy świeżo wyczyszczone.
         if (!bestTargetMap && !isExpMap) {
             const nearestExpPath = getClosestExpMapPath(currMap, unclearedMaps.length ? unclearedMaps : mapsPool);
             if (nearestExpPath?.targetMap) bestTargetMap = nearestExpPath.targetMap;
@@ -8824,7 +8906,7 @@ function runExpLogic() {
             if (backtrackHint?.map) {
                 bestTargetMap = backtrackHint.map;
                 if (window.logExp && window._lastDeadEndBacktrackLog !== `${currMap}->${bestTargetMap}`) {
-                    window.logExp(`â†©ď¸Ź Ĺšlepa mapa albo brak dalszej bramy. Cofam siÄ™ ostatnim znanym przejĹ›ciem: [${currMap}] â†’ [${bestTargetMap}]`, "#ffcc80");
+                    window.logExp(`↩️ Ślepa mapa albo brak dalszej bramy. Cofam się ostatnim znanym przejściem: [${currMap}] → [${bestTargetMap}]`, "#ffcc80");
                     window._lastDeadEndBacktrackLog = `${currMap}->${bestTargetMap}`;
                 }
             }
@@ -8832,7 +8914,7 @@ function runExpLogic() {
 
         if (bestTargetMap && !window.isRushing) {
             if (window.logExp && window._lastTransitMapLog !== bestTargetMap) {
-                window.logExp(`đźŹ Bieg do: [${bestTargetMap}]`, "#90caf9");
+                window.logExp(`🏃 Bieg do: [${bestTargetMap}]`, "#90caf9");
                 window._lastTransitMapLog = bestTargetMap;
             }
             if (window.logExp && expLastLoggedTransitMap !== bestTargetMap) {
@@ -8849,13 +8931,13 @@ function runExpLogic() {
             // Wszystkie mapy wyczyszczone: czekamy na bezpiecznej mapie i po minucie ponawiamy obieg.
             if (!window.expAllMapsClearedAt) {
                 window.expAllMapsClearedAt = now;
-                if (window.logExp) window.logExp("âś… WyczyĹ›ciĹ‚em wszystkie mapy. Szukam bezpiecznej mapy i czekam 1 minutÄ™ na resp.", "#4db6ac");
+                if (window.logExp) window.logExp("✅ Wyczyściłem wszystkie mapy. Szukam bezpiecznej mapy i czekam 1 minutę na resp.", "#4db6ac");
             }
 
             const deadEndBack = typeof getLastTransitionBacktrack === 'function' ? getLastTransitionBacktrack(currMap) : null;
             if (deadEndBack?.map && typeof isRouteDeadEndMap === 'function' && isRouteDeadEndMap(currMap) && !window.isRushing) {
                 if (window.logExp && window._lastAllClearBacktrackLog !== `${currMap}->${deadEndBack.map}`) {
-                    window.logExp(`â†©ď¸Ź Wszystko wyczyszczone, ale stojÄ™ na Ĺ›lepej mapie. Wracam do: [${deadEndBack.map}]`, "#ffcc80");
+                    window.logExp(`↩️ Wszystko wyczyszczone, ale stoję na ślepej mapie. Wracam do: [${deadEndBack.map}]`, "#ffcc80");
                     window._lastAllClearBacktrackLog = `${currMap}->${deadEndBack.map}`;
                 }
                 window.rushToMap(deadEndBack.map);
@@ -8868,7 +8950,7 @@ function runExpLogic() {
                 const safeMap = getNearestKnownSafeExpMap(currMap, mapsPool);
                 if (safeMap && safeMap !== currMap) {
                     window.expWaitingSafeMap = safeMap;
-                    if (window.logExp) window.logExp(`đź›ˇď¸Ź Mapa czerwona. PrzenoszÄ™ siÄ™ na bezpiecznÄ… mapÄ™: [${safeMap}]`, "#81d4fa");
+                    if (window.logExp) window.logExp(`🛡️ Mapa czerwona. Przenoszę się na bezpieczną mapę: [${safeMap}]`, "#81d4fa");
                     window.rushToMap(safeMap);
                     expLastActionTime = now + 1000;
                     return;
@@ -8880,13 +8962,13 @@ function runExpLogic() {
             if (elapsed < waitMs) {
                 if (!window.expLastWaitLogAt || now - window.expLastWaitLogAt > 12000) {
                     const leftSec = Math.max(0, Math.ceil((waitMs - elapsed) / 1000));
-                    if (window.logExp) window.logExp(`âŹł Czekam na odrodzenie potworĂłw... (${leftSec}s)`, "#90a4ae");
+                    if (window.logExp) window.logExp(`⏳ Czekam na odrodzenie potworów... (${leftSec}s)`, "#90a4ae");
                     window.expLastWaitLogAt = now;
                 }
                 return;
             }
 
-            if (window.logExp) window.logExp("đź” MinÄ™Ĺ‚a minuta â€” wracam sprawdziÄ‡ mapy expowiska.", "#4fc3f7");
+            if (window.logExp) window.logExp("🔁 Minęła minuta — wracam sprawdzić mapy expowiska.", "#4fc3f7");
             window.mapClearTimes = {};
             window.expAllMapsClearedAt = 0;
             window.expLastWaitLogAt = 0;
@@ -8894,7 +8976,7 @@ function runExpLogic() {
             expEmptyScans = 0;
             return;
         } else if (!bestTargetMap) {
-            // Backtracking tylko do map osiÄ…galnych i niezbannowanych map-level.
+            // Backtracking tylko do map osiągalnych i niezbannowanych map-level.
             const immediateBack = typeof getLastTransitionBacktrack === 'function' ? getLastTransitionBacktrack(currMap) : null;
             let back = immediateBack?.map || null;
             while (!back && window.expMapHistory && window.expMapHistory.length) {
@@ -8923,12 +9005,12 @@ function runExpLogic() {
 
             if (back) {
                 if (window.logExp && window._lastTransitMapLog !== back) {
-                    window.logExp(`â†©ď¸Ź Brak dalszego przejĹ›cia. Wracam na osiÄ…galnÄ… mapÄ™: [${back}]`, "#ffb74d");
+                    window.logExp(`↩️ Brak dalszego przejścia. Wracam na osiągalną mapę: [${back}]`, "#ffb74d");
                     window._lastTransitMapLog = back;
                 }
                 window.rushToMap(back);
             } else {
-                if (window.logExp) window.logExp("đź›‘ Brak osiÄ…galnej mapy do backtracku. ZatrzymujÄ™ EXP.", "#e53935");
+                if (window.logExp) window.logExp("🛑 Brak osiągalnej mapy do backtracku. Zatrzymuję EXP.", "#e53935");
                 if (typeof stopPatrol === 'function') stopPatrol(true);
                 else window.isExping = false;
             }
@@ -8944,7 +9026,7 @@ setInterval(runExpLogic, 400);
 
         let desc = document.getElementById('inpProfileDesc').value.trim();
 
-        if(!name) return heroAlert("Podaj nazwÄ™ dla tego expowiska!");
+        if(!name) return heroAlert("Podaj nazwę dla tego expowiska!");
 
         if(botSettings.exp.mapOrder.length === 0) return heroAlert("Twoja obecna trasa EXP jest pusta.");
 
@@ -8962,7 +9044,7 @@ setInterval(runExpLogic, 400);
 
         if(typeof window.renderExpProfiles === 'function') window.renderExpProfiles();
 
-        heroAlert("âś… Expowisko zapisane pomyĹ›lnie w bazie!");
+        heroAlert("✅ Expowisko zapisane pomyślnie w bazie!");
 
     };
 
@@ -9016,7 +9098,7 @@ setInterval(runExpLogic, 400);
 
             if(typeof window.renderExpMaps === 'function') window.renderExpMaps();
 
-            heroAlert(`âś… ZaĹ‚adowano i NADPISANO trasÄ™: ${p.name}\nAutomatycznie ustawiono poziom potworĂłw na: ${botSettings.exp.minLvl} - ${botSettings.exp.maxLvl}.`);
+            heroAlert(`✅ Załadowano i NADPISANO trasę: ${p.name}\nAutomatycznie ustawiono poziom potworów na: ${botSettings.exp.minLvl} - ${botSettings.exp.maxLvl}.`);
 
         }
 
@@ -9024,7 +9106,7 @@ setInterval(runExpLogic, 400);
 
 
 
-    // NOWOĹšÄ†: Funkcja do Ĺ‚Ä…czenia expowisk ze sobÄ…!
+    // NOWOŚĆ: Funkcja do łączenia expowisk ze sobą!
 
     window.appendExpProfile = function(index) {
 
@@ -9032,7 +9114,7 @@ setInterval(runExpLogic, 400);
 
         if(p) {
 
-            // Dodawanie map bez duplikatĂłw
+            // Dodawanie map bez duplikatów
 
             p.maps.forEach(m => {
 
@@ -9048,7 +9130,7 @@ setInterval(runExpLogic, 400);
 
 
 
-            // Rozszerzanie zakresu poziomĂłw
+            // Rozszerzanie zakresu poziomów
 
             let lvlMatch = p.name.match(/\((\d+)\s*lvl\)/i);
 
@@ -9095,7 +9177,7 @@ setInterval(runExpLogic, 400);
             expLastTargetPos = null;
             if(typeof window.renderExpMaps === 'function') window.renderExpMaps();
 
-            heroAlert(`âž• DOĹÄ„CZONO do obecnej trasy: ${p.name}\nZakres potworĂłw zostaĹ‚ poszerzony i wynosi teraz: ${botSettings.exp.minLvl} - ${botSettings.exp.maxLvl}.`);
+            heroAlert(`➕ DOŁĄCZONO do obecnej trasy: ${p.name}\nZakres potworów został poszerzony i wynosi teraz: ${botSettings.exp.minLvl} - ${botSettings.exp.maxLvl}.`);
 
         }
 
@@ -9105,7 +9187,7 @@ setInterval(runExpLogic, 400);
 
     window.deleteExpProfile = function(index) {
 
-        heroConfirm("Czy na pewno chcesz usunÄ…Ä‡ to zapisane expowisko?", (res) => {
+        heroConfirm("Czy na pewno chcesz usunąć to zapisane expowisko?", (res) => {
 
             if(res) {
 
@@ -9129,7 +9211,7 @@ setInterval(runExpLogic, 400);
 
 
 
-        // Ĺ»elazne zabezpieczenie przed pustÄ… bazÄ… (wymusza zaĹ‚adowanie 109 expowisk)
+        // Żelazne zabezpieczenie przed pustą bazą (wymusza załadowanie 109 expowisk)
 
         if (!botSettings.expProfiles || botSettings.expProfiles.length === 0) {
 
@@ -9149,7 +9231,7 @@ setInterval(runExpLogic, 400);
 
         if (botSettings.expProfiles.length === 0) {
 
-             c.innerHTML = '<div style="padding:10px; text-align:center; color:#777; font-size:10px;">Brak zapisanych tras. OdĹ›wieĹĽ stronÄ™ (F5).</div>';
+             c.innerHTML = '<div style="padding:10px; text-align:center; color:#777; font-size:10px;">Brak zapisanych tras. Odśwież stronę (F5).</div>';
 
              return;
 
@@ -9177,7 +9259,7 @@ setInterval(runExpLogic, 400);
 
                 </div>
 
-                <span style="font-size:10px; color:#a99a75;">â–Ľ</span>
+                <span style="font-size:10px; color:#a99a75;">▼</span>
 
             `;
 
@@ -9195,7 +9277,7 @@ setInterval(runExpLogic, 400);
 
 
 
-            let mapsHtml = p.maps.join(' <span style="color:#777;">âžť</span> ');
+            let mapsHtml = p.maps.join(' <span style="color:#777;">➝</span> ');
 
 
 
@@ -9211,11 +9293,11 @@ setInterval(runExpLogic, 400);
 
                 <div style="display:flex; gap:4px; flex-wrap: wrap;">
 
-                    <button class="btn-sepia" style="padding:4px 4px; background:#00838f; flex:1;" onclick="loadExpProfile(${i})" title="CaĹ‚kowicie podmienia listÄ™ na to expowisko">đź“Ą NADPISZ</button>
+                    <button class="btn-sepia" style="padding:4px 4px; background:#00838f; flex:1;" onclick="loadExpProfile(${i})" title="Całkowicie podmienia listę na to expowisko">📥 NADPISZ</button>
 
-                    <button class="btn-sepia" style="padding:4px 4px; background:#4caf50; flex:1;" onclick="appendExpProfile(${i})" title="Dopisuje mapy tego expowiska do juĹĽ wczytanych">âž• DOĹÄ„CZ</button>
+                    <button class="btn-sepia" style="padding:4px 4px; background:#4caf50; flex:1;" onclick="appendExpProfile(${i})" title="Dopisuje mapy tego expowiska do już wczytanych">➕ DOŁĄCZ</button>
 
-                    <button class="btn-sepia" style="padding:4px 4px; background:#e53935; width:25px;" onclick="deleteExpProfile(${i})">âś–</button>
+                    <button class="btn-sepia" style="padding:4px 4px; background:#e53935; width:25px;" onclick="deleteExpProfile(${i})">✖</button>
 
                 </div>
 
@@ -9229,7 +9311,7 @@ setInterval(runExpLogic, 400);
 
 
 
-                // ZwiĹ„ inne
+                // Zwiń inne
 
                 document.querySelectorAll('#expProfilesList > div > div:nth-child(2)').forEach(el => el.style.display = 'none');
 
@@ -9329,7 +9411,7 @@ setInterval(runExpLogic, 400);
 
     window.removeExpMap = (index) => {
 
-        heroConfirm(`UsunÄ…Ä‡ mapÄ™ ze Ĺ›cieĹĽki expowiska?`, (res) => {
+        heroConfirm(`Usunąć mapę ze ścieżki expowiska?`, (res) => {
 
             if (res) { botSettings.exp.mapOrder.splice(index, 1); localStorage.setItem('exp_map_order_v64', JSON.stringify(botSettings.exp.mapOrder)); window.renderExpMaps(); }
 
@@ -9348,19 +9430,19 @@ window.clearExpMaps = clearExpMaps;
    window.optimizeExpRoute = function(silent = false) {
         let maps = botSettings.exp.mapOrder;
         if (!maps || maps.length < 2) {
-            if (!silent) heroAlert("Dodaj co najmniej 2 mapy do listy, aby bot mĂłgĹ‚ je zoptymalizowaÄ‡!");
+            if (!silent) heroAlert("Dodaj co najmniej 2 mapy do listy, aby bot mógł je zoptymalizować!");
             return;
         }
 
         let unvisited = new Set(maps);
         let sysMap = typeof Engine !== 'undefined' && Engine.map && Engine.map.d ? Engine.map.d.name : lastMapName;
 
-        // Zaczynamy od mapy, na ktĂłrej aktualnie stoimy (jeĹ›li jest na liĹ›cie), lub od pierwszej z brzegu
+        // Zaczynamy od mapy, na której aktualnie stoimy (jeśli jest na liście), lub od pierwszej z brzegu
         let currentMap = unvisited.has(sysMap) ? sysMap : maps[0];
         let finalRoute = [currentMap];
         unvisited.delete(currentMap);
 
-        // Sortowanie najbliĹĽszego sÄ…siada
+        // Sortowanie najbliższego sąsiada
         while(unvisited.size > 0) {
             let bestPath = null;
             let bestTarget = null;
@@ -9381,8 +9463,8 @@ window.clearExpMaps = clearExpMaps;
                 bestTarget = remaining[0];
                 finalRoute.push(bestTarget);
             } else {
-                // PRZYWRĂ“CONA LOGIKA: Zapisujemy wszystkie mapy przejĹ›ciowe do gĹ‚Ăłwnej trasy!
-                // DziÄ™ki temu bot po wejĹ›ciu do lasu zatrzyma siÄ™, wybije potwory, odhaczy w pamiÄ™ci jako "czyste" i pĂłjdzie dalej.
+                // PRZYWRÓCONA LOGIKA: Zapisujemy wszystkie mapy przejściowe do głównej trasy!
+                // Dzięki temu bot po wejściu do lasu zatrzyma się, wybije potwory, odhaczy w pamięci jako "czyste" i pójdzie dalej.
                 for (let i = 1; i < bestPath.length; i++) {
                     finalRoute.push(bestPath[i]);
                 }
@@ -9392,7 +9474,7 @@ window.clearExpMaps = clearExpMaps;
             currentMap = bestTarget;
         }
 
-        // Zamykamy pÄ™tlÄ™ powrotnÄ… (od ostatniej mapy wprost do pierwszej)
+        // Zamykamy pętlę powrotną (od ostatniej mapy wprost do pierwszej)
         let returnPath = typeof getShortestPath === 'function' ? getShortestPath(currentMap, finalRoute[0], routePathOptions()) : null;
         if (returnPath && returnPath.length > 1) {
             for (let i = 1; i < returnPath.length - 1; i++) {
@@ -9400,7 +9482,7 @@ window.clearExpMaps = clearExpMaps;
             }
         }
 
-        // Redukcja duplikatĂłw (jeĹ›li algorytm przechodziĹ‚ przez tÄ™ samÄ… mapÄ™ pod rzad)
+        // Redukcja duplikatów (jeśli algorytm przechodził przez tę samą mapę pod rzad)
         let cleanRoute = [];
         finalRoute.forEach(m => {
             if (cleanRoute.length === 0 || cleanRoute[cleanRoute.length - 1] !== m) {
@@ -9412,7 +9494,7 @@ window.clearExpMaps = clearExpMaps;
         localStorage.setItem('exp_map_order_v64', JSON.stringify(cleanRoute));
         if (typeof window.renderExpMaps === 'function') window.renderExpMaps();
 
-        if (!silent) heroAlert(`âś… Trasa poĹ‚Ä…czona!\nBot dodaĹ‚ mapy przejĹ›ciowe do gĹ‚Ăłwnej listy. JeĹ›li podczas biegu przez korytarz lub las spotka potwory, wyhamuje, normalnie je wybije i po zrobieniu czystki zapisze tÄ™ mapÄ™ w pamiÄ™ci!`);
+        if (!silent) heroAlert(`✅ Trasa połączona!\nBot dodał mapy przejściowe do głównej listy. Jeśli podczas biegu przez korytarz lub las spotka potwory, wyhamuje, normalnie je wybije i po zrobieniu czystki zapisze tę mapę w pamięci!`);
     };
 
     window.openInternalMapGraph = function(selectedMap = null) {
@@ -9456,22 +9538,22 @@ window.clearExpMaps = clearExpMaps;
 
         const edgeCount = [...graph.adj.values()].reduce((sum, m) => sum + m.size, 0);
         if (summary) {
-            summary.innerHTML = `Mapy: <b style="color:#e0f7fa;">${graph.nodes.size}</b> | PoĹ‚Ä…czenia: <b style="color:#c8e6c9;">${edgeCount}</b> | Trasa EXP: <b style="color:#ffd54f;">${routeSet.size}</b>`;
+            summary.innerHTML = `Mapy: <b style="color:#e0f7fa;">${graph.nodes.size}</b> | Połączenia: <b style="color:#c8e6c9;">${edgeCount}</b> | Trasa EXP: <b style="color:#ffd54f;">${routeSet.size}</b>`;
         }
 
         list.innerHTML = nodes.map(n => {
             const active = normMapName(n.name) === normMapName(selectedMap);
             const outgoing = getKnownOutgoingConnections(n.name).length;
             const routeBadge = routeSet.has(normMapName(n.name)) ? '<span class="internal-map-pill">EXP</span>' : '';
-            const indoorBadge = n.indoor ? '<span class="internal-map-pill">wnÄ™trze</span>' : '';
+            const indoorBadge = n.indoor ? '<span class="internal-map-pill">wnętrze</span>' : '';
             const safeName = String(n.name).replace(/'/g, "\\'");
             return `
                 <div class="internal-map-node ${active ? 'active' : ''}" onclick="window.selectInternalMapNode('${safeName}')">
                     <div style="font-weight:bold; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(n.name)}</div>
-                    <div style="color:#90a4ae; font-size:9px; margin-top:2px;">wyjĹ›cia: ${outgoing} ${routeBadge}${indoorBadge}</div>
+                    <div style="color:#90a4ae; font-size:9px; margin-top:2px;">wyjścia: ${outgoing} ${routeBadge}${indoorBadge}</div>
                 </div>
             `;
-        }).join('') || '<div style="color:#777; padding:8px;">Brak map pasujÄ…cych do filtra.</div>';
+        }).join('') || '<div style="color:#777; padding:8px;">Brak map pasujących do filtra.</div>';
 
         const selectedEdges = getKnownOutgoingConnections(selectedMap);
         const incoming = graph.incoming.get(normMapName(selectedMap)) ? [...graph.incoming.get(normMapName(selectedMap)).values()] : [];
@@ -9479,29 +9561,29 @@ window.clearExpMaps = clearExpMaps;
         const incomingOnly = incoming.filter(edge => !selectedEdges.some(e => normMapName(e.to) === normMapName(edge.from)));
 
         const edgeHtml = selectedEdges.map(edge => {
-            const coords = edge.coords.length ? edge.coords.map(c => `[${c[0]},${c[1]}]`).join(', ') : 'brak kordĂłw po tej stronie';
-            const sources = [...edge.sources].join(', ') || 'pamiÄ™Ä‡';
+            const coords = edge.coords.length ? edge.coords.map(c => `[${c[0]},${c[1]}]`).join(', ') : 'brak kordów po tej stronie';
+            const sources = [...edge.sources].join(', ') || 'pamięć';
             const inferredClass = edge.inferred || edge.coords.length === 0 ? ' inferred' : '';
             const inferredLabel = edge.inferred ? '<span class="internal-map-pill">odtworzone</span>' : '';
-            const indoorLabel = isIndoorTransitMapName(edge.to) ? '<span class="internal-map-pill">wnÄ™trze</span>' : '';
+            const indoorLabel = isIndoorTransitMapName(edge.to) ? '<span class="internal-map-pill">wnętrze</span>' : '';
             return `
                 <div class="internal-map-edge${inferredClass}">
                     <div style="display:flex; justify-content:space-between; gap:8px; align-items:flex-start;">
-                        <div style="font-weight:bold; color:#e8f5e9;">â†’ ${escapeHtml(edge.to)} ${inferredLabel}${indoorLabel}</div>
-                        <button class="btn-sepia" style="padding:2px 6px;" onclick="window.rushToMap('${String(edge.to).replace(/'/g, "\\'")}')">IdĹş</button>
+                        <div style="font-weight:bold; color:#e8f5e9;">→ ${escapeHtml(edge.to)} ${inferredLabel}${indoorLabel}</div>
+                        <button class="btn-sepia" style="padding:2px 6px;" onclick="window.rushToMap('${String(edge.to).replace(/'/g, "\\'")}')">Idź</button>
                     </div>
                     <div style="font-size:10px; color:#b0bec5; margin-top:4px;">Kordy: ${escapeHtml(coords)}</div>
-                    <div style="font-size:9px; color:#78909c; margin-top:2px;">ĹąrĂłdĹ‚o: ${escapeHtml(sources)}</div>
+                    <div style="font-size:9px; color:#78909c; margin-top:2px;">Źródło: ${escapeHtml(sources)}</div>
                 </div>
             `;
         }).join('');
 
         const incomingHtml = incomingOnly.length ? `
-            <div style="margin-top:10px; color:#ffcc80; font-weight:bold; font-size:11px;">WejĹ›cia do tej mapy bez zapisanego powrotu:</div>
+            <div style="margin-top:10px; color:#ffcc80; font-weight:bold; font-size:11px;">Wejścia do tej mapy bez zapisanego powrotu:</div>
             ${incomingOnly.map(edge => `
                 <div class="internal-map-edge inferred">
-                    <div style="font-weight:bold; color:#ffe0b2;">â† ${escapeHtml(edge.from)} <span class="internal-map-pill">brak wyjĹ›cia zwrotnego</span></div>
-                    <div style="font-size:10px; color:#b0bec5; margin-top:4px;">Po wejĹ›ciu bot zapisze powrĂłt automatycznie.</div>
+                    <div style="font-weight:bold; color:#ffe0b2;">← ${escapeHtml(edge.from)} <span class="internal-map-pill">brak wyjścia zwrotnego</span></div>
+                    <div style="font-size:10px; color:#b0bec5; margin-top:4px;">Po wejściu bot zapisze powrót automatycznie.</div>
                 </div>
             `).join('')}
         ` : '';
@@ -9510,12 +9592,12 @@ window.clearExpMaps = clearExpMaps;
             <div style="border-bottom:1px solid #263238; padding-bottom:8px; margin-bottom:8px;">
                 <div style="font-size:14px; color:#00e5ff; font-weight:bold;">${escapeHtml(selectedMap || 'Brak mapy')}</div>
                 <div style="font-size:10px; color:#90a4ae; margin-top:3px;">
-                    ${selectedNode?.indoor ? 'Mapa wewnÄ™trzna / jaskinia / domek' : 'Mapa zewnÄ™trzna lub zwykĹ‚a'}
-                    ${routeSet.has(normMapName(selectedMap)) ? ' | czÄ™Ĺ›Ä‡ trasy EXP' : ' | mapa pomocnicza / tranzyt'}
-                    ${isRouteDeadEndMap(selectedMap) ? ' | Ĺ›lepa mapa' : ''}
+                    ${selectedNode?.indoor ? 'Mapa wewnętrzna / jaskinia / domek' : 'Mapa zewnętrzna lub zwykła'}
+                    ${routeSet.has(normMapName(selectedMap)) ? ' | część trasy EXP' : ' | mapa pomocnicza / tranzyt'}
+                    ${isRouteDeadEndMap(selectedMap) ? ' | ślepa mapa' : ''}
                 </div>
             </div>
-            ${edgeHtml || '<div style="color:#ef9a9a; padding:8px; border:1px solid #4a1f1f; background:#160b0b;">Brak zapisanych wyjĹ›Ä‡ z tej mapy. WejdĹş/wyjdĹş przez przejĹ›cie raz, a bot zapisze je w pamiÄ™ci.</div>'}
+            ${edgeHtml || '<div style="color:#ef9a9a; padding:8px; border:1px solid #4a1f1f; background:#160b0b;">Brak zapisanych wyjść z tej mapy. Wejdź/wyjdź przez przejście raz, a bot zapisze je w pamięci.</div>'}
             ${incomingHtml}
         `;
     };
@@ -9526,18 +9608,18 @@ window.renderMapOrderList = () => {
 
         let hero = document.getElementById('selHero').value;
         if (!hero || !heroMapOrder[hero] || heroMapOrder[hero].length === 0) {
-            c.innerHTML = '<div style="padding:5px;text-align:center;color:#777;">Wybierz herosa, by zobaczyÄ‡ trasÄ™</div>';
+            c.innerHTML = '<div style="padding:5px;text-align:center;color:#777;">Wybierz herosa, by zobaczyć trasę</div>';
             return;
         }
 
         let currentMap = lastMapName;
-        // Obliczamy dystanse raz, dla caĹ‚ej mapy, co naprawi "brak dojĹ›cia"
+        // Obliczamy dystanse raz, dla całej mapy, co naprawi "brak dojścia"
         let distMap = typeof buildDistanceMapFromHero === 'function' ? buildDistanceMapFromHero() : new Map();
         let allGateways = typeof getCurrentMapGatewaysForRadar === 'function' ? getCurrentMapGatewaysForRadar(distMap) : [];
 
         c.innerHTML = heroMapOrder[hero].map((mapStep, index) => {
             // POPRAWKA (KREATOR TRASY / HEROSI):
-            // Zawsze renderujemy kaĹĽdy krok sekwencji, nawet jeĹ›li parser nie zna mapy.
+            // Zawsze renderujemy każdy krok sekwencji, nawet jeśli parser nie zna mapy.
             const rawLabel = (typeof mapStep === 'string')
                 ? mapStep
                 : (mapStep?.name || mapStep?.map || mapStep?.id || String(mapStep ?? ''));
@@ -9569,16 +9651,16 @@ window.renderMapOrderList = () => {
                             </label>
                             <button class="btn-sepia" style="flex-grow:1;"
                                 onclick="document.getElementById('gw_edit_x').value = Engine.hero.d.x; document.getElementById('gw_edit_y').value = Engine.hero.d.y;"
-                                title="Pobiera koordynaty z obecnej postaci">đź“Ť StÄ…d</button>
+                                title="Pobiera koordynaty z obecnej postaci">📍 Stąd</button>
                         </div>
                         <div style="display:flex; gap:4px; margin-top:4px;">
                             <button class="btn-sepia btn-go-sepia" style="flex-grow:1;" onclick="window.saveInlineGateway('${safeMapName}')">ZAPISZ</button>
-                            <button class="btn-sepia" style="background:#8e0000; width:30px;" onclick="window.cancelInlineGateway()">âś–</button>
+                            <button class="btn-sepia" style="background:#8e0000; width:30px;" onclick="window.cancelInlineGateway()">✖</button>
                         </div>
                     </div>
                 </div>`;
             } else {
-                // Sprawdzamy czy to wejĹ›cie jest aktualnie osiÄ…galne z miejsca gdzie stoisz
+                // Sprawdzamy czy to wejście jest aktualnie osiągalne z miejsca gdzie stoisz
                 const liveDoor = hasReadableName
                     ? allGateways.find(g => g.targetMap.toLowerCase() === mapName.toLowerCase() && g.reachable)
                     : null;
@@ -9587,14 +9669,14 @@ window.renderMapOrderList = () => {
                 const unknownLabel = hasReadableName ? mapName : `[krok-${index + 1}]`;
                 const mapDisplayText = isUnknown ? `Nieznana mapa: ${unknownLabel}` : mapName;
                 const baseBadge = !isUnknown
-                    ? `<span style="color:#81c784; font-size:9px; margin-left:4px; white-space:nowrap;" title="${liveDoor ? `OdlegĹ‚oĹ›Ä‡ do bramy: ${doorDistance}` : `Nie widzÄ™ bramy z obecnego punktu`} ">[BAZA${liveDoor ? ' âś”' : ''}]</span>`
+                    ? `<span style="color:#81c784; font-size:9px; margin-left:4px; white-space:nowrap;" title="${liveDoor ? `Odległość do bramy: ${doorDistance}` : `Nie widzę bramy z obecnego punktu`} ">[BAZA${liveDoor ? ' ✔' : ''}]</span>`
                     : `<span style="color:#ef9a9a; font-size:9px; margin-left:4px; white-space:nowrap;">[NIEZNANA]</span>`;
 
                 const mapColor = isUnknown ? "#ef5350" : (liveDoor ? "#4caf50" : "#aed581");
 
                 return `<div class="list-item">
                     <div class="map-name-wrap" title="${mapDisplayText}">
-                        <span class="btn-del-map" onclick="window.removeHeroMapFromOrder(${index})">âś–</span>
+                        <span class="btn-del-map" onclick="window.removeHeroMapFromOrder(${index})">✖</span>
                         <span class="map-name" style="color:${mapColor}; font-weight:bold;">
                             ${index + 1}. ${mapDisplayText}
                         </span>
@@ -9607,7 +9689,7 @@ window.renderMapOrderList = () => {
                                value="${index + 1}"
                                onchange="window.changeMapOrder(${index}, this.value)"
                                style="width:35px; text-align:center; font-size:10px; padding:2px; background:#111; color:#d4af37; border:1px solid #444; border-radius:4px;">
-                        <button class="icon-btn" onclick="window.openInlineEditor('${safeMapName}')" title="RÄ™czna edycja kordĂłw">đźšŞ</button>
+                        <button class="icon-btn" onclick="window.openInlineEditor('${safeMapName}')" title="Ręczna edycja kordów">🚪</button>
                     </div>
                 </div>`;
             }
@@ -9619,7 +9701,7 @@ window.renderMapOrderList = () => {
         if (!c) return;
 
         let currentMap = lastMapName;
-        // Obliczamy dystanse raz, ĹĽeby uniknÄ…Ä‡ laga
+        // Obliczamy dystanse raz, żeby uniknąć laga
         let distMap = typeof buildDistanceMapFromHero === 'function' ? buildDistanceMapFromHero() : new Map();
         let allGateways = typeof getCurrentMapGatewaysForRadar === 'function' ? getCurrentMapGatewaysForRadar(distMap) : [];
 
@@ -9648,37 +9730,37 @@ window.renderMapOrderList = () => {
                             </label>
                             <button class="btn-sepia" style="flex-grow:1;"
                                 onclick="document.getElementById('gw_edit_x').value = Engine.hero.d.x; document.getElementById('gw_edit_y').value = Engine.hero.d.y;"
-                                title="Pobiera koordynaty z obecnej postaci">đź“Ť StÄ…d</button>
+                                title="Pobiera koordynaty z obecnej postaci">📍 Stąd</button>
                         </div>
                         <div style="display:flex; gap:4px; margin-top:4px;">
                             <button class="btn-sepia btn-go-sepia" style="flex-grow:1;" onclick="window.saveInlineGateway('${safeMapName}')">ZAPISZ</button>
-                            <button class="btn-sepia" style="background:#8e0000; width:30px;" onclick="window.cancelInlineGateway()">âś–</button>
+                            <button class="btn-sepia" style="background:#8e0000; width:30px;" onclick="window.cancelInlineGateway()">✖</button>
                         </div>
                     </div>
                 </div>`;
             } else {
                 const inBase = isMapKnownInGatewayBase(mapName);
                 
-                // Sprawdzamy czy to wejĹ›cie jest aktualnie osiÄ…galne z miejsca gdzie stoisz
+                // Sprawdzamy czy to wejście jest aktualnie osiągalne z miejsca gdzie stoisz
                 const liveDoor = allGateways.find(g => g.targetMap.toLowerCase() === mapName.toLowerCase() && g.reachable);
                 const doorDistance = liveDoor ? liveDoor.pathDistance : "?";
                 
                 const baseBadge = inBase
-                    ? `<span style="color:#81c784; font-size:9px; margin-left:4px; white-space:nowrap;" title="${liveDoor ? `OdlegĹ‚oĹ›Ä‡ do bramy: ${doorDistance}` : `Nie widzÄ™ bramy z obecnego punktu`} ">[BAZA${liveDoor ? ' âś”' : ''}]</span>`
+                    ? `<span style="color:#81c784; font-size:9px; margin-left:4px; white-space:nowrap;" title="${liveDoor ? `Odległość do bramy: ${doorDistance}` : `Nie widzę bramy z obecnego punktu`} ">[BAZA${liveDoor ? ' ✔' : ''}]</span>`
                     : `<span style="color:#ef9a9a; font-size:9px; margin-left:4px; white-space:nowrap;">[BRAK]</span>`;
 
                 const mapColor = inBase ? (liveDoor ? "#4caf50" : "#aed581") : "#ef9a9a";
 
                 return `<div class="list-item">
                     <div class="map-name-wrap" title="${mapName}">
-                        <span class="btn-del-map" onclick="window.removeExpMap(${index})">âś–</span>
-                        <span class="map-name" style="color:${mapColor}; font-weight:bold; cursor:pointer;" onclick="window.openInternalMapGraph('${safeMapName}')" title="PokaĹĽ zapisane przejĹ›cia tej mapy">
+                        <span class="btn-del-map" onclick="window.removeExpMap(${index})">✖</span>
+                        <span class="map-name" style="color:${mapColor}; font-weight:bold; cursor:pointer;" onclick="window.openInternalMapGraph('${safeMapName}')" title="Pokaż zapisane przejścia tej mapy">
                             ${mapName}
                         </span>
                         ${baseBadge}
                     </div>
                     <div class="buttons-wrapper">
-                        <button class="icon-btn" onclick="window.openInlineEditor('${safeMapName}')" title="RÄ™czna edycja kordĂłw (opcjonalne)">đźšŞ</button>
+                        <button class="icon-btn" onclick="window.openInlineEditor('${safeMapName}')" title="Ręczna edycja kordów (opcjonalne)">🚪</button>
                     </div>
                 </div>`;
             }
@@ -9688,7 +9770,7 @@ window.toggleTeleportLock = function(city, isChecked) {
         if (!botSettings.unlockedTeleports) botSettings.unlockedTeleports = {};
         botSettings.unlockedTeleports[city] = isChecked;
 
-        // Zapisujemy przypisujÄ…c do nicku
+        // Zapisujemy przypisując do nicku
         if (typeof Engine !== 'undefined' && Engine.hero && Engine.hero.d && Engine.hero.d.nick) {
             let nick = Engine.hero.d.nick;
             let allTps = JSON.parse(localStorage.getItem('hero_teleports_by_nick_v64') || '{}');
@@ -9719,13 +9801,13 @@ window.toggleTeleportLock = function(city, isChecked) {
         if(!c) return;
 
         let playerLvl = (typeof Engine !== 'undefined' && Engine.hero && Engine.hero.d && Engine.hero.d.lvl) ? Engine.hero.d.lvl : 1;
-        // Rozszerzony zakres dla lepszej widocznoĹ›ci bazy (-10 do +25 lvl)
+        // Rozszerzony zakres dla lepszej widoczności bazy (-10 do +25 lvl)
         let minTarget = playerLvl - 10;
         let maxTarget = playerLvl + 25;
 
         let html = '';
 
-        // Zabezpieczenie: korzystamy bezpoĹ›rednio z odĹ›wieĹĽonych botSettings
+        // Zabezpieczenie: korzystamy bezpośrednio z odświeżonych botSettings
         let safeProfiles = (botSettings && botSettings.expProfiles) ? botSettings.expProfiles : window.defaultExpProfiles;
 
         safeProfiles.forEach((p, index) => {
@@ -9733,7 +9815,7 @@ window.toggleTeleportLock = function(city, isChecked) {
             if(lvlMatch && lvlMatch[1]) {
                 let baseLvl = parseInt(lvlMatch[1]);
                 if(baseLvl >= minTarget && baseLvl <= maxTarget) {
-                    // Dodano wyĹ›wietlanie p.desc (Opis zawierajÄ…cy iloĹ›Ä‡ potworĂłw)
+                    // Dodano wyświetlanie p.desc (Opis zawierający ilość potworów)
                     html += `
                         <label style="display:flex; align-items:flex-start; gap:5px; background:#1a1a1a; padding:5px; border:1px solid #333; cursor:pointer; color:#d4af37; font-size:11px; margin-bottom: 2px;">
                             <input type="checkbox" class="chk-rec-profile" data-index="${index}" style="margin-top:2px;">
@@ -9749,7 +9831,7 @@ window.toggleTeleportLock = function(city, isChecked) {
         });
 
         if(html === '') {
-            c.innerHTML = '<div style="text-align:center; color:#777; padding:10px; font-size:10px;">Brak gotowych expowisk w bazie dla Twojego przedziaĹ‚u poziomowego.</div>';
+            c.innerHTML = '<div style="text-align:center; color:#777; padding:10px; font-size:10px;">Brak gotowych expowisk w bazie dla Twojego przedziału poziomowego.</div>';
         } else {
             c.innerHTML = html;
         }
@@ -9765,7 +9847,7 @@ window.toggleTeleportLock = function(city, isChecked) {
             }
         });
     }
-// --- SYSTEM RYSOWANIA TELEPORTĂ“W ---
+// --- SYSTEM RYSOWANIA TELEPORTÓW ---
     window.renderTeleportList = function() {
         let container = document.getElementById('heroTeleportsGUI');
         if (!container) return;
@@ -9773,8 +9855,8 @@ window.toggleTeleportLock = function(city, isChecked) {
         let tpList = typeof getKnownTeleportMaps === 'function' ? getKnownTeleportMaps().sort() : (typeof ZAKONNICY !== 'undefined' ? Object.keys(ZAKONNICY).sort() : [
             "Ithan", "Torneg", "Karka-han", "Werbin", "Eder", "Mythar", "Tuzmer",
             "Port Tuzmer", "Wioska Pszczelarzy", "Nithal", "Podgrodzie Nithal",
-            "Thuzal", "Gildia KupcĂłw - czÄ™Ĺ›Ä‡ zachodnia", "Brama PĂłĹ‚nocy",
-            "Zniszczone Opactwo", "Kwieciste PrzejĹ›cie", "WzgĂłrze PĹ‚aczek", "Nizinne Sady"
+            "Thuzal", "Gildia Kupców - część zachodnia", "Brama Północy",
+            "Zniszczone Opactwo", "Kwieciste Przejście", "Wzgórze Płaczek", "Nizinne Sady"
         ]);
 
         let myNick = (typeof Engine !== 'undefined' && Engine.hero && Engine.hero.d && Engine.hero.d.nick) ? Engine.hero.d.nick : "Nieznany";
@@ -9794,7 +9876,7 @@ window.toggleTeleportLock = function(city, isChecked) {
         container.innerHTML = html;
     };
 
-    // ObsĹ‚uga klikania teleportĂłw w pamiÄ™ci tymczasowej
+    // Obsługa klikania teleportów w pamięci tymczasowej
     document.addEventListener('change', (e) => {
         if (e.target && e.target.classList.contains('chk-teleport')) {
             let mapName = e.target.getAttribute('data-map');
@@ -9806,7 +9888,7 @@ window.toggleTeleportLock = function(city, isChecked) {
         }
     });
 
-    // --- GĹĂ“WNY SYSTEM NASĹUCHIWANIA PRZYCISKĂ“W ---
+    // --- GŁÓWNY SYSTEM NASŁUCHIWANIA PRZYCISKÓW ---
     document.addEventListener('click', (e) => {
         let tpGui = document.getElementById('heroTeleportsGUI');
         let eqList = document.getElementById('recommendedEqList');
@@ -9816,7 +9898,7 @@ window.toggleTeleportLock = function(city, isChecked) {
 
         let hideAllTabs = () => { if(tpGui) tpGui.style.display='none'; if(eqList) eqList.style.display='none'; if(potList) potList.style.display='none'; if(shopsWrap) shopsWrap.style.display='none'; };
 
-        // 0. ZAPISYWANIE TELEPORTĂ“W DLA NICKU
+        // 0. ZAPISYWANIE TELEPORTÓW DLA NICKU
         if (e.target && e.target.id === 'btnSaveTeleportsManual') {
             if (typeof Engine !== 'undefined' && Engine.hero && Engine.hero.d && Engine.hero.d.nick) {
                 let nick = Engine.hero.d.nick;
@@ -9824,17 +9906,17 @@ window.toggleTeleportLock = function(city, isChecked) {
                 allTps[nick] = botSettings.unlockedTeleports;
                 localStorage.setItem('hero_teleports_by_nick_v64', JSON.stringify(allTps));
                 saveSettings();
-                if (window.logHero) window.logHero(`âś… Zapisano ustawienia teleportĂłw dla: ${nick}!`, "#4caf50");
-                e.target.innerText = "âś… ZAPISANO!";
+                if (window.logHero) window.logHero(`✅ Zapisano ustawienia teleportów dla: ${nick}!`, "#4caf50");
+                e.target.innerText = "✅ ZAPISANO!";
                 setTimeout(() => { if(e.target) e.target.innerText = "đź’ľ ZAPISZ TELEPORTY"; }, 1500);
             } else {
-                heroAlert("BĹ‚Ä…d: Silnik gry jeszcze nie wczytaĹ‚ nazwy Twojej postaci.");
+                heroAlert("Błąd: Silnik gry jeszcze nie wczytał nazwy Twojej postaci.");
             }
         }
 
-        // 1. ZARZÄ„DZAJ TELEPORTAMI
+        // 1. ZARZĄDZAJ TELEPORTAMI
         if (e.target && e.target.closest('#btnOpenTeleports')) { hideAllTabs(); if (tpGui) { tpGui.style.display = 'flex'; if (typeof renderTeleportList === 'function') renderTeleportList(); } }
-        // --- NAPRAWA PRZYCISKĂ“W BAZY EXP ---
+        // --- NAPRAWA PRZYCISKÓW BAZY EXP ---
         if (e.target && e.target.closest('#btnOpenExpBase')) {
             let p = document.getElementById('heroExpBaseGUI');
             if (p) {
@@ -9850,12 +9932,12 @@ window.toggleTeleportLock = function(city, isChecked) {
             }
         }
         // -----------------------------------
-// WYMUSZENIE RÄCZNEJ SPRZEDAĹ»Y ORAZ ANULOWANIE
+// WYMUSZENIE RĘCZNEJ SPRZEDAŻY ORAZ ANULOWANIE
         if (e.target && e.target.closest('#btnForceSell')) {
             if (!window.autoSellState) window.autoSellState = { active: false };
 
             if (window.autoSellState.active) {
-             // --- ANULOWANIE SPRZEDAĹ»Y ---
+             // --- ANULOWANIE SPRZEDAŻY ---
                 window.autoSellState.active = false;
                 window.autoSellState.ignoreUntil = Date.now() + 180000;
                 sessionStorage.setItem('hero_autosell_ignore', window.autoSellState.ignoreUntil); // Twardy zapis blokady
@@ -9864,26 +9946,26 @@ window.toggleTeleportLock = function(city, isChecked) {
                 if (window.rushInterval) clearTimeout(window.rushInterval);
                 if (typeof stopPatrol === 'function') stopPatrol(true); // Twardy stop bota i postaci
 
-                // JeĹ›li bot sam wyĹ‚Ä…czyĹ‚ Ci Berserka na czas powrotu - przywracamy go!
+                // Jeśli bot sam wyłączył Ci Berserka na czas powrotu - przywracamy go!
                 if (window.autoSellState.wasBerserkOn) {
                     botSettings.berserk.enabled = true;
                     let chkBerserk = document.getElementById('berserkEnabled');
                     if (chkBerserk) chkBerserk.checked = true;
                     if (typeof window.updateServerBerserk === 'function') window.updateServerBerserk();
-                    if (window.logExp) window.logExp("đź›ˇď¸Ź PrzywrĂłcono Berserka.", "#ff9800");
+                    if (window.logExp) window.logExp("🛡️ Przywrócono Berserka.", "#ff9800");
                 }
 
-                if (window.logHero) window.logHero("đź›‘ Przerwano pĂłjĹ›cie do sklepu!", "#f44336");
-                if (window.logExp) window.logExp("đź›‘ Przerwano pĂłjĹ›cie do sklepu!", "#f44336");
+                if (window.logHero) window.logHero("🛑 Przerwano pójście do sklepu!", "#f44336");
+                if (window.logExp) window.logExp("🛑 Przerwano pójście do sklepu!", "#f44336");
                 return;
             }
 
-            if (typeof stopPatrol === 'function') stopPatrol(true); // Zatrzymuje szukanie herosĂłw i ruch expa
+            if (typeof stopPatrol === 'function') stopPatrol(true); // Zatrzymuje szukanie herosów i ruch expa
 
-      if (window.logHero) window.logHero("đźŹ RÄ™cznie wymuszono oprĂłĹĽnienie plecaka! ZatrzymujÄ™ akcje i wyruszam...", "#ff5252");
-            if (window.logExp) window.logExp("đźŹ RÄ™cznie wymuszono oprĂłĹĽnienie plecaka! ZatrzymujÄ™ akcje i wyruszam...", "#ff5252");
+      if (window.logHero) window.logHero("🏃 Ręcznie wymuszono opróżnienie plecaka! Zatrzymuję akcje i wyruszam...", "#ff5252");
+            if (window.logExp) window.logExp("🏃 Ręcznie wymuszono opróżnienie plecaka! Zatrzymuję akcje i wyruszam...", "#ff5252");
 
-            sessionStorage.removeItem('hero_autosell_ignore'); // ĹšciÄ…gniÄ™cie blokady przy rÄ™cznym wywoĹ‚aniu
+            sessionStorage.removeItem('hero_autosell_ignore'); // Ściągnięcie blokady przy ręcznym wywołaniu
             window.autoSellState.ignoreUntil = 0;
             window.autoSellState.active = true;
             window.autoSellState.step = 1;
@@ -9899,15 +9981,15 @@ window.toggleTeleportLock = function(city, isChecked) {
                 let chkBerserk = document.getElementById('berserkEnabled');
                 if (chkBerserk) chkBerserk.checked = false;
                 if (typeof window.updateServerBerserk === 'function') window.updateServerBerserk();
-                if (window.logExp) window.logExp("đź›ˇď¸Ź WyĹ‚Ä…czam Berserka na czas powrotu do sklepu.", "#ff9800");
+                if (window.logExp) window.logExp("🛡️ Wyłączam Berserka na czas powrotu do sklepu.", "#ff9800");
             }
         }
-           // 2. POKAĹ» POLECANE EQ (Z filtrowaniem, PorĂłwnywaniem i PodwĂłjnym Tooltipem)
+           // 2. POKAŻ POLECANE EQ (Z filtrowaniem, Porównywaniem i Podwójnym Tooltipem)
         if (e.target && e.target.closest('#btnShowRecommendedEq')) {
             hideAllTabs(); if (eqList) eqList.style.display = 'flex';
-            if (!window.DatabaseModule || window.DatabaseModule.ekwipunek.length === 0) { eqList.innerHTML = `<span style="color:#e53935; font-size:10px; text-align:center;">Baza danych Ĺ‚aduje siÄ™...</span>`; return; }
+            if (!window.DatabaseModule || window.DatabaseModule.ekwipunek.length === 0) { eqList.innerHTML = `<span style="color:#e53935; font-size:10px; text-align:center;">Baza danych ładuje się...</span>`; return; }
 
-            // --- INICJALIZACJA PODWĂ“JNEGO TOOLTIPA ---
+            // --- INICJALIZACJA PODWÓJNEGO TOOLTIPA ---
             if (!document.getElementById('radarDualTooltip')) {
                 let tt = document.createElement('div');
                 tt.id = 'radarDualTooltip';
@@ -9943,7 +10025,7 @@ window.toggleTeleportLock = function(city, isChecked) {
                 };
             }
 
-            // --- MODUĹ MATEMATYCZNY I FULL-FORMATTER ---
+            // --- MODUŁ MATEMATYCZNY I FULL-FORMATTER ---
             if (!window.EquipmentScorer) {
                 window.EquipmentScorer = {
                     WEIGHTS_WEAPON_EXP: { dmg: 5.0, fire: 4.5, frost: 4.5, light: 4.5, poison: 4.5, sa: 3.0, pierce: 2.2, crit: 1.8, evade: 1.2, hp: 0.5, ac: 0.3 },
@@ -9955,14 +10037,14 @@ window.toggleTeleportLock = function(city, isChecked) {
                         const out = {};
                         let rawStat = itemData.stat || itemData.rawStat || itemData.stats;
 
-                        // 1. ODCZYT RAW (ZaĹ‚oĹĽone EQ lub NI Sklep) - Naprawa bĹ‚Ä™du sa=19 zamiast 0.19!
+                        // 1. ODCZYT RAW (Założone EQ lub NI Sklep) - Naprawa błędu sa=19 zamiast 0.19!
                         if (rawStat && typeof rawStat === "string" && rawStat.includes("=")) {
                             rawStat.split(";").forEach(part => {
                                 const [k, v] = part.split("=");
                                 if (k) {
                                     let key = k.trim();
                                     let val = v ?? true;
-                                    // Margonem zapisuje szybkoĹ›Ä‡ ataku i spowolnienie bez przecinka w statach!
+                                    // Margonem zapisuje szybkość ataku i spowolnienie bez przecinka w statach!
                                     if (key === 'sa' || key === 'slow') {
                                         if (val) val = (Number(val) / 100).toString();
                                     }
@@ -9976,45 +10058,45 @@ window.toggleTeleportLock = function(city, isChecked) {
                         let htmlStr = itemData.stats || itemData.tooltip_text || itemData.name || "";
                         let str = htmlStr.replace(/<[^>]*>?/gm, ' ').toLowerCase();
 
-                        // Unikalne tokeny (zabezpieczajÄ… przed nakĹ‚adaniem siÄ™ sĹ‚Ăłw)
-                        str = str.replace(/obniĹĽa szybkoĹ›Ä‡ ataku przeciwnika o/g, "slow_val");
-                        str = str.replace(/szybkoĹ›Ä‡ ataku/g, "sa_val");
+                        // Unikalne tokeny (zabezpieczają przed nakładaniem się słów)
+                        str = str.replace(/obniża szybkość ataku przeciwnika o/g, "slow_val");
+                        str = str.replace(/szybkość ataku/g, "sa_val");
                         str = str.replace(/moc ciosu krytycznego(?: magicznego)?/g, "critm_val");
                         str = str.replace(/cios krytyczny/g, "crit_val");
-                        str = str.replace(/obraĹĽenia fizyczne/g, "pdmg_val");
-                        str = str.replace(/obraĹĽenia dystansowe/g, "acdmg_val");
-                        str = str.replace(/obraĹĽenia magiczne/g, "mdmg_val");
-                        str = str.replace(/obraĹĽenia/g, "dmg_val");
+                        str = str.replace(/obrażenia fizyczne/g, "pdmg_val");
+                        str = str.replace(/obrażenia dystansowe/g, "acdmg_val");
+                        str = str.replace(/obrażenia magiczne/g, "mdmg_val");
+                        str = str.replace(/obrażenia/g, "dmg_val");
                         str = str.replace(/atak/g, "dmg_val");
                         str = str.replace(/przebicie pancerza/g, "pierce_val");
                         str = str.replace(/niszczenie pancerza/g, "dz_val");
                         str = str.replace(/wszystkie cechy/g, "all_val");
-                        str = str.replace(/siĹ‚a/g, "str_val");
-                        str = str.replace(/zrÄ™cznoĹ›Ä‡/g, "agi_val");
+                        str = str.replace(/siła/g, "str_val");
+                        str = str.replace(/zręczność/g, "agi_val");
                         str = str.replace(/intelekt/g, "int_val");
-                        str = str.replace(/odpornoĹ›Ä‡ na ogieĹ„/g, "resfire_val");
-                        str = str.replace(/odpornoĹ›Ä‡ na zimno/g, "resfrost_val");
-                        str = str.replace(/odpornoĹ›Ä‡ na bĹ‚yskawice/g, "reslight_val");
-                        str = str.replace(/odpornoĹ›Ä‡ na truciznÄ™/g, "respoison_val");
+                        str = str.replace(/odporność na ogień/g, "resfire_val");
+                        str = str.replace(/odporność na zimno/g, "resfrost_val");
+                        str = str.replace(/odporność na błyskawice/g, "reslight_val");
+                        str = str.replace(/odporność na truciznę/g, "respoison_val");
                         str = str.replace(/od ognia/g, "fire_val");
                         str = str.replace(/od zimna/g, "frost_val");
-                        str = str.replace(/od bĹ‚yskawic/g, "light_val");
+                        str = str.replace(/od błyskawic/g, "light_val");
                         str = str.replace(/od trucizny/g, "poison_val");
                         str = str.replace(/pancerz/g, "ac_val");
-                        str = str.replace(/punktĂłw ĹĽycia/g, "hp_val");
-                        str = str.replace(/ĹĽycie/g, "hp_val");
-                        str = str.replace(/punktĂłw many/g, "mana_val");
+                        str = str.replace(/punktów życia/g, "hp_val");
+                        str = str.replace(/życie/g, "hp_val");
+                        str = str.replace(/punktów many/g, "mana_val");
                         str = str.replace(/mana/g, "mana_val");
                         str = str.replace(/aktywny unik/g, "act_val");
                         str = str.replace(/unik/g, "evade_val");
-                        str = str.replace(/podwĂłjny atak/g, "da_val");
+                        str = str.replace(/podwójny atak/g, "da_val");
                         str = str.replace(/leczenie turowe/g, "heal_val");
-                        str = str.replace(/leczenie zbrojÄ…/g, "heal_val");
+                        str = str.replace(/leczenie zbroją/g, "heal_val");
                         str = str.replace(/przywraca/g, "heal_val");
                         str = str.replace(/blok/g, "block_val");
                         str = str.replace(/absorbuje/g, "absorb_val");
 
-                        // Bezpieczne Regexy wyĹ‚apujÄ…ce liczby z minusem lub bez
+                        // Bezpieczne Regexy wyłapujące liczby z minusem lub bez
                         let extract = (name) => { let regex = new RegExp(name + "[^0-9\\-]*(-?[0-9]+(?:[.,][0-9]+)?)"); let m = str.match(regex); return m ? m[1].replace(',', '.') : null; };
                         let extractRange = (name) => { let regex = new RegExp(name + "[^0-9\\-]*(-?[0-9]+(?:[.,][0-9]+)?)(?:\\s*-\\s*(-?[0-9]+(?:[.,][0-9]+)?))?"); let m = str.match(regex); if (!m) return null; if (m[2]) return `${m[1].replace(',','.')},${m[2].replace(',','.')}`; return m[1].replace(',','.'); };
 
@@ -10085,16 +10167,16 @@ window.toggleTeleportLock = function(city, isChecked) {
                         if (parsed.cl) return Number(parsed.cl);
 
                         let type = displayType.toLowerCase();
-                        if (type.includes("bro") || type.includes("dystans") || type.includes("Ĺ‚uk")) return 4;
+                        if (type.includes("bro") || type.includes("dystans") || type.includes("łuk")) return 4;
                         if (type.includes("zbro") || type.includes("kaftan") || type.includes("szat")) return 8;
-                        if (type.includes("heĹ‚m") || type.includes("czapk") || type.includes("kaptur")) return 9;
+                        if (type.includes("hełm") || type.includes("czapk") || type.includes("kaptur")) return 9;
                         if (type.includes("but")) return 10;
-                        if (type.includes("rÄ™kaw") || type.includes("bransol")) return 11;
-                        if (type.includes("pierĹ›")) return 12;
+                        if (type.includes("rękaw") || type.includes("bransol")) return 11;
+                        if (type.includes("pierś")) return 12;
                         if (type.includes("naszyj") || type.includes("ozdob")) return 13;
                         if (type.includes("tarcz")) return 15;
                         if (type.includes("talizman")) return 22;
-                        if (type.includes("amunicja") || type.includes("strzaĹ‚")) return 29;
+                        if (type.includes("amunicja") || type.includes("strzał")) return 29;
                         return 0;
                     },
 
@@ -10123,47 +10205,47 @@ window.toggleTeleportLock = function(city, isChecked) {
                     },
 
                     formatItemHTML: function(itemObj, displayType, isDb) {
-                        if (!itemObj && !isDb) return `<div style="text-align:center; padding:10px;"><span style="color:#00e5ff; font-weight:bold; font-size:12px;">[PUSTY SLOT]</span><br><br><span style="color:#aaa;">Brak zaĹ‚oĹĽonego przedmiotu<br>w tym miejscu.</span></div>`;
+                        if (!itemObj && !isDb) return `<div style="text-align:center; padding:10px;"><span style="color:#00e5ff; font-weight:bold; font-size:12px;">[PUSTY SLOT]</span><br><br><span style="color:#aaa;">Brak założonego przedmiotu<br>w tym miejscu.</span></div>`;
 
                         let stats = this.parseStats(isDb ? itemObj : { stat: itemObj.stat || itemObj._cachedStats?.stat });
                         let name = isDb ? itemObj.name : (itemObj._cachedStats?.name || itemObj.name || "Nieznany");
 
                         let lvl = isDb ? itemObj.level : "";
-                        let prof = isDb ? (itemObj.prof && itemObj.prof.length > 0 ? itemObj.prof.join(', ') : "ZwykĹ‚y") : "";
+                        let prof = isDb ? (itemObj.prof && itemObj.prof.length > 0 ? itemObj.prof.join(', ') : "Zwykły") : "";
 
                         if (!isDb && itemObj) {
                             let sStr = itemObj.stat || itemObj._cachedStats?.stat || "";
                             let mLvl = sStr.match(/lvl=(\d+)/); if (mLvl) lvl = mLvl[1];
                             let mReqp = sStr.match(/reqp=([a-z]+)/);
                             if (mReqp) {
-                                let pMap = {"w":"Wojownik", "m":"Mag", "t":"Tropiciel", "p":"Paladyn", "h":"Ĺowca", "b":"Tancerz ostrzy"};
+                                let pMap = {"w":"Wojownik", "m":"Mag", "t":"Tropiciel", "p":"Paladyn", "h":"Łowca", "b":"Tancerz ostrzy"};
                                 prof = mReqp[1].split('').map(x => pMap[x] || x).join(', ');
-                            } else { prof = "ZwykĹ‚y"; }
+                            } else { prof = "Zwykły"; }
                         }
 
                         let titleColor = isDb ? "#ffb300" : "#4caf50";
-                        let titleText = isDb ? "[Ze Sklepu / Bazy]" : "[Obecnie ZaĹ‚oĹĽony]";
+                        let titleText = isDb ? "[Ze Sklepu / Bazy]" : "[Obecnie Założony]";
 
                         let html = `<div style="text-align:center; border-bottom:1px solid #333; padding-bottom:4px; margin-bottom:6px;"><b style="color:${titleColor}; font-size:12px;">${titleText}</b><br><b style="color:#d4af37; font-size:12px;">${name}</b><br><span style="color:#aaa; font-size:9px;">Typ: ${displayType}</span></div>`;
 
                         // Lista WSZYSTKICH statystyk (Pancerze, Cechy, Resy, Kryty itd.)
                         const statOrder = [
-                            {k:'dmg', l:'ObraĹĽenia', c:'#fff'}, {k:'pdmg', l:'ObraĹĽenia fizyczne', c:'#fff'}, {k:'acdmg', l:'ObraĹĽenia dystansowe', c:'#fff'}, {k:'mdmg', l:'ObraĹĽenia magiczne', c:'#fff'},
+                            {k:'dmg', l:'Obrażenia', c:'#fff'}, {k:'pdmg', l:'Obrażenia fizyczne', c:'#fff'}, {k:'acdmg', l:'Obrażenia dystansowe', c:'#fff'}, {k:'mdmg', l:'Obrażenia magiczne', c:'#fff'},
                             {k:'ac', l:'Pancerz', c:'#fff', p:true}, {k:'block', l:'Blok', c:'#fff', p:true},
-                            {k:'all', l:'Wszystkie cechy', c:'#fff', p:true}, {k:'str', l:'SiĹ‚a', c:'#fff', p:true}, {k:'agi', l:'ZrÄ™cznoĹ›Ä‡', c:'#fff', p:true}, {k:'int', l:'Intelekt', c:'#fff', p:true},
-                            {k:'hp', l:'Ĺ»ycie', c:'#4caf50', p:true}, {k:'mana', l:'Mana', c:'#2196f3', p:true},
-                            {k:'fire', l:'Od ognia', c:'#ff9800'}, {k:'frost', l:'Od zimna', c:'#00e5ff'}, {k:'light', l:'Od bĹ‚yskawic', c:'#e040fb'}, {k:'poison', l:'Od trucizny', c:'#64dd17'},
-                            {k:'resfire', l:'OdpornoĹ›Ä‡ na ogieĹ„', c:'#ff9800', p:true, pct:true}, {k:'resfrost', l:'OdpornoĹ›Ä‡ na zimno', c:'#00e5ff', p:true, pct:true}, {k:'reslight', l:'OdpornoĹ›Ä‡ na bĹ‚yskawice', c:'#e040fb', p:true, pct:true}, {k:'respoison', l:'OdpornoĹ›Ä‡ na truciznÄ™', c:'#64dd17', p:true, pct:true},
-                            {k:'sa', l:'SzybkoĹ›Ä‡ ataku', c:'#fff', p:true}, {k:'crit', l:'Cios krytyczny', c:'#fff', p:true, pct:true}, {k:'critm', l:'Moc ciosu krytycznego', c:'#fff', p:true, pct:true},
-                            {k:'evade', l:'Unik', c:'#fff', p:true}, {k:'act', l:'Aktywny unik', c:'#fff', p:true}, {k:'da', l:'PodwĂłjny atak', c:'#fff', p:true},
-                            {k:'pierce', l:'Przebicie pancerza', c:'#fff', p:true}, {k:'dz', l:'Niszczenie pancerza', c:'#fff', p:true}, {k:'slow', l:'ObniĹĽa SA przeciwnika', c:'#fff'},
+                            {k:'all', l:'Wszystkie cechy', c:'#fff', p:true}, {k:'str', l:'Siła', c:'#fff', p:true}, {k:'agi', l:'Zręczność', c:'#fff', p:true}, {k:'int', l:'Intelekt', c:'#fff', p:true},
+                            {k:'hp', l:'Życie', c:'#4caf50', p:true}, {k:'mana', l:'Mana', c:'#2196f3', p:true},
+                            {k:'fire', l:'Od ognia', c:'#ff9800'}, {k:'frost', l:'Od zimna', c:'#00e5ff'}, {k:'light', l:'Od błyskawic', c:'#e040fb'}, {k:'poison', l:'Od trucizny', c:'#64dd17'},
+                            {k:'resfire', l:'Odporność na ogień', c:'#ff9800', p:true, pct:true}, {k:'resfrost', l:'Odporność na zimno', c:'#00e5ff', p:true, pct:true}, {k:'reslight', l:'Odporność na błyskawice', c:'#e040fb', p:true, pct:true}, {k:'respoison', l:'Odporność na truciznę', c:'#64dd17', p:true, pct:true},
+                            {k:'sa', l:'Szybkość ataku', c:'#fff', p:true}, {k:'crit', l:'Cios krytyczny', c:'#fff', p:true, pct:true}, {k:'critm', l:'Moc ciosu krytycznego', c:'#fff', p:true, pct:true},
+                            {k:'evade', l:'Unik', c:'#fff', p:true}, {k:'act', l:'Aktywny unik', c:'#fff', p:true}, {k:'da', l:'Podwójny atak', c:'#fff', p:true},
+                            {k:'pierce', l:'Przebicie pancerza', c:'#fff', p:true}, {k:'dz', l:'Niszczenie pancerza', c:'#fff', p:true}, {k:'slow', l:'Obniża SA przeciwnika', c:'#fff'},
                             {k:'absorb', l:'Absorbuje fizyczne', c:'#fff'}, {k:'absorbm', l:'Absorbuje magiczne', c:'#fff'}, {k:'heal', l:'Leczenie turowe', c:'#4caf50', p:true}
                         ];
 
                         statOrder.forEach(st => {
                             let val = stats[st.k];
                             if (val) {
-                                // Dodajemy plusa (+) tylko jeĹ›li p:true i liczba jest na plusie (dla ujemnego SA nie damy +)
+                                // Dodajemy plusa (+) tylko jeśli p:true i liczba jest na plusie (dla ujemnego SA nie damy +)
                                 let pre = (st.p && Number(val) > 0) ? '+' : '';
                                 let post = st.pct ? '%' : '';
                                 html += `<span style="color:${st.c}">${st.l}: <b>${pre}${String(val).replace(',', ' - ')}${post}</b></span><br>`;
@@ -10186,13 +10268,13 @@ window.toggleTeleportLock = function(city, isChecked) {
                         <span style="color:#a99a75; font-size:10px; font-weight:bold;">Filtruj typ:</span>
                         <select id="eqTypeFilter" style="background:#000; color:#d4af37; border:1px solid #333; font-size:10px; padding:2px; font-weight:bold; cursor:pointer;">
                             <option value="Wszystkie">Wszystkie (-5 do aktualnego)</option>
-                            <option value="bro">BroĹ„ (BiaĹ‚a/ZĹ‚oto)</option>
-                            <option value="dystansowe">Dystansowe / Ĺuki</option>
+                            <option value="bro">Broń (Biała/Złoto)</option>
+                            <option value="dystansowe">Dystansowe / Łuki</option>
                             <option value="zbroj">Zbroje</option>
-                            <option value="heĹ‚m">HeĹ‚my</option>
+                            <option value="hełm">Hełmy</option>
                             <option value="but">Buty</option>
-                            <option value="rÄ™kaw">RÄ™kawice</option>
-                            <option value="pierĹ›">PierĹ›cienie</option>
+                            <option value="rękaw">Rękawice</option>
+                            <option value="pierś">Pierścienie</option>
                             <option value="naszyj">Naszyjniki</option>
                             <option value="tarcz">Tarcze</option>
                             <option value="pomocnicze">Pomocnicze</option>
@@ -10208,14 +10290,14 @@ window.renderEqItems = function(filterType = 'Wszystkie') {
                 if (!container) return;
 
                 if (typeof window.DatabaseModule === 'undefined' || !window.DatabaseModule.ekwipunek || !Array.isArray(window.DatabaseModule.ekwipunek)) {
-                    container.innerHTML = '<div style="padding:10px; text-align:center; color:#ff5252;">Baza danych ekwipunku Ĺ‚aduje siÄ™... Odczekaj chwilÄ™.</div>';
+                    container.innerHTML = '<div style="padding:10px; text-align:center; color:#ff5252;">Baza danych ekwipunku ładuje się... Odczekaj chwilę.</div>';
                     return;
                 }
 
                 let currentLvl = (typeof Engine !== 'undefined' && Engine.hero && Engine.hero.d && Engine.hero.d.lvl) ? parseInt(Engine.hero.d.lvl) : 1;
                 let currentProf = (typeof Engine !== 'undefined' && Engine.hero && Engine.hero.d && Engine.hero.d.prof) ? Engine.hero.d.prof : 'w';
 
-                let profMap = { 'w': 'wojownik', 'm': 'mag', 'p': 'paladyn', 'h': 'Ĺ‚owca', 't': 'tropiciel', 'b': 'tancerz ostrzy' };
+                let profMap = { 'w': 'wojownik', 'm': 'mag', 'p': 'paladyn', 'h': 'łowca', 't': 'tropiciel', 'b': 'tancerz ostrzy' };
                 let profName = profMap[currentProf] || 'wszystkie';
                 let safeFilterType = String(filterType || 'Wszystkie').toLowerCase();
 
@@ -10228,7 +10310,7 @@ window.renderEqItems = function(filterType = 'Wszystkie') {
                     let profMatch = true;
                     if (item.prof && Array.isArray(item.prof) && item.prof.length > 0) {
                         let profArray = item.prof.map(p => String(p).toLowerCase());
-                        profMatch = profArray.some(p => p.includes(profName) || p.includes('wszystkie') || p.includes('kaĹĽda'));
+                        profMatch = profArray.some(p => p.includes(profName) || p.includes('wszystkie') || p.includes('każda'));
                     }
 
                     let itemTypeLower = String(item.type).toLowerCase();
@@ -10237,9 +10319,9 @@ window.renderEqItems = function(filterType = 'Wszystkie') {
                     if (safeFilterType === 'wszystkie') {
                         typeMatch = true;
                     } else if (safeFilterType === 'bro') {
-                        typeMatch = itemTypeLower.includes('rÄ™czne') && !itemTypeLower.includes('dystansowe');
+                        typeMatch = itemTypeLower.includes('ręczne') && !itemTypeLower.includes('dystansowe');
                     } else if (safeFilterType === 'dystansowe') {
-                        typeMatch = itemTypeLower.includes('dystans') || itemTypeLower.includes('Ĺ‚uk');
+                        typeMatch = itemTypeLower.includes('dystans') || itemTypeLower.includes('łuk');
                     } else {
                         typeMatch = itemTypeLower.includes(safeFilterType);
                     }
@@ -10276,11 +10358,11 @@ window.renderEqItems = function(filterType = 'Wszystkie') {
                     `;
                 });
 
-                container.innerHTML = html || '<div style="padding:10px; color:#aaa; text-align:center;">Brak przedmiotĂłw w tym przedziale poziomowym.</div>';
+                container.innerHTML = html || '<div style="padding:10px; color:#aaa; text-align:center;">Brak przedmiotów w tym przedziale poziomowym.</div>';
             } catch (e) {
-                HERO_LOG.error("BĹ‚Ä…d rysowania Ekwipunku (Radar).", e);
+                HERO_LOG.error("Błąd rysowania Ekwipunku (Radar).", e);
                 let container = document.getElementById('eqListContent');
-                if (container) container.innerHTML = '<div style="padding:10px; color:#ff5252; text-align:center;">WystÄ…piĹ‚ bĹ‚Ä…d Ĺ‚adowania przedmiotĂłw. Zerknij do konsoli (F12).</div>';
+                if (container) container.innerHTML = '<div style="padding:10px; color:#ff5252; text-align:center;">Wystąpił błąd ładowania przedmiotów. Zerknij do konsoli (F12).</div>';
             }
         };
 
@@ -10295,7 +10377,7 @@ window.renderEqItems = function(filterType = 'Wszystkie') {
             let hItems = typeof Engine.heroEquipment.getHItems === 'function' ? Engine.heroEquipment.getHItems() : {};
             let itemsArr = Object.values(hItems).filter(i => i);
 
-            // 1. RÄ™czne zliczanie pojemnoĹ›ci (Baza 42 kratek + zaĹ‚oĹĽone torby cl=24)
+            // 1. Ręczne zliczanie pojemności (Baza 42 kratek + założone torby cl=24)
             let total = 42;
             itemsArr.forEach(i => {
                 if (Number(i.st) > 0 && Number(i.cl) === 24) {
@@ -10305,7 +10387,7 @@ window.renderEqItems = function(filterType = 'Wszystkie') {
                 }
             });
 
-            // 2. Liczenie zajÄ™tych kratek (st === 0 to przedmioty w plecaku)
+            // 2. Liczenie zajętych kratek (st === 0 to przedmioty w plecaku)
             let occupied = itemsArr.filter(i => Number(i.st) === 0).length;
             let free = Math.max(0, total - occupied);
 
@@ -10313,14 +10395,14 @@ window.renderEqItems = function(filterType = 'Wszystkie') {
         };
     }
 
-        // 3. WYSZUKIWARKA SKLEPĂ“W
+        // 3. WYSZUKIWARKA SKLEPÓW
         if (e.target && e.target.closest('#btnToggleShops')) { hideAllTabs(); if (shopsWrap) shopsWrap.style.display = 'flex'; }
 
-     // 4. MIKSTURY I LECZENIE (Lista Uzdrowicieli ze wskaĹşnikiem leczenia)
+     // 4. MIKSTURY I LECZENIE (Lista Uzdrowicieli ze wskaźnikiem leczenia)
         if (e.target && e.target.closest('#btnShowPotions')) {
             hideAllTabs(); if (potList) potList.style.display = 'flex';
             if (!window.DatabaseModule || window.DatabaseModule.kupcy.length === 0) {
-                potList.innerHTML = `<span style="color:#e53935; font-size:10px; text-align:center;">Baza danych Ĺ‚aduje siÄ™...</span>`; return;
+                potList.innerHTML = `<span style="color:#e53935; font-size:10px; text-align:center;">Baza danych ładuje się...</span>`; return;
             }
 
             let healers = window.DatabaseModule.kupcy.filter(k => {
@@ -10338,7 +10420,7 @@ window.renderEqItems = function(filterType = 'Wszystkie') {
                 if (itemCount > 0) {
                     itemsHtml = k.items.map((i, sIdx) => {
                         let cleanName = i.name.split('Typ:')[0].trim();
-                        let price = i.price_or_value ? `${(i.price_or_value).toLocaleString()} zĹ‚` : '?';
+                        let price = i.price_or_value ? `${(i.price_or_value).toLocaleString()} zł` : '?';
                         let fullStats = i.tooltip_text || i.raw_detected_text || i.name;
 
                         let healMatch = fullStats.match(/Leczy\s+([0-9\s]+)\s+punkt/i);
@@ -10348,7 +10430,7 @@ window.renderEqItems = function(filterType = 'Wszystkie') {
                             <div style="display:flex; justify-content:space-between; align-items:center; color:#d4af37; font-size:9px; margin-bottom:4px; border-bottom:1px solid #222; padding-bottom:2px;">
                                 <div style="width:60%; padding-right:5px;">
                                     <div style="margin-bottom:2px;">- <span class="margo-tooltip-trigger" data-stats="${fullStats.replace(/"/g, '&quot;')}" data-name="${cleanName.replace(/"/g, '&quot;')}" style="cursor:help; text-decoration:underline; color:#f48fb1; font-weight:bold;">${cleanName}</span> <span style="color:#4caf50;">(${price})</span></div>
-                                    <div style="color:#8bc34a; font-size:8px; margin-left:6px;">âť¤ď¸Ź Leczy: ${healAmount} HP</div>
+                                    <div style="color:#8bc34a; font-size:8px; margin-left:6px;">❤️ Leczy: ${healAmount} HP</div>
                                 </div>
                                 <div style="display:flex; align-items:center;">
                                     <input type="number" id="buy_amt_heal_${index}_${sIdx}" value="10" min="1" max="1000" style="width:35px; height:16px; font-size:10px; background:#000; color:#fff; border:1px solid #444; text-align:center; margin-right:4px;">
@@ -10361,7 +10443,7 @@ window.renderEqItems = function(filterType = 'Wszystkie') {
                                         data-x="${k.x}"
                                         data-y="${k.y}"
                                         style="background:#d81b60; color:white; border:none; padding:2px 6px; border-radius:3px; cursor:pointer; font-size:9px; font-weight:bold;">
-                                        đźŹ KUP
+                                        🏃 KUP
                                     </button>
                                 </div>
                             </div>`;
@@ -10377,11 +10459,11 @@ window.renderEqItems = function(filterType = 'Wszystkie') {
                         </div>
                         <div style="color:#888; font-size:9px; margin-top:2px; display:flex; justify-content:space-between; align-items:center;">
                             <span>đźŚŤ ${k.map_name} [${k.x}, ${k.y}]</span>
-                            <button class="btn-go-npc" data-map="${k.map_name}" data-x="${k.x}" data-y="${k.y}" style="background:#4caf50; color:white; border:none; padding:2px 6px; border-radius:3px; cursor:pointer; font-size:9px; font-weight:bold;">đźŹ IDĹą DO NPC</button>
+                            <button class="btn-go-npc" data-map="${k.map_name}" data-x="${k.x}" data-y="${k.y}" style="background:#4caf50; color:white; border:none; padding:2px 6px; border-radius:3px; cursor:pointer; font-size:9px; font-weight:bold;">🏃 IDŹ DO NPC</button>
                         </div>
 
                         <div class="toggle-items-btn" data-index="heal_${index}" style="color:#00acc1; font-size:9px; margin-top:4px; cursor:pointer; font-weight:bold; background:#222; padding:2px 4px; text-align:center; border-radius:2px;">
-                            PokaĹĽ asortyment (${itemCount} szt.) â–Ľ
+                            Pokaż asortyment (${itemCount} szt.) ▼
                         </div>
 
                         <div id="shop_items_heal_${index}" style="display:none; margin-top:5px; border-top:1px solid #333; padding-top:4px; background:#0a0a0a; padding-left:4px;">
@@ -10428,14 +10510,14 @@ window.renderEqItems = function(filterType = 'Wszystkie') {
                                         data-x="${s.x}"
                                         data-y="${s.y}"
                                         style="background:${isPotion ? '#d81b60' : '#4caf50'}; color:white; border:none; padding:2px 6px; border-radius:3px; cursor:pointer; font-size:9px; font-weight:bold;">
-                                        đźŹ IDĹą
+                                        🏃 IDŹ
                                     </button>
                                 </div>
                             </div>`;
                     });
                     sellerDiv.innerHTML = sHtml;
                 } else {
-                    sellerDiv.innerHTML = `<span style="color:#777; font-size:9px;">Przedmiot nie wystÄ™puje w sklepach (Drop z potworĂłw).</span>`;
+                    sellerDiv.innerHTML = `<span style="color:#777; font-size:9px;">Przedmiot nie występuje w sklepach (Drop z potworów).</span>`;
                 }
                 sellerDiv.style.display = 'block';
             }
@@ -10447,7 +10529,7 @@ window.renderEqItems = function(filterType = 'Wszystkie') {
             if (itemsDiv) {
                 let isHidden = itemsDiv.style.display === 'none';
                 itemsDiv.style.display = isHidden ? 'block' : 'none';
-                e.target.innerHTML = isHidden ? 'Ukryj asortyment â–˛' : `PokaĹĽ asortyment â–Ľ`;
+                e.target.innerHTML = isHidden ? 'Ukryj asortyment ▲' : `Pokaż asortyment ▼`;
             }
         }
 
@@ -10471,16 +10553,16 @@ window.renderEqItems = function(filterType = 'Wszystkie') {
 
             if (buyAmount > 0) {
                 window.autoBuyTask = { npc: e.target.getAttribute('data-npc'), item: e.target.getAttribute('data-item'), amount: buyAmount, mode: mode };
-                let logMsg = mode === 'potion' ? `đź›’ Zlecenie: KupiÄ‡ ${buyAmount} stakĂłw (po 15 szt.) ${window.autoBuyTask.item} od ${window.autoBuyTask.npc}. Wyruszam!` : `đź›’ Zlecenie: KupiÄ‡ ${buyAmount}x ${window.autoBuyTask.item} od ${window.autoBuyTask.npc}. Wyruszam!`;
+                let logMsg = mode === 'potion' ? `🛒 Zlecenie: Kupić ${buyAmount} staków (po 15 szt.) ${window.autoBuyTask.item} od ${window.autoBuyTask.npc}. Wyruszam!` : `🛒 Zlecenie: Kupić ${buyAmount}x ${window.autoBuyTask.item} od ${window.autoBuyTask.npc}. Wyruszam!`;
                 if (window.logHero) window.logHero(logMsg, "#d81b60");
             } else {
                 window.autoBuyTask = null;
-                if (window.logHero) window.logHero(`đźŹ Obieram kurs na: [${mapName}] (${targetX}, ${targetY})`, "#00e5ff");
+                if (window.logHero) window.logHero(`🏃 Obieram kurs na: [${mapName}] (${targetX}, ${targetY})`, "#00e5ff");
             }
 
             if (btnStop) btnStop.style.display = 'block';
 
-            // UĹĽywamy zintegrowanego silnika Rush, ktĂłry sam teleportuje siÄ™ Zakonnikami!
+            // Używamy zintegrowanego silnika Rush, który sam teleportuje się Zakonnikami!
             if (typeof window.rushToMap === 'function') {
                 window.rushToMap(mapName, targetX, targetY);
             } else {
@@ -10490,7 +10572,7 @@ window.renderEqItems = function(filterType = 'Wszystkie') {
 
             if (window.npcWalkInterval) clearInterval(window.npcWalkInterval);
 
-            // Lekki nasĹ‚uchiwacz czekajÄ…cy aĹĽ bot zakoĹ„czy bieg w innym mieĹ›cie
+            // Lekki nasłuchiwacz czekający aż bot zakończy bieg w innym mieście
             window.npcWalkInterval = setInterval(() => {
                 if (!window.autoBuyTask) {
                     clearInterval(window.npcWalkInterval);
@@ -10501,7 +10583,7 @@ window.renderEqItems = function(filterType = 'Wszystkie') {
                 if (typeof Engine !== 'undefined' && Engine.map && Engine.hero) {
                     if (Engine.map.d.name === mapName) {
                         let dist = Math.abs(Engine.hero.d.x - targetX) + Math.abs(Engine.hero.d.y - targetY);
-                        // Czekamy aĹĽ skoĹ„czy biec (isRushing jest flagÄ… z algorytmu drĂłg)
+                        // Czekamy aż skończy biec (isRushing jest flagą z algorytmu dróg)
                         if (dist <= 2 && !isRushing) {
                             if (window.logHero) window.logHero(`đź’¬ Zaczepiam NPC ${window.autoBuyTask.npc}...`, "#ffeb3b");
                             clearInterval(window.npcWalkInterval);
@@ -10525,14 +10607,14 @@ window.renderEqItems = function(filterType = 'Wszystkie') {
                 }
             }, 500);
         }
-    }); // <--- TO TA BRAKUJÄ„CA KLAMERKA NR 2!
+    }); // <--- TO TA BRAKUJĄCA KLAMERKA NR 2!
 
-      // 8. ZATRZYMYWANIE RUCHU (NiezaleĹĽny, bezpieczny blok)
+      // 8. ZATRZYMYWANIE RUCHU (Niezależny, bezpieczny blok)
         document.addEventListener('click', (e) => {
             if (e.target && e.target.closest('#btnStopWalk')) {
                 if (window.npcWalkInterval) clearInterval(window.npcWalkInterval);
                 window.autoBuyTask = null;
-                if (window.logHero) window.logHero(`đź›‘ Zatrzymano akcjÄ™ manualnie.`, "#d32f2f");
+                if (window.logHero) window.logHero(`🛑 Zatrzymano akcję manualnie.`, "#d32f2f");
                 if (typeof Engine !== 'undefined' && Engine.hero && Engine.hero.d) {
                     Engine.hero.autoGoTo({x: Engine.hero.d.x, y: Engine.hero.d.y});
                 }
@@ -10541,7 +10623,7 @@ window.renderEqItems = function(filterType = 'Wszystkie') {
             }
         });
 
-    // --- SILNIK WYSZUKIWANIA SKLEPĂ“W NA Ĺ»YWO ---
+    // --- SILNIK WYSZUKIWANIA SKLEPÓW NA ŻYWO ---
     document.addEventListener('input', (e) => {
         if (e.target && e.target.id === 'shopSearchInput') {
             let term = e.target.value.toLowerCase();
@@ -10557,7 +10639,7 @@ window.renderEqItems = function(filterType = 'Wszystkie') {
                 (k.items && k.items.some(i => i.name && i.name.toLowerCase().includes(term)))
             ).slice(0, 30);
 
-            if (filtered.length === 0) { container.innerHTML = `<span style="color:#777; font-size:10px;">Brak wynikĂłw dla: "${term}".</span>`; return; }
+            if (filtered.length === 0) { container.innerHTML = `<span style="color:#777; font-size:10px;">Brak wyników dla: "${term}".</span>`; return; }
 
             let html = '';
             filtered.forEach((k, index) => {
@@ -10567,15 +10649,15 @@ window.renderEqItems = function(filterType = 'Wszystkie') {
                if (itemCount > 0) {
                     itemsHtml = k.items.map(i => {
                         let cleanName = i.name.split('Typ:')[0].trim();
-                        let price = i.price_or_value ? `${(i.price_or_value).toLocaleString()} zĹ‚` : '?';
-                        let typeMatch = i.name.match(/Typ:\s*([A-Za-zĹĽĹşÄ‡Ĺ„ĂłĹ‚Ä™Ä…Ĺ›Ĺ»ĹąÄ†ĹĂ“ĹÄÄ„Ĺš]+)/);
+                        let price = i.price_or_value ? `${(i.price_or_value).toLocaleString()} zł` : '?';
+                        let typeMatch = i.name.match(/Typ:\s*([A-Za-zżźćńółęąśŻŹĆŃÓŁĘĄŚ]+)/);
                         let itemType = typeMatch ? typeMatch[1] : (i.slot_type || "Inne");
                         let lvlMatch = i.name.match(/Wymagany poziom:\s*(\d+)/);
                         let lvl = lvlMatch ? lvlMatch[1] : (i.required_level || "Brak");
-                        let profMatch = i.name.match(/Wymagana profesja:\s*([A-Za-zĹĽĹşÄ‡Ĺ„ĂłĹ‚Ä™Ä…Ĺ›Ĺ»ĹąÄ†ĹĂ“ĹÄÄ„Ĺš,\s]+?)(?=\sWymagany|\sWartoĹ›Ä‡|$)/);
-                        let prof = profMatch ? profMatch[1].trim() : (i.allowed_professions && i.allowed_professions.length > 0 ? i.allowed_professions.join(', ') : "KaĹĽda");
+                        let profMatch = i.name.match(/Wymagana profesja:\s*([A-Za-zżźćńółęąśŻŹĆŃÓŁĘĄŚ,\s]+?)(?=\sWymagany|\sWartość|$)/);
+                        let prof = profMatch ? profMatch[1].trim() : (i.allowed_professions && i.allowed_professions.length > 0 ? i.allowed_professions.join(', ') : "Każda");
 
-                        // PeĹ‚ne statystyki dla tooltipa w wyszukiwarce
+                        // Pełne statystyki dla tooltipa w wyszukiwarce
                         let fullStats = i.tooltip_text || i.raw_detected_text || i.name;
 
                         return `
@@ -10597,11 +10679,11 @@ window.renderEqItems = function(filterType = 'Wszystkie') {
                         </div>
                         <div style="color:#888; font-size:9px; margin-top:2px; display:flex; justify-content:space-between; align-items:center;">
                             <span>đźŚŤ ${k.map_name} [${k.x}, ${k.y}]</span>
-                            <button class="btn-go-npc" data-map="${k.map_name}" data-x="${k.x}" data-y="${k.y}" style="background:#4caf50; color:white; border:none; padding:2px 6px; border-radius:3px; cursor:pointer; font-size:9px; font-weight:bold;">đźŹ IDĹą</button>
+                            <button class="btn-go-npc" data-map="${k.map_name}" data-x="${k.x}" data-y="${k.y}" style="background:#4caf50; color:white; border:none; padding:2px 6px; border-radius:3px; cursor:pointer; font-size:9px; font-weight:bold;">🏃 IDŹ</button>
                         </div>
 
                         <div class="toggle-items-btn" data-index="${index}" style="color:#00acc1; font-size:9px; margin-top:4px; cursor:pointer; font-weight:bold;">
-                            PokaĹĽ asortyment (${itemCount} szt.) â–Ľ
+                            Pokaż asortyment (${itemCount} szt.) ▼
                         </div>
 
                         <div id="shop_items_${index}" style="display:none; margin-top:5px; border-top:1px solid #333; padding-top:4px; background:#0a0a0a; padding-left:4px;">
@@ -10612,7 +10694,7 @@ window.renderEqItems = function(filterType = 'Wszystkie') {
             container.innerHTML = html;
         }
     });
- // --- SILNIK GRAFICZNY CUSTOMOWYCH TOOLTIPĂ“W (Styl Margonem) ---
+ // --- SILNIK GRAFICZNY CUSTOMOWYCH TOOLTIPÓW (Styl Margonem) ---
 
     if (!document.getElementById('customMargoTooltip')) {
         let tt = document.createElement('div');
@@ -10621,7 +10703,7 @@ window.renderEqItems = function(filterType = 'Wszystkie') {
         document.body.appendChild(tt);
     }
 
- // WyĹ›wietlanie tooltipa
+ // Wyświetlanie tooltipa
     document.addEventListener('mouseover', (e) => {
         if (e.target && e.target.classList.contains('margo-tooltip-trigger')) {
             let tt = document.getElementById('customMargoTooltip');
@@ -10631,18 +10713,18 @@ window.renderEqItems = function(filterType = 'Wszystkie') {
             if (tt && rawStats) {
                 let desc = rawStats.replace(name, '').trim();
 
-                // RzadkoĹ›ci w rĂłĹĽnych odmianach (od teraz podĹ›wietli i "Unikat", i "Unikatowy")
-                desc = desc.replace(/(?<![a-zÄ…Ä‡Ä™Ĺ‚Ĺ„ĂłĹ›ĹşĹĽA-ZÄ„Ä†ÄĹĹĂ“ĹšĹąĹ»])(Pospolity)(?![a-zÄ…Ä‡Ä™Ĺ‚Ĺ„ĂłĹ›ĹşĹĽA-ZÄ„Ä†ÄĹĹĂ“ĹšĹąĹ»])/gi, '<br><span style="color:#b0bec5; font-weight:bold;">$1</span><br>');
-                desc = desc.replace(/(?<![a-zÄ…Ä‡Ä™Ĺ‚Ĺ„ĂłĹ›ĹşĹĽA-ZÄ„Ä†ÄĹĹĂ“ĹšĹąĹ»])(Unikat|Unikatowy)(?![a-zÄ…Ä‡Ä™Ĺ‚Ĺ„ĂłĹ›ĹşĹĽA-ZÄ„Ä†ÄĹĹĂ“ĹšĹąĹ»])/gi, '<br><span style="color:#fbc02d; font-weight:bold;">$1</span><br>');
-                desc = desc.replace(/(?<![a-zÄ…Ä‡Ä™Ĺ‚Ĺ„ĂłĹ›ĹşĹĽA-ZÄ„Ä†ÄĹĹĂ“ĹšĹąĹ»])(Heroik|Heroiczny)(?![a-zÄ…Ä‡Ä™Ĺ‚Ĺ„ĂłĹ›ĹşĹĽA-ZÄ„Ä†ÄĹĹĂ“ĹšĹąĹ»])/gi, '<br><span style="color:#29b6f6; font-weight:bold;">$1</span><br>');
-                desc = desc.replace(/(?<![a-zÄ…Ä‡Ä™Ĺ‚Ĺ„ĂłĹ›ĹşĹĽA-ZÄ„Ä†ÄĹĹĂ“ĹšĹąĹ»])(Legendarny)(?![a-zÄ…Ä‡Ä™Ĺ‚Ĺ„ĂłĹ›ĹşĹĽA-ZÄ„Ä†ÄĹĹĂ“ĹšĹąĹ»])/gi, '<br><span style="color:#ef5350; font-weight:bold;">$1</span><br>');
+                // Rzadkości w różnych odmianach (od teraz podświetli i "Unikat", i "Unikatowy")
+                desc = desc.replace(/(?<![a-ząćęłńóśźżA-ZĄĆĘŁŃÓŚŹŻ])(Pospolity)(?![a-ząćęłńóśźżA-ZĄĆĘŁŃÓŚŹŻ])/gi, '<br><span style="color:#b0bec5; font-weight:bold;">$1</span><br>');
+                desc = desc.replace(/(?<![a-ząćęłńóśźżA-ZĄĆĘŁŃÓŚŹŻ])(Unikat|Unikatowy)(?![a-ząćęłńóśźżA-ZĄĆĘŁŃÓŚŹŻ])/gi, '<br><span style="color:#fbc02d; font-weight:bold;">$1</span><br>');
+                desc = desc.replace(/(?<![a-ząćęłńóśźżA-ZĄĆĘŁŃÓŚŹŻ])(Heroik|Heroiczny)(?![a-ząćęłńóśźżA-ZĄĆĘŁŃÓŚŹŻ])/gi, '<br><span style="color:#29b6f6; font-weight:bold;">$1</span><br>');
+                desc = desc.replace(/(?<![a-ząćęłńóśźżA-ZĄĆĘŁŃÓŚŹŻ])(Legendarny)(?![a-ząćęłńóśźżA-ZĄĆĘŁŃÓŚŹŻ])/gi, '<br><span style="color:#ef5350; font-weight:bold;">$1</span><br>');
 
                 const statKeywords = [
-                    "Typ:", "ObraĹĽenia", "Cios krytyczny", "SiĹ‚a", "ZrÄ™cznoĹ›Ä‡", "Intelekt", "Energia", "Mana",
-                    "Pancerz", "Blok", "Unik", "Ĺ»ycie", "OdpornoĹ›Ä‡ na", "WiÄ…ĹĽe", "Spowalnia", "Zmniejsza", "Przebicie",
-                    "PojemnoĹ›Ä‡", "IloĹ›Ä‡:", "Teleportuje", "Leczy", "Przywraca", "Niszczy", "Szansa na",
+                    "Typ:", "Obrażenia", "Cios krytyczny", "Siła", "Zręczność", "Intelekt", "Energia", "Mana",
+                    "Pancerz", "Blok", "Unik", "Życie", "Odporność na", "Wiąże", "Spowalnia", "Zmniejsza", "Przebicie",
+                    "Pojemność", "Ilość:", "Teleportuje", "Leczy", "Przywraca", "Niszczy", "Szansa na",
                     "Podczas ataku", "Dodatkowe", "Absorbuje", "Wymagany poziom:", "Wymagana profesja:",
-                    "WartoĹ›Ä‡:", "Zadaje", "ObniĹĽa", "ZwiÄ…zany"
+                    "Wartość:", "Zadaje", "Obniża", "Związany"
                 ];
 
                 statKeywords.forEach(key => {
@@ -10651,9 +10733,9 @@ window.renderEqItems = function(filterType = 'Wszystkie') {
                 });
 
                 desc = desc.replace(/^(<br>\s*)+/, '');
-                desc = desc.replace(/(Wymagany poziom:|Wymagana profesja:|Typ:|WartoĹ›Ä‡:)/g, '<span style="color:#888;">$1</span>');
+                desc = desc.replace(/(Wymagany poziom:|Wymagana profesja:|Typ:|Wartość:)/g, '<span style="color:#888;">$1</span>');
                 desc = desc.replace(/(\+[0-9]+(?:.[0-9]+)?%?)/g, '<span style="color:#66bb6a; font-weight:bold;">$1</span>');
-                desc = desc.replace(/(WartoĹ›Ä‡:\s*<\/span>)([0-9\.\s]+k?)/g, '$1<span style="color:#ffca28;">$2</span>');
+                desc = desc.replace(/(Wartość:\s*<\/span>)([0-9\.\s]+k?)/g, '$1<span style="color:#ffca28;">$2</span>');
                 desc = desc.replace(/(<br>\s*){2,}/g, '<br>');
 
                 let html = `<div style="color:#ffca28; font-weight:bold; font-size:12px; border-bottom:1px solid #443c2c; padding-bottom:4px; margin-bottom:4px; text-align:center; text-shadow:1px 1px 0 #000;">${name}</div>`;
@@ -10688,7 +10770,7 @@ window.renderEqItems = function(filterType = 'Wszystkie') {
                 if (dialogOptions.length > 0) {
                     let shopOpt = dialogOptions.find(el => {
                         let txt = (el.innerText || el.textContent).toLowerCase();
-                        return txt.includes('sklep') || txt.includes('handl') || txt.includes('wywar') || txt.includes('lecznicz') || txt.includes('towar') || txt.includes('sprzedaj') || txt.includes('pokaĹĽ');
+                        return txt.includes('sklep') || txt.includes('handl') || txt.includes('wywar') || txt.includes('lecznicz') || txt.includes('towar') || txt.includes('sprzedaj') || txt.includes('pokaż');
                     });
                     if (shopOpt) {
                         let humanDelay = Math.floor(Math.random() * 401) + 400;
@@ -10711,7 +10793,7 @@ window.renderEqItems = function(filterType = 'Wszystkie') {
                             return realName === window.autoBuyTask.item;
                         });
                         if (itemToBuy) {
-                            if (window.logHero) window.logHero(`đź›’ DodajÄ™ do koszyka: ${window.autoBuyTask.item}...`, "#8bc34a");
+                            if (window.logHero) window.logHero(`🛒 Dodaję do koszyka: ${window.autoBuyTask.item}...`, "#8bc34a");
                             let finalAmount = window.autoBuyTask.amount;
                             let mode = window.autoBuyTask.mode;
                             let finalItemName = window.autoBuyTask.item;
@@ -10726,7 +10808,7 @@ window.renderEqItems = function(filterType = 'Wszystkie') {
                                 setTimeout(() => {
                                     if (typeof Engine.shop.basket.finalize === 'function') {
                                         Engine.shop.basket.finalize();
-                                        let msg = mode === 'potion' ? `âś… Zakupiono ${finalAmount} stakĂłw (po 15 szt.)!` : `âś… Zakupiono 1 sztukÄ™ ekwipunku!`;
+                                        let msg = mode === 'potion' ? `✅ Zakupiono ${finalAmount} staków (po 15 szt.)!` : `✅ Zakupiono 1 sztukę ekwipunku!`;
                                         if (window.logHero) window.logHero(msg, "#4caf50");
                                         if (mode === 'eq') {
                                             setTimeout(() => {
@@ -10740,7 +10822,7 @@ window.renderEqItems = function(filterType = 'Wszystkie') {
                                                 });
                                                 if (boughtItem && typeof Engine.heroEquipment.sendUseRequest === 'function') {
                                                     Engine.heroEquipment.sendUseRequest(boughtItem);
-                                                    if (window.logHero) window.logHero(`đź›ˇď¸Ź Automatycznie zaĹ‚oĹĽono: ${finalItemName}!`, "#00acc1");
+                                                    if (window.logHero) window.logHero(`🛡️ Automatycznie założono: ${finalItemName}!`, "#00acc1");
                                                 }
                                             }, 1500);
                                         }
@@ -10754,7 +10836,7 @@ window.renderEqItems = function(filterType = 'Wszystkie') {
                                 }, finalizeDelay);
                             }, buyDelay);
                         } else {
-                            if (window.logHero) window.logHero(`âťŚ Sprzedawca nie posiada obecnie [${window.autoBuyTask.item}]!`, "#e53935");
+                            if (window.logHero) window.logHero(`❌ Sprzedawca nie posiada obecnie [${window.autoBuyTask.item}]!`, "#e53935");
                             window.autoBuyTask = null;
                         }
                     }
@@ -10762,7 +10844,7 @@ window.renderEqItems = function(filterType = 'Wszystkie') {
             }
         }, 800);
     }
-// --- TWOJE FUNKCJE DO DETEKCJI STANU NIEPRZYTOMNOĹšCI ---
+// --- TWOJE FUNKCJE DO DETEKCJI STANU NIEPRZYTOMNOŚCI ---
     function getUnconsciousState() {
         const overlay = document.querySelector(".dead-overlay.map-overlay, .dead-window, .death-window");
         const timerEl = document.querySelector(".dead-overlay.map-overlay .dazed-time, .dead-window .dazed-time");
@@ -10800,8 +10882,8 @@ window.renderEqItems = function(filterType = 'Wszystkie') {
         return String(text || "")
             .normalize("NFD")
             .replace(/[\u0300-\u036f]/g, "")
-            .replace(/Ĺ‚/g, "l")
-            .replace(/Ĺ/g, "l")
+            .replace(/ł/g, "l")
+            .replace(/Ł/g, "l")
             .replace(/\s+/g, " ")
             .trim()
             .toLowerCase();
@@ -10983,7 +11065,7 @@ window.renderEqItems = function(filterType = 'Wszystkie') {
     }
 
   function isUnconsciousNow() {
-        // 1. Sprawdzamy DOM TwojÄ… dokĹ‚adnÄ… funkcjÄ…
+        // 1. Sprawdzamy DOM Twoją dokładną funkcją
         const domState = getUnconsciousState();
 
         // 2. Twarde sprawdzenie w silniku gry (Zabezpieczenie)
@@ -10994,11 +11076,11 @@ window.renderEqItems = function(filterType = 'Wszystkie') {
             (hero && (hero.dead === true || hero.dead === 1 || hero.dead === "1"))
         );
 
-        // USUNIÄTO BĹÄDNY WARUNEK "hp <= 1". Teraz oĹĽywienie z 1 HP zostanie natychmiast wykryte!
+        // USUNIĘTO BŁĘDNY WARUNEK "hp <= 1". Teraz ożywienie z 1 HP zostanie natychmiast wykryte!
         return domState.unconscious || engineDead;
     }
 
-    // --- PÄTLA STRAĹ»NIKA ĹšMIERCI ---
+    // --- PĘTLA STRAŻNIKA ŚMIERCI ---
     setInterval(() => {
         const state = getUnconsciousState();
         const isDead = isUnconsciousNow();
@@ -11011,7 +11093,7 @@ window.renderEqItems = function(filterType = 'Wszystkie') {
             }
             if (window.logExp) window.logExp("[STRAZNIK] Wykryto zgon. Zamykam walke i pauzuje bota do odrodzenia.", "#e53935");
 
-            // Twarde wyĹ‚Ä…czenie auto-walki po Ĺ›mierci (UI + pamiÄ™Ä‡), ĹĽeby nie wisiaĹ‚a aktywna walka na ekranie.
+            // Twarde wyłączenie auto-walki po śmierci (UI + pamięć), żeby nie wisiała aktywna walka na ekranie.
             if (window.BerserkController && typeof window.BerserkController.setBotBerserkState === 'function') {
                 window.BerserkController.setBotBerserkState(false, 'death_guard');
             }
@@ -11025,14 +11107,14 @@ window.renderEqItems = function(filterType = 'Wszystkie') {
                 Engine.settings.d.fight_auto_solo = 0;
             }
 
-            // --- WYMUSZONE ZAMKNIÄCIE OKNA WALKI ---
+            // --- WYMUSZONE ZAMKNIĘCIE OKNA WALKI ---
             if (typeof Engine !== 'undefined' && Engine.battle) {
                 if (typeof Engine.battle.close === 'function') Engine.battle.close();
             }
-            // Symulacja wciĹ›niÄ™cia klawisza "Z" (OpuĹ›Ä‡ walkÄ™)
+            // Symulacja wciśnięcia klawisza "Z" (Opuść walkę)
             document.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', keyCode: 90, which: 90 }));
-            // Symulacja klikniÄ™cia w fizyczny przycisk "OpuĹ›Ä‡ walkÄ™"
-            let closeZ = document.querySelector('.battle-close, .button.close, [data-tip*="OpuĹ›Ä‡ walkÄ™"]');
+            // Symulacja kliknięcia w fizyczny przycisk "Opuść walkę"
+            let closeZ = document.querySelector('.battle-close, .button.close, [data-tip*="Opuść walkę"]');
             if (closeZ) {
                 closeZ.click();
                 if (window.jQuery) window.jQuery(closeZ).click();
@@ -11062,15 +11144,15 @@ window.renderEqItems = function(filterType = 'Wszystkie') {
         }
 
         if (!isDead && window.__unconscious) {
-            // Lekkie opĂłĹşnienie, ĹĽeby nie zrobiÄ‡ faĹ‚szywego 'oĹĽyĹ‚eĹ›'
+            // Lekkie opóźnienie, żeby nie zrobić fałszywego 'ożyłeś'
             setTimeout(() => {
                 if (window.__unconscious && !isUnconsciousNow()) {
                     window.__unconscious = false;
                     window.__stuckTimerCount = 0;
                     window.__lastParsedSeconds = null;
-                    if (window.logExp) window.logExp("âś… [STRAĹ»NIK] OĹĽyĹ‚eĹ›. Wracamy do akcji!", "#4caf50");
+                    if (window.logExp) window.logExp("✅ [STRAŻNIK] Ożyłeś. Wracamy do akcji!", "#4caf50");
 
-                    // WYMUSZENIE STATUSU LECZENIA (DziaĹ‚a niezaleĹĽnie od expienia, wystarczy wĹ‚Ä…czony autoheal)
+                    // WYMUSZENIE STATUSU LECZENIA (Działa niezależnie od expienia, wystarczy włączony autoheal)
                     if (botSettings && botSettings.autoheal && botSettings.autoheal.enabled) {
                         window.isRegeneratingToFull = true;
                     }
@@ -11079,7 +11161,7 @@ window.renderEqItems = function(filterType = 'Wszystkie') {
             }, 1200);
         }
 
-        // WATCHDOG: Wykrywanie ZAMROĹ»ONEGO zegara z pomocÄ… Twojego obiektu!
+        // WATCHDOG: Wykrywanie ZAMROŻONEGO zegara z pomocą Twojego obiektu!
         if (window.__unconscious && state.timerSeconds !== null) {
             let seconds = state.timerSeconds;
 
@@ -11090,9 +11172,9 @@ window.renderEqItems = function(filterType = 'Wszystkie') {
                 window.__stuckTimerCount = 0;
             }
 
-            // JeĹ›li zegar stoi w miejscu przez 6 sekund (lag gry)
+            // Jeśli zegar stoi w miejscu przez 6 sekund (lag gry)
             if (window.__stuckTimerCount >= 6) {
-                if (window.logExp) window.logExp(`đź”„ Zegar Ĺ›mierci zamarzĹ‚ na ${seconds}s! MiÄ™kkie odĹ›wieĹĽanie interfejsu...`, "#ffb300");
+                if (window.logExp) window.logExp(`🔄 Zegar śmierci zamarzł na ${seconds}s! Miękkie odświeżanie interfejsu...`, "#ffb300");
                 window.__stuckTimerCount = -999;
 
                 requestDeadRespawn('timer_stuck');
@@ -11112,7 +11194,7 @@ window.renderEqItems = function(filterType = 'Wszystkie') {
             }
         }
     }, 1000);
-// --- DAEMON: AUTOHEAL (Logika: Start poniĹĽej progu -> Koniec przy 100%) ---
+// --- DAEMON: AUTOHEAL (Logika: Start poniżej progu -> Koniec przy 100%) ---
     if (!window.autoHealDaemonInstalled) {
         window.autoHealDaemonInstalled = true;
         window.lastHealTime = 0;
@@ -11125,7 +11207,7 @@ window.renderEqItems = function(filterType = 'Wszystkie') {
                 if (v) return v;
             }
             let statStr = String(itemData.stat || itemData.stats || "").toLowerCase();
-            if (statStr.includes('fullheal') || statStr.includes('caĹ‚e ĹĽycie') || statStr.includes('caĹ‚Ä… energiÄ™')) return 999999;
+            if (statStr.includes('fullheal') || statStr.includes('całe życie') || statStr.includes('całą energię')) return 999999;
             if (statStr.includes('hot=')) return 0;
             statStr = statStr.replace(/(\d)\s+(\d)/g, '$1$2');
             let match = statStr.match(/(?:leczy|przywraca)[^\d]*(\d+)/);
@@ -11142,7 +11224,7 @@ window.renderEqItems = function(filterType = 'Wszystkie') {
         setInterval(() => {
             if (typeof Engine === 'undefined' || !Engine.hero || !Engine.hero.d) return;
 
-            // Awaryjne zdjÄ™cie locka (jeĹ›li internet zlaguje)
+            // Awaryjne zdjęcie locka (jeśli internet zlaguje)
             if (window.isHealLocked && Date.now() > window.lastHealTime + 3000) {
                 window.isHealLocked = false;
             }
@@ -11171,7 +11253,7 @@ if (isDead) {
             // Start leczenia
             if (hpPercent < threshold && !window.isRegeneratingToFull) {
                 window.isRegeneratingToFull = true;
-                let msg = `đź©¸ Niski poziom HP (${hpPercent.toFixed(0)}%). Rozpoczynam leczenie do peĹ‚na...`;
+                let msg = `🩸 Niski poziom HP (${hpPercent.toFixed(0)}%). Rozpoczynam leczenie do pełna...`;
                 if (window.isExping && window.logExp) window.logExp(msg, "#ff5252");
                 else if (window.logHero) window.logHero(msg, "#ff5252");
             }
@@ -11179,7 +11261,7 @@ if (isDead) {
             // TWARDE LECZENIE DO 100% (Czekamy na potwierdzenie od serwera)
             if (window.isRegeneratingToFull && hp >= maxhp) {
                 window.isRegeneratingToFull = false;
-                let msg = `đź’š Zregenerowano siĹ‚y (100%). Wracam do akcji.`;
+                let msg = `💚 Zregenerowano siły (100%). Wracam do akcji.`;
                 if (window.isExping && window.logExp) window.logExp(msg, "#4caf50");
                 else if (window.logHero) window.logHero(msg, "#4caf50");
                 return;
@@ -11222,7 +11304,7 @@ if (isDead) {
                     window.isHealLocked = true;
                     let missingHp = maxhp - hp;
 
-                    // WybĂłr najlepszej mikstury do wyleczenia braku
+                    // Wybór najlepszej mikstury do wyleczenia braku
                     validPotions.sort((a, b) => Math.abs(a.heal - missingHp) - Math.abs(b.heal - missingHp));
                     let bestPot = validPotions[0];
 
@@ -11236,17 +11318,17 @@ if (isDead) {
                     }
 
                     // Czekamy na realne HP z serwera i dopiero wtedy decydujemy o kolejnej potce.
-                    // DziÄ™ki temu zawsze domykamy leczenie do 100%, zamiast koĹ„czyÄ‡ na pierwszej miksturze.
+                    // Dzięki temu zawsze domykamy leczenie do 100%, zamiast kończyć na pierwszej miksturze.
                     window.lastHealTime = Date.now() + 550;
                     setTimeout(() => { window.isHealLocked = false; }, 500);
                 } else {
                     window.isRegeneratingToFull = false;
-                    if (window.logHero) window.logHero(`âš ď¸Ź SkoĹ„czyĹ‚o Ci siÄ™ jedzenie w plecaku! (Zbyt wysoki lvl / Lista ignorowanych)`, "#ffb300");
+                    if (window.logHero) window.logHero(`⚠️ Skończyło Ci się jedzenie w plecaku! (Zbyt wysoki lvl / Lista ignorowanych)`, "#ffb300");
                 }
             }
         }, 350);
     }
-// --- DAEMON: AUTO-POTY (Kupowanie mikstur z humanizacjÄ…) ---
+// --- DAEMON: AUTO-POTY (Kupowanie mikstur z humanizacją) ---
     if (!window.autoPotDaemonInstalled) {
         window.autoPotDaemonInstalled = true;
         window.autoPotState = { active: false, step: 0, nextActionTime: 0, targetNpc: null, targetItem: null };
@@ -11258,14 +11340,14 @@ if (isDead) {
             let btnForce = document.getElementById('btnForceSell');
             if (btnForce) {
                 if (window.autoSellState.active) {
-                    if (btnForce.innerText !== "đź›‘ ANULUJ SPRZEDAĹ»") {
-                        btnForce.innerHTML = "đź›‘ ANULUJ SPRZEDAĹ»";
+                    if (btnForce.innerText !== "🛑 ANULUJ SPRZEDAŻ") {
+                        btnForce.innerHTML = "🛑 ANULUJ SPRZEDAŻ";
                         btnForce.style.background = "#d32f2f";
                         btnForce.style.borderColor = "#b71c1c";
                     }
                 } else {
-                    if (btnForce.innerText !== "đźŹ OPRĂ“Ĺ»NIJ TERAZ") {
-                        btnForce.innerHTML = "đźŹ OPRĂ“Ĺ»NIJ TERAZ";
+                    if (btnForce.innerText !== "🏃 OPRÓŻNIJ TERAZ") {
+                        btnForce.innerHTML = "🏃 OPRÓŻNIJ TERAZ";
                         btnForce.style.background = "#e65100";
                         btnForce.style.borderColor = "#bf360c";
                     }
@@ -11282,8 +11364,8 @@ if (isDead) {
                         let requiredStacks = botSettings.autopot.stacks || 14;
 
                         if (s.freeSlots < requiredStacks && botSettings.autosell && botSettings.autosell.enabled) {
-                            if (window.logHero) window.logHero("đźŽ’ Za maĹ‚o miejsca na potki! Najpierw idÄ™ sprzedaÄ‡ Ĺ›mieci...", "#ffb300");
-                            if (window.logExp) window.logExp("đźŽ’ Za maĹ‚o miejsca na potki! Najpierw idÄ™ sprzedaÄ‡ Ĺ›mieci...", "#ffb300");
+                            if (window.logHero) window.logHero("🎒 Za mało miejsca na potki! Najpierw idę sprzedać śmieci...", "#ffb300");
+                            if (window.logExp) window.logExp("🎒 Za mało miejsca na potki! Najpierw idę sprzedać śmieci...", "#ffb300");
 
                             const wasExpingBeforeSell = !!window.isExping;
                             const wasBerserkOnBeforeSell = !!(botSettings.berserk && botSettings.berserk.enabled);
@@ -11305,16 +11387,16 @@ if (isDead) {
                                 let chkBerserk = document.getElementById('berserkEnabled');
                                 if (chkBerserk) chkBerserk.checked = false;
                                 if (typeof window.updateServerBerserk === 'function') window.updateServerBerserk();
-                                if (window.logExp) window.logExp("đź›ˇď¸Ź WyĹ‚Ä…czam Berserka na czas powrotu do sklepu.", "#ff9800");
+                                if (window.logExp) window.logExp("🛡️ Wyłączam Berserka na czas powrotu do sklepu.", "#ff9800");
                             }
-                            return; // Przerywamy Auto-Poty, niech demon sprzedaĹĽy przejmie stery!
+                            return; // Przerywamy Auto-Poty, niech demon sprzedaży przejmie stery!
                         }
 
-                        // BRAK MIEJSCA, ALE AUTO-SELL WYĹÄ„CZONY? Kupujemy tyle, na ile jest miejsca
+                        // BRAK MIEJSCA, ALE AUTO-SELL WYŁĄCZONY? Kupujemy tyle, na ile jest miejsca
                         if (s.freeSlots < requiredStacks) {
                             if (s.freeSlots === 0) {
-                                if (window.logHero) window.logHero("đźš¨ Brak miejsca w plecaku na mikstury! WĹ‚Ä…cz Auto-SprzedaĹĽ!", "#e53935");
-                                return; // CaĹ‚kowity brak miejsca
+                                if (window.logHero) window.logHero("🚨 Brak miejsca w plecaku na mikstury! Włącz Auto-Sprzedaż!", "#e53935");
+                                return; // Całkowity brak miejsca
                             }
                             requiredStacks = s.freeSlots; // Zmniejszamy zakup do limitu wolnych kratek
                         }
@@ -11328,7 +11410,7 @@ if (isDead) {
                         let chkBerserk = document.getElementById('berserkEnabled');
                         if (chkBerserk) chkBerserk.checked = false;
                         if (typeof window.updateServerBerserk === 'function') window.updateServerBerserk();
-                        if (window.logExp) window.logExp("đź›ˇď¸Ź WyĹ‚Ä…czam Berserka na czas powrotu do miasta.", "#ff9800");
+                        if (window.logExp) window.logExp("🛡️ Wyłączam Berserka na czas powrotu do miasta.", "#ff9800");
                     }
                     let maxhp = parseInt(Engine.hero.d.maxhp) || (Engine.hero.d.warrior_stats ? parseInt(Engine.hero.d.warrior_stats.maxhp) : 0);
                     if (!maxhp) {
@@ -11341,7 +11423,7 @@ if (isDead) {
                     maxhp = maxhp || 5000;
                     let currentLvl = Engine.hero.d.lvl || 1;
                     let targetHeal = Math.floor(maxhp * 0.30);
-                    let minAcceptableHeal = targetHeal * 0.15; // Potka musi leczyÄ‡ chociaĹĽ 15% tego co chcemy
+                    let minAcceptableHeal = targetHeal * 0.15; // Potka musi leczyć chociaż 15% tego co chcemy
 
                     let currMap = Engine.map.d.name;
                     let availablePotions = [];
@@ -11386,14 +11468,14 @@ if (isDead) {
                             let aAcceptable = a.heal >= minAcceptableHeal;
                             let bAcceptable = b.heal >= minAcceptableHeal;
 
-                            // Odrzucamy Ĺ›mieci, chyba ĹĽe nie mamy wyjĹ›cia
+                            // Odrzucamy śmieci, chyba że nie mamy wyjścia
                             if (aAcceptable && !bAcceptable) return -1;
                             if (!aAcceptable && bAcceptable) return 1;
 
-                            // NajwaĹĽniejszy warunek: kto jest bliĹĽej?
+                            // Najważniejszy warunek: kto jest bliżej?
                             if (a.distance !== b.distance) return a.distance - b.distance;
 
-                            // JeĹ›li dystans ten sam, bierzemy potkÄ™, ktĂłra lepiej pasuje
+                            // Jeśli dystans ten sam, bierzemy potkę, która lepiej pasuje
                             return Math.abs(a.heal - targetHeal) - Math.abs(b.heal - targetHeal);
                         });
 
@@ -11409,8 +11491,8 @@ if (isDead) {
                         if (window.logExp) window.logExp(msg, "#e91e63");
                     } else {
                         window.autoPotState.active = false;
-                        if (window.logHero) window.logHero(`đźš¨ Brak mikstur! Handlarze w Twoim zasiÄ™gu nie majÄ… nic na TwĂłj level!`, "#e53935");
-                        if (window.logExp) window.logExp(`đźš¨ Brak mikstur! Handlarze w Twoim zasiÄ™gu nie majÄ… nic na TwĂłj level!`, "#e53935");
+                        if (window.logHero) window.logHero(`🚨 Brak mikstur! Handlarze w Twoim zasięgu nie mają nic na Twój level!`, "#e53935");
+                        if (window.logExp) window.logExp(`🚨 Brak mikstur! Handlarze w Twoim zasięgu nie mają nic na Twój level!`, "#e53935");
                     }
                 }
             }
@@ -11478,7 +11560,7 @@ if (isDead) {
                     if (itemToBuy && typeof Engine.shop.basket?.buyItem === 'function') {
                         let stacksToBuy = window.autoPotState.stacksToBuy || botSettings.autopot.stacks || 14;
                         let clicksNeeded = stacksToBuy * 3;
-                        let msg = `đź›’ Wrzucam ${stacksToBuy} stakĂłw do koszyka...`;
+                        let msg = `🛒 Wrzucam ${stacksToBuy} staków do koszyka...`;
                         if (window.logHero) window.logHero(msg, "#8bc34a");
                         if (window.logExp) window.logExp(msg, "#8bc34a");
                         for (let i = 0; i < clicksNeeded; i++) Engine.shop.basket.buyItem(itemToBuy);
@@ -11499,7 +11581,7 @@ if (isDead) {
                         acceptBtn.click();
                         acceptBtn.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
                     }
-                    let msg = `âś… Otrzymano mikstury. Zamykam i wracam do pracy.`;
+                    let msg = `✅ Otrzymano mikstury. Zamykam i wracam do pracy.`;
                     if (window.logHero) window.logHero(msg, "#4caf50");
                     if (window.logExp) window.logExp(msg, "#4caf50");
                     window.autoPotState.active = false;
@@ -11515,7 +11597,7 @@ if (isDead) {
         }, 500);
     }
 
-   // --- DAEMON: AUTO-SPRZEDAĹ» Z LUDZKÄ„ MECHANIKÄ„ SPRZEDAĹ»Y TOREB ---
+   // --- DAEMON: AUTO-SPRZEDAŻ Z LUDZKĄ MECHANIKĄ SPRZEDAŻY TOREB ---
     if (!window.autoSellDaemonInstalled) {
         window.autoSellDaemonInstalled = true;
         window.autoSellState = { active: false, step: 0, oldGold: 0, bagToSell: 1, nextActionTime: 0, lastFreeSlots: 0, failedNPCs: [], shopWaitStartTime: 0, targetNpc: null, wasExpingBeforeSell: false, wasBerserkOn: false };
@@ -11538,8 +11620,8 @@ if (isDead) {
                     acceptBtn.click();
                     acceptBtn.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
                 }
-                if (window.logHero) window.logHero(`âś… Zaakceptowano sprzedaĹĽ torby ${bagNo}.`, "#8bc34a");
-                if (window.logExp) window.logExp(`âś… Zaakceptowano sprzedaĹĽ torby ${bagNo}.`, "#8bc34a");
+                if (window.logHero) window.logHero(`✅ Zaakceptowano sprzedaż torby ${bagNo}.`, "#8bc34a");
+                if (window.logExp) window.logExp(`✅ Zaakceptowano sprzedaż torby ${bagNo}.`, "#8bc34a");
             }, delay);
             return true;
         };
@@ -11549,7 +11631,7 @@ if (isDead) {
             if (Engine.battle && Engine.battle.show) return;
 
       if (!window.autoSellState.active && botSettings.autosell && botSettings.autosell.enabled) {
-                // Odczyt blokady z pamiÄ™ci przeglÄ…darki (PrzeĹĽyje odĹ›wieĹĽenie F5)
+                // Odczyt blokady z pamięci przeglądarki (Przeżyje odświeżenie F5)
                 let savedIgnore = parseInt(sessionStorage.getItem('hero_autosell_ignore') || 0);
                 if (savedIgnore > Date.now() || (window.autoSellState.ignoreUntil && Date.now() < window.autoSellState.ignoreUntil)) return;
 
@@ -11573,9 +11655,9 @@ if (isDead) {
                         let chkBerserk = document.getElementById('berserkEnabled');
                         if (chkBerserk) chkBerserk.checked = false;
                         if (typeof window.updateServerBerserk === 'function') window.updateServerBerserk();
-                        if (window.logExp) window.logExp("đź›ˇď¸Ź WyĹ‚Ä…czam Berserka na czas powrotu do sklepu.", "#ff9800");
+                        if (window.logExp) window.logExp("🛡️ Wyłączam Berserka na czas powrotu do sklepu.", "#ff9800");
                     }
-                    let msg = `đźŽ’ TORBA PEĹNA â†’ przerywam inne akcje i idÄ™ sprzedaÄ‡!`;
+                    let msg = `🎒 TORBA PEŁNA → przerywam inne akcje i idę sprzedać!`;
                     if (window.logHero) window.logHero(msg, "#ffb300");
                     if (window.logExp) window.logExp(msg, "#ffb300");
                 }
@@ -11608,7 +11690,7 @@ if (isDead) {
                         const answers = [...document.querySelectorAll(".dialogue-window.is-open .dialogue-window-answer, .dialog-custom-scroll .answer, .dialog-window .answer")];
                         return answers.find(el => {
                             const txt = (el.innerText || el.textContent || "").toLowerCase();
-                            return txt.includes("pokaĹĽ mi, co masz na sprzedaĹĽ") || txt.includes("co masz na sprzedaĹĽ") || txt.includes("sprzedaĹĽ") || txt.includes("sprzedaz") || txt.includes("handel") || txt.includes("kup");
+                            return txt.includes("pokaż mi, co masz na sprzedaż") || txt.includes("co masz na sprzedaż") || txt.includes("sprzedaż") || txt.includes("sprzedaz") || txt.includes("handel") || txt.includes("kup");
                         }) || null;
                     };
 
@@ -11618,12 +11700,12 @@ window.openShopAsync = async (namePart) => {
                         const targetName = (namePart || "").split('(')[0].trim().toLowerCase();
                         HERO_LOG.info(`AUTO-SELL: inicjacja dla ${namePart}`);
 
-                        // 1. ZABEZPIECZENIE MAPY (Czekamy, aĹĽ zniknie kran Ĺ‚adowania)
+                        // 1. ZABEZPIECZENIE MAPY (Czekamy, aż zniknie kran ładowania)
                         for (let w = 0; w < 50; w++) {
                             if (!Engine.map?.isLoading) break;
                             await sleep(100);
                         }
-                        // Twardy oddech po wejĹ›ciu na mapÄ™ (moby muszÄ… siÄ™ pojawiÄ‡, a blokady ruchu wygasnÄ…Ä‡)
+                        // Twardy oddech po wejściu na mapę (moby muszą się pojawić, a blokady ruchu wygasnąć)
                         await sleep(800);
 
                         // 2. ZNALEZIENIE NPC (Wg Twojego schematu)
@@ -11638,16 +11720,16 @@ window.openShopAsync = async (namePart) => {
                         }
 
                         if (!npc) {
-                            HERO_LOG.warn(`AUTO-SELL [A]: brak NPC na mapie po zaĹ‚adowaniu (${namePart}).`);
+                            HERO_LOG.warn(`AUTO-SELL [A]: brak NPC na mapie po załadowaniu (${namePart}).`);
                             return false;
                         }
 
-                        HERO_LOG.info(`AUTO-SELL: idÄ™ do ${npc.nick} (X: ${npc.x}, Y: ${npc.y}).`);
+                        HERO_LOG.info(`AUTO-SELL: idę do ${npc.nick} (X: ${npc.x}, Y: ${npc.y}).`);
 
-                      // 3. DOJĹšCIE DO NPC
+                      // 3. DOJŚCIE DO NPC
                         let reached = false;
                         for (let i = 0; i < 60; i++) { // 6 sekund
-                            // NATYCHMIASTOWE PRZERWANIE BIEGU, JEĹšLI WCIĹšNIESZ ANULUJ
+                            // NATYCHMIASTOWE PRZERWANIE BIEGU, JEŚLI WCIŚNIESZ ANULUJ
                             if (window.autoSellState && window.autoSellState.active === false) return false;
 
                             const h = Engine.hero?.d || Engine.hero;
@@ -11660,7 +11742,7 @@ window.openShopAsync = async (namePart) => {
                                 break;
                             }
 
-                            // Agresywne ponawianie ruchu (omijamy wewnÄ™trzne blokady anti-stuck bota!)
+                            // Agresywne ponawianie ruchu (omijamy wewnętrzne blokady anti-stuck bota!)
                             if (i % 10 === 0) {
                                 try {
                                     if (typeof window.originalAutoWalk === 'function') {
@@ -11674,23 +11756,23 @@ window.openShopAsync = async (namePart) => {
                             await sleep(100);
                         }
 
-                        // KRYTYCZNE: JeĹ›li nie podszedĹ‚, nie ma sensu klikaÄ‡ w dialog z 10 kratek!
+                        // KRYTYCZNE: Jeśli nie podszedł, nie ma sensu klikać w dialog z 10 kratek!
                         if (!reached) {
-                            HERO_LOG.warn("AUTO-SELL [B]: bot nie mĂłgĹ‚ podejĹ›Ä‡ do NPC (dystans > 1), omijam.");
+                            HERO_LOG.warn("AUTO-SELL [B]: bot nie mógł podejść do NPC (dystans > 1), omijam.");
                             return false;
                         }
 
-                        HERO_LOG.info("AUTO-SELL: odblokowujÄ™ stop.");
+                        HERO_LOG.info("AUTO-SELL: odblokowuję stop.");
                         if (Engine.hero) Engine.hero.stop = false;
 
                         await sleep(400);
 
-                        // JeĹ›li to elita/potwĂłr, walka zaraz wĹ‚Ä…czy siÄ™ sama
+                        // Jeśli to elita/potwór, walka zaraz włączy się sama
                         if (npc.type === 2 || npc.type === 3) return true;
 
-                        HERO_LOG.info("AUTO-SELL: rozpoczynam rozmowÄ™.");
+                        HERO_LOG.info("AUTO-SELL: rozpoczynam rozmowę.");
 
-                        // --- 1:1 TWĂ“J KOD ROZMOWY ---
+                        // --- 1:1 TWÓJ KOD ROZMOWY ---
                         try { Engine.npcs?.clickNpc?.(npc.id); } catch(e) {}
                         await sleep(200);
 
@@ -11733,17 +11815,17 @@ window.openShopAsync = async (namePart) => {
                         }
 
                         if (!shopOpened) {
-                            HERO_LOG.warn("AUTO-SELL [D]: klikniÄ™to opcjÄ™ sklepu, ale okno siÄ™ nie otworzyĹ‚o.");
+                            HERO_LOG.warn("AUTO-SELL [D]: kliknięto opcję sklepu, ale okno się nie otworzyło.");
                             return false;
                         }
 
                         await sleep(500); // Twardy margines czasu na zsynchronizowanie plecaka z nowym oknem
-                        HERO_LOG.success("AUTO-SELL: sklep otwarty pomyĹ›lnie.");
+                        HERO_LOG.success("AUTO-SELL: sklep otwarty pomyślnie.");
                         return true;
                     };
-} // <--- TEN JEDEN NAWIAS NAPRAWIA CAĹY SKRYPT!
+} // <--- TEN JEDEN NAWIAS NAPRAWIA CAŁY SKRYPT!
 
-                // --- GĹĂ“WNA LOGIKA KROKU 1 ---
+                // --- GŁÓWNA LOGIKA KROKU 1 ---
                 if (window.autoSellState.step === 1) {
                     if (!window.autoSellState.failedNPCs) {
                         window.autoSellState.failedNPCs = [];
@@ -11754,16 +11836,16 @@ window.openShopAsync = async (namePart) => {
                    if (!window.autoSellState.targetNpc) {
                         let kupcy = window.DatabaseModule.kupcy || [];
 
-                        // WybĂłr listy dozwolonych kupcĂłw w zaleĹĽnoĹ›ci od Checkboxa
+                        // Wybór listy dozwolonych kupców w zależności od Checkboxa
                         let allowedNames = ['Flineks', 'Makin', 'Rozen', 'Tuni', 'Unil', 'Aukcjoner', 'Syntia', 'Jemen'];
                         if (botSettings.autosell && botSettings.autosell.onlyTunia) {
-                            allowedNames = ['Tuni']; // Ograniczamy listÄ™ wyĹ‚Ä…cznie do Tunii
+                            allowedNames = ['Tuni']; // Ograniczamy listę wyłącznie do Tunii
                         }
 
                         let validMerchants = kupcy.filter(k => allowedNames.some(n => k.npc_name.includes(n)));
                         if (validMerchants.length === 0 && allowedNames.length > 1) validMerchants = kupcy;
 
-                        // NAPRAWA BĹÄDU LOKALIZACJI Z BAZY DANYCH
+                        // NAPRAWA BŁĘDU LOKALIZACJI Z BAZY DANYCH
                         validMerchants.forEach(m => {
                             if (m.npc_name.includes("Tuni") && m.map_name !== "Dom Tunii") {
                                 m.map_name = "Dom Tunii";
@@ -11775,7 +11857,7 @@ window.openShopAsync = async (namePart) => {
                         }
 
                     if (validMerchants.length === 0) {
-                            let msg = "âťŚ Brak kupcĂłw! (WstrzymujÄ™ auto-sprzedaĹĽ na 3 minuty)";
+                            let msg = "❌ Brak kupców! (Wstrzymuję auto-sprzedaż na 3 minuty)";
                             if (window.logHero) window.logHero(msg, "#e53935");
                             if (window.logExp) window.logExp(msg, "#e53935");
 
@@ -11818,25 +11900,25 @@ window.openShopAsync = async (namePart) => {
                     } else {
                         window.isRushingToShop = false;
 
-                        // WYWOĹANIE TWOJEJ FUNKCJI ASYNCHRONICZNEJ
-                        // UĹĽywamy blokady, ĹĽeby nie odpaliÄ‡ jej 100 razy naraz
+                        // WYWOŁANIE TWOJEJ FUNKCJI ASYNCHRONICZNEJ
+                        // Używamy blokady, żeby nie odpalić jej 100 razy naraz
                         if (!window.autoSellState.isAsyncRunning) {
                             window.autoSellState.isAsyncRunning = true;
 
                             window.openShopAsync(bestNpc.npc_name).then(success => {
                                 if (success) {
-                                   if (window.logExp) window.logExp(`âś… Otwieram sklep u: ${bestNpc.npc_name}`, "#ffb300");
-                                            window.autoSellState.oldGold = parseInt(Engine.hero.d.gold || 0); // <--- ZAPIS PIENIÄDZY PRZED SPRZEDAĹ»Ä„
-                                            window.autoSellState.step = 3; // Sukces - przechodzimy do sprzedaĹĽy!
+                                   if (window.logExp) window.logExp(`✅ Otwieram sklep u: ${bestNpc.npc_name}`, "#ffb300");
+                                            window.autoSellState.oldGold = parseInt(Engine.hero.d.gold || 0); // <--- ZAPIS PIENIĘDZY PRZED SPRZEDAŻĄ
+                                            window.autoSellState.step = 3; // Sukces - przechodzimy do sprzedaży!
                                             window.autoSellState.nextActionTime = Date.now() + 1000;
                                 } else {
-                                    if (window.logHero) window.logHero(`âš ď¸Ź Problem z otwarciem sklepu u: ${bestNpc.npc_name}. Szukam innego...`, "#ff9800");
+                                    if (window.logHero) window.logHero(`⚠️ Problem z otwarciem sklepu u: ${bestNpc.npc_name}. Szukam innego...`, "#ff9800");
                                     let closeBtn = document.querySelector('.dialogue-window.is-open .close-button, #dialog .close-button, .dialog-window .close-button');
                                     if (closeBtn) closeBtn.click();
                                     window.autoSellState.failedNPCs.push(bestNpc.npc_name);
                                     window.autoSellState.targetNpc = null;
                                 }
-                                window.autoSellState.isAsyncRunning = false; // Zdejmujemy blokadÄ™
+                                window.autoSellState.isAsyncRunning = false; // Zdejmujemy blokadę
                             });
                         }
                     }
@@ -11865,11 +11947,11 @@ window.openShopAsync = async (namePart) => {
                         let oldGold = parseInt(window.autoSellState.oldGold || 0);
                         let profit = currentGold - oldGold;
 
-                        // Zabezpieczenie przed bĹ‚Ä™dnym wyliczeniem
+                        // Zabezpieczenie przed błędnym wyliczeniem
                         if (oldGold === 0 || profit === currentGold || profit < 0) profit = 0;
 
                         if (profit >= 0) {
-                            let msg = `âś… OprĂłĹĽnianie zakoĹ„czone! Zarobek: ${profit.toLocaleString()} zĹ‚. Wracam do pracy.`;
+                            let msg = `✅ Opróżnianie zakończone! Zarobek: ${profit.toLocaleString()} zł. Wracam do pracy.`;
                             if (window.logHero) window.logHero(msg, "#4caf50");
                             if (window.logExp) window.logExp(msg, "#4caf50");
                         }
@@ -11877,7 +11959,7 @@ window.openShopAsync = async (namePart) => {
                         const shouldRestoreBerserk = !!window.autoSellState.wasBerserkOn;
                         const shouldResumeExp = !!window.autoSellState.wasExpingBeforeSell;
 
-      // PeĹ‚ny, bezwarunkowy Reset po zakoĹ„czeniu sprzedaĹĽy
+      // Pełny, bezwarunkowy Reset po zakończeniu sprzedaży
                         window.autoSellState = { active: false, step: 0, oldGold: 0, bagToSell: 1, nextActionTime: 0, lastFreeSlots: 0, failedNPCs: [], shopWaitStartTime: 0, targetNpc: null, wasExpingBeforeSell: false, wasBerserkOn: false };
                         window.isExpSuspended = false;
                         window.isRushing = false;
@@ -11889,7 +11971,7 @@ window.openShopAsync = async (namePart) => {
                         let closeBtn = document.querySelector('.shop-close-btn, .close-button, .window-close, .close-cross');
                         if (closeBtn) closeBtn.click();
 
-                        // Awaryjnie upewniamy siÄ™, ĹĽe bieg Exp zostanie wznowiony, jeĹ›li byĹ‚ wczeĹ›niej aktywny
+                        // Awaryjnie upewniamy się, że bieg Exp zostanie wznowiony, jeśli był wcześniej aktywny
                         if (shouldRestoreBerserk) {
                              botSettings.berserk.enabled = true;
                              let chkBerserk = document.getElementById('berserkEnabled');
@@ -12018,7 +12100,7 @@ window.openShopAsync = async (namePart) => {
                 await emitF11();
             }
             window.__fullscreenByBotForTrap = true;
-            HeroLogger.emit('INFO', 'FULLSCREEN_ON', 'WĹ‚Ä…czono peĹ‚ny ekran przed pierwszÄ… akcjÄ… zapadki.', "#4fc3f7");
+            HeroLogger.emit('INFO', 'FULLSCREEN_ON', 'Włączono pełny ekran przed pierwszą akcją zapadki.', "#4fc3f7");
         }
         async function ensureFullscreenOffAfterTrap() {
             if (!shouldToggleFullscreenForTrap()) {
@@ -12037,7 +12119,7 @@ window.openShopAsync = async (namePart) => {
                 await emitF11();
             }
             window.__fullscreenByBotForTrap = false;
-            HeroLogger.emit('INFO', 'FULLSCREEN_OFF', 'WyĹ‚Ä…czono peĹ‚ny ekran po zapadce i wznowieniu ruchu.', "#4fc3f7");
+            HeroLogger.emit('INFO', 'FULLSCREEN_OFF', 'Wyłączono pełny ekran po zapadce i wznowieniu ruchu.', "#4fc3f7");
         }
 
         function randomDelay(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
@@ -12167,7 +12249,7 @@ window.openShopAsync = async (namePart) => {
             if (!window.margoneuroPausedByQuiz) {
                 window.margoneuroPausedByQuiz = true;
                 window.margoneuroWasRunningBeforeQuiz = isMargoneuroRunningForQuizSync(snap);
-                logQuizSync("Quiz wykryty, pauzujÄ™ bota");
+                logQuizSync("Quiz wykryty, pauzuję bota");
             }
 
             if (snap.exping) {
@@ -12233,7 +12315,7 @@ window.openShopAsync = async (namePart) => {
 
             const btn = document.getElementById('btnStartStop');
             if (btn) {
-                btn.innerHTML = '<span class="btn-icon">âŹ±</span><span>STOP</span>';
+                btn.innerHTML = '<span class="btn-icon">⏱</span><span>STOP</span>';
                 btn.style.color = "#f44336";
                 btn.style.borderColor = "#f44336";
             }
@@ -12355,7 +12437,7 @@ window.openShopAsync = async (namePart) => {
                 HERO_LOG.info("Pre-captcha Vision click result", data);
                 return !!(data && data.ok);
             } catch (e) {
-                HERO_LOG.warn("Nie udaĹ‚o siÄ™ kliknÄ…Ä‡ pre-captcha przez Vision", e);
+                HERO_LOG.warn("Nie udało się kliknąć pre-captcha przez Vision", e);
                 return false;
             }
         }
@@ -12382,7 +12464,7 @@ window.openShopAsync = async (namePart) => {
             });
         }
 
-        // --- PRECYZYJNA DETEKCJA MAĹEGO OKNA ---
+        // --- PRECYZYJNA DETEKCJA MAŁEGO OKNA ---
         function isVisibleCaptchaElement(el) {
             if (!el) return false;
             const style = window.getComputedStyle(el);
@@ -12395,8 +12477,8 @@ window.openShopAsync = async (namePart) => {
                 if (!isVisibleCaptchaElement(el)) continue;
                 const text = (el.innerText || el.textContent || "").toLowerCase();
                 const hasTrapKeyword = /(zapadka|zagadka|captcha)/i.test(text);
-                const hasPreKeyword = /(pojawi|za\\s*\\d+\\s*s|rozwiÄ…ĹĽ\\s*teraz|rozwiaz\\s*teraz|solve\\s*now)/i.test(text);
-                const hasSolveUi = /(zaznacz|potwierdzam|pozostaĹ‚ych\\s*prĂłb|pozostalych\\s*prob)/i.test(text);
+                const hasPreKeyword = /(pojawi|za\\s*\\d+\\s*s|rozwiąż\\s*teraz|rozwiaz\\s*teraz|solve\\s*now)/i.test(text);
+                const hasSolveUi = /(zaznacz|potwierdzam|pozostałych\\s*prób|pozostalych\\s*prob)/i.test(text);
                 if (hasSolveUi) continue;
                 if (hasTrapKeyword && hasPreKeyword) {
                     return el;
@@ -12418,10 +12500,10 @@ window.openShopAsync = async (namePart) => {
                     txt: (el.textContent || "").trim().toLowerCase(),
                     area: Math.max(1, el.offsetWidth * el.offsetHeight)
                 }))
-                .filter(item => /rozwiÄ…ĹĽ\s*teraz|rozwiaz\s*teraz|solve\s*now|rozwiÄ…ĹĽ|rozwiaz|solve|start/i.test(item.txt));
+                .filter(item => /rozwiąż\s*teraz|rozwiaz\s*teraz|solve\s*now|rozwiąż|rozwiaz|solve|start/i.test(item.txt));
 
             const preferred = candidates
-                .filter(item => /rozwiÄ…ĹĽ\s*teraz|rozwiaz\s*teraz|solve\s*now/.test(item.txt))
+                .filter(item => /rozwiąż\s*teraz|rozwiaz\s*teraz|solve\s*now/.test(item.txt))
                 .sort((a, b) => a.area - b.area);
             if (preferred.length) return preferred[0].el;
 
@@ -12429,14 +12511,14 @@ window.openShopAsync = async (namePart) => {
             return candidates.length ? candidates[0].el : null;
         }
 
-        // --- PRECYZYJNA DETEKCJA GĹĂ“WNEGO OKNA ---
+        // --- PRECYZYJNA DETEKCJA GŁÓWNEGO OKNA ---
         function getCaptchaWindow() {
             const elements = document.querySelectorAll('.captcha, .margo-window[data-wnd="zapadka"], .captcha-window, .zapadka-window, .c-window[id="zapadka"], .margo-window, .c-window, [role="dialog"]');
             for (let el of elements) {
                 if (!isVisibleCaptchaElement(el)) continue;
                 const text = (el.innerText || el.textContent || "").toLowerCase();
-                const hasSolveUi = /(zaznacz|potwierdzam|powodzenia|pozostaĹ‚ych\\s*prĂłb|pozostalych\\s*prob)/i.test(text);
-                const isPreOnly = /(pojawi\\s*siÄ™\\s*za|pojawi\\s*sie\\s*za|rozwiÄ…ĹĽ\\s*teraz|rozwiaz\\s*teraz|solve\\s*now)/i.test(text) && !hasSolveUi;
+                const hasSolveUi = /(zaznacz|potwierdzam|powodzenia|pozostałych\\s*prób|pozostalych\\s*prob)/i.test(text);
+                const isPreOnly = /(pojawi\\s*się\\s*za|pojawi\\s*sie\\s*za|rozwiąż\\s*teraz|rozwiaz\\s*teraz|solve\\s*now)/i.test(text) && !hasSolveUi;
                 if (!isPreOnly && hasSolveUi) {
                     return el;
                 }
@@ -12446,8 +12528,8 @@ window.openShopAsync = async (namePart) => {
 
         const symbolMap = {
             "gwiazdk": "*", "tyld": "~", "kratk": "#", "daszek": "^",
-            "wykrzyknik": "!", "dolar": "$", "maĹ‚p": "@", "procent": "%",
-            "ampersand": "&", "plus": "+", "minus": "-", "zapytani": "?", "rĂłwna": "="
+            "wykrzyknik": "!", "dolar": "$", "małp": "@", "procent": "%",
+            "ampersand": "&", "plus": "+", "minus": "-", "zapytani": "?", "równa": "="
         };
 
         setInterval(async () => {
@@ -12461,7 +12543,7 @@ window.openShopAsync = async (namePart) => {
                 noteQuizVisibleForSync();
             }
 
-            // 1. ZAMKNIÄCIE ZAPADKI I WZNOWIENIE PRACY
+            // 1. ZAMKNIĘCIE ZAPADKI I WZNOWIENIE PRACY
             if (!fullWin && !preWin) {
                 const hadTrapSession = window.__trapSessionActive || (window.__trapSeenAt && (Date.now() - window.__trapSeenAt < 45000));
                 window.__trapSessionActive = false;
@@ -12485,8 +12567,8 @@ window.openShopAsync = async (namePart) => {
                     await ensureFullscreenOffAfterTrap();
                     let delay = randomDelay(1000, 2000);
                     window.margoneuroQuizSolvedAt = Date.now();
-                    if (window.logExp) window.logExp(`âś… Zapadka zniknÄ™Ĺ‚a. Wznawiam pracÄ™ za ${(delay/1000).toFixed(1)}s...`, "#4caf50");
-                    if (window.logHero) window.logHero(`âś… Zapadka zniknÄ™Ĺ‚a. Wznawiam pracÄ™ za ${(delay/1000).toFixed(1)}s...`, "#4caf50");
+                    if (window.logExp) window.logExp(`✅ Zapadka zniknęła. Wznawiam pracę za ${(delay/1000).toFixed(1)}s...`, "#4caf50");
+                    if (window.logHero) window.logHero(`✅ Zapadka zniknęła. Wznawiam pracę za ${(delay/1000).toFixed(1)}s...`, "#4caf50");
 
                     setTimeout(() => {
                         if (getCaptchaWindow() || getPreCaptcha()) {
@@ -12499,20 +12581,20 @@ window.openShopAsync = async (namePart) => {
                             window.margoneuroWasRunningBeforeQuiz &&
                             window.margoneuroStoppedManually
                         ) {
-                            logQuizSync("Bot byĹ‚ zatrzymany rÄ™cznie, nie wznawiam");
+                            logQuizSync("Bot był zatrzymany ręcznie, nie wznawiam");
                             resetTrapResumeState();
                             return;
                         }
                         const resumed = resumeBotsAfterTrap(resumeSnapshot);
                         if (resumed) {
-                            logQuizSync("Quiz zniknÄ…Ĺ‚, wznawiam bota");
+                            logQuizSync("Quiz zniknął, wznawiam bota");
                             resetTrapResumeState();
-                            if (window.logExp) window.logExp("â–¶ Bot wznowiony po zapadce.", "#4caf50");
-                            if (window.logHero) window.logHero("â–¶ Patrol wznowiony po zapadce.", "#4caf50");
+                            if (window.logExp) window.logExp("▶ Bot wznowiony po zapadce.", "#4caf50");
+                            if (window.logHero) window.logHero("▶ Patrol wznowiony po zapadce.", "#4caf50");
                         } else {
                             window.__trapResumeQueued = false;
                             window.__captchaPhase = "none";
-                            if (window.logHero) window.logHero("âš ď¸Ź Zapadka zniknÄ™Ĺ‚a, ale nie udaĹ‚o siÄ™ odtworzyÄ‡ stanu patrolu. Snapshot zostawiony do kolejnej prĂłby.", "#ff9800");
+                            if (window.logHero) window.logHero("⚠️ Zapadka zniknęła, ale nie udało się odtworzyć stanu patrolu. Snapshot zostawiony do kolejnej próby.", "#ff9800");
                         }
                     }, delay);
                 } else if (hadTrapSession && !window.__trapBotPausedByCaptcha) {
@@ -12523,12 +12605,12 @@ window.openShopAsync = async (namePart) => {
 
             // 2. ZAPISANIE STANU BOTA
             if (window.__captchaPhase === "none") {
-                HeroLogger.emit('INFO', 'TRAP_DETECTED', 'Wykryto zapadkÄ™/captcha.', "#ffeb3b");
+                HeroLogger.emit('INFO', 'TRAP_DETECTED', 'Wykryto zapadkę/captcha.', "#ffeb3b");
                 window.__trapResumeQueued = false;
                 noteQuizVisibleForSync(ensureTrapResumeSnapshot("detected"));
             }
 
-            // 3. OBSĹUGA MAĹEGO OKNA
+            // 3. OBSŁUGA MAŁEGO OKNA
             if (shouldToggleFullscreenForTrap() && (preWin || fullWin) && !window.__fullscreenByBotForTrap) {
                 await ensureFullscreenOnForTrap();
             }
@@ -12550,8 +12632,8 @@ window.openShopAsync = async (namePart) => {
                 const clickerOnline = await checkMargoclickerAlive();
                 if (!clickerOnline) {
                     window.__captchaPhase = "manual_waiting";
-                    if (window.logExp) window.logExp("đź›‘ MargoClicker nie dziaĹ‚a â€” nie rozwiÄ…zujÄ™ zapadki automatycznie.", "#ff9800");
-                    if (window.logHero) window.logHero("đź›‘ MargoClicker nie dziaĹ‚a â€” czekam na rÄ™czne rozwiÄ…zanie zapadki.", "#ff9800");
+                    if (window.logExp) window.logExp("🛑 MargoClicker nie działa — nie rozwiązuję zapadki automatycznie.", "#ff9800");
+                    if (window.logHero) window.logHero("🛑 MargoClicker nie działa — czekam na ręczne rozwiązanie zapadki.", "#ff9800");
                     window.__captchaLock = false;
                     return;
                 }
@@ -12562,8 +12644,8 @@ window.openShopAsync = async (namePart) => {
                 if (window.logExp) {
                     window.logExp(
                         usedVisionPreCaptchaClick
-                            ? `đź§© KlikniÄ™to â€žRozwiÄ…ĹĽ terazâ€ť przez endpoint /pre_captcha/click (prĂłba ${window.__preCaptchaAttempts}).`
-                            : `âš ď¸Ź Nie udaĹ‚o siÄ™ kliknÄ…Ä‡ â€žRozwiÄ…ĹĽ terazâ€ť przez /pre_captcha/click (prĂłba ${window.__preCaptchaAttempts}).`,
+                            ? `🧩 Kliknięto „Rozwiąż teraz” przez endpoint /pre_captcha/click (próba ${window.__preCaptchaAttempts}).`
+                            : `⚠️ Nie udało się kliknąć „Rozwiąż teraz” przez /pre_captcha/click (próba ${window.__preCaptchaAttempts}).`,
                         usedVisionPreCaptchaClick ? "#ab47bc" : "#ff9800"
                     );
                 }
@@ -12572,12 +12654,12 @@ window.openShopAsync = async (namePart) => {
                 return;
             }
 
-            // 4. OBSĹUGA GĹĂ“WNEGO OKNA ZAPADKI
+            // 4. OBSŁUGA GŁÓWNEGO OKNA ZAPADKI
             if (fullWin) {
                 if (!window.__trapBotPausedByCaptcha) {
                     pauseBotsForTrap(ensureTrapResumeSnapshot("full"));
-                    if (window.logExp) window.logExp("đźš¨ Wstrzymano bota na czas wĹ‚aĹ›ciwej zapadki (pre-zapadka nie zatrzymuje bota).", "#ffeb3b");
-                    if (window.logHero) window.logHero("đźš¨ Wstrzymano bota na czas wĹ‚aĹ›ciwej zapadki (pre-zapadka nie zatrzymuje bota).", "#ffeb3b");
+                    if (window.logExp) window.logExp("🚨 Wstrzymano bota na czas właściwej zapadki (pre-zapadka nie zatrzymuje bota).", "#ffeb3b");
+                    if (window.logHero) window.logHero("🚨 Wstrzymano bota na czas właściwej zapadki (pre-zapadka nie zatrzymuje bota).", "#ffeb3b");
                 }
                 const now = Date.now();
                 if (now - (window.__captchaSolveLastAttemptAt || 0) < 900) {
@@ -12597,8 +12679,8 @@ window.openShopAsync = async (namePart) => {
                 const clickerOnline = await checkMargoclickerAlive();
                 if (!clickerOnline) {
                     window.__captchaPhase = "manual_waiting";
-                    if (window.logExp) window.logExp("đź›‘ MargoClicker nie dziaĹ‚a â€” pomijam auto-rozwiÄ…zywanie zapadki.", "#ff9800");
-                    if (window.logHero) window.logHero("đź›‘ Brak margoclicker.py: czekam na rÄ™czne rozwiÄ…zanie.", "#ff9800");
+                    if (window.logExp) window.logExp("🛑 MargoClicker nie działa — pomijam auto-rozwiązywanie zapadki.", "#ff9800");
+                    if (window.logHero) window.logHero("🛑 Brak margoclicker.py: czekam na ręczne rozwiązanie.", "#ff9800");
                     window.__captchaLock = false;
                     return;
                 }
@@ -12606,7 +12688,7 @@ window.openShopAsync = async (namePart) => {
                 if (botSettings.exp?.captchaAlert || botSettings.discord?.alerts?.captcha) {
                     if (!window.__lastCaptchaNotif || Date.now() - window.__lastCaptchaNotif > 15000) {
                         window.__lastCaptchaNotif = Date.now();
-                        if (botSettings.discord?.alerts?.captcha) window.sendDiscordWebhook("đźš¨ [ZAPADKA] Wykryto Captcha!", "Bot prĂłbuje jÄ… wĹ‚aĹ›nie rozwiÄ…zaÄ‡...", 16711680);
+                        if (botSettings.discord?.alerts?.captcha) window.sendDiscordWebhook("🚨 [ZAPADKA] Wykryto Captcha!", "Bot próbuje ją właśnie rozwiązać...", 16711680);
                         if (botSettings.exp?.captchaAlert) {
                             try { let audio = new Audio('https://actions.google.com/sounds/v1/alarms/digital_watch_alarm_long.ogg'); audio.play(); setTimeout(()=>audio.pause(), 2000); } catch(e){}
                         }
@@ -12619,7 +12701,7 @@ window.openShopAsync = async (namePart) => {
                 if (resolveNowBtn) {
                     const clickedByVision = await clickPreCaptchaViaVision();
                     if (clickedByVision) {
-                        if (window.logExp) window.logExp("đź§© Klikam â€žRozwiÄ…ĹĽ terazâ€ť przez /pre_captcha/click.", "#ab47bc");
+                        if (window.logExp) window.logExp("🧩 Klikam „Rozwiąż teraz” przez /pre_captcha/click.", "#ab47bc");
                         window.__captchaLock = false;
                         return;
                     }
@@ -12670,23 +12752,23 @@ window.openShopAsync = async (namePart) => {
                              const confirmed = await clickConfirmViaVision();
                              if (!confirmed) await humanClickAsync(confirmBtn);
                         } else {
-                            if (window.logExp) window.logExp("âš ď¸Ź Nie znalazĹ‚em przycisku potwierdzenia zapadki.", "#ff9800");
+                            if (window.logExp) window.logExp("⚠️ Nie znalazłem przycisku potwierdzenia zapadki.", "#ff9800");
                             window.__captchaPhase = "manual_waiting";
                         }
                     } else {
-                        if (window.logExp) window.logExp("âš ď¸Ź BĹ‚Ä…d: Nie znalazĹ‚em w opcjach symbolu: " + targetSymbol, "#ff9800");
+                        if (window.logExp) window.logExp("⚠️ Błąd: Nie znalazłem w opcjach symbolu: " + targetSymbol, "#ff9800");
                         window.__captchaPhase = "manual_waiting";
                     }
                 } else {
-                    if (window.logExp) window.logExp("âš ď¸Ź Nie rozpoznano pytania w zapadce. RozwiÄ…ĹĽ rÄ™cznie!", "#ff9800");
+                    if (window.logExp) window.logExp("⚠️ Nie rozpoznano pytania w zapadce. Rozwiąż ręcznie!", "#ff9800");
                     window.__captchaPhase = "manual_waiting";
                 }
 
                 window.__captchaLock = false;
             }
         }, 500);
-    } // <--- TO JEST TA KLAMRA, KTĂ“RA WCZEĹšNIEJ ZNIKNÄĹA!
-// --- CZÄĹšÄ† 2: DETEKCJA GRACZY (Smart Player Radar - Zbiorczy) ---
+    } // <--- TO JEST TA KLAMRA, KTÓRA WCZEŚNIEJ ZNIKNĘŁA!
+// --- CZĘŚĆ 2: DETEKCJA GRACZY (Smart Player Radar - Zbiorczy) ---
     window.alertedPlayersList = window.alertedPlayersList || new Set();
     window.__playerThreatMemory = window.__playerThreatMemory || {};
 
@@ -12757,15 +12839,15 @@ window.openShopAsync = async (namePart) => {
             }
 
             if (newPlayers.length > 0) {
-                let msgTitle = newPlayers.length === 1 ? `đź‘ď¸Ź Wykryto Gracza!` : `đź‘ď¸Ź Wykryto Graczy (${newPlayers.length})!`;
+                let msgTitle = newPlayers.length === 1 ? `👁️ Wykryto Gracza!` : `👁️ Wykryto Graczy (${newPlayers.length})!`;
                 let msgBody = newPlayers.map(p => `- ${p.nick} (${p.lvl} lvl)`).join('\n');
-                let logBody = newPlayers.map(p => `${p.nick} (${p.lvl} lvl)`).join('<br> &nbsp;&nbsp;&nbsp; â†ł ');
+                let logBody = newPlayers.map(p => `${p.nick} (${p.lvl} lvl)`).join('<br> &nbsp;&nbsp;&nbsp; ↳ ');
 
                 if (shouldFlee) {
                     const chased = threatPlayers.some(t => t.chase);
-                    if (window.logExp) window.logExp(`đźš¨ UWAGA! WrĂłg ${nearestThreatDist <= 7 ? "â‰¤7" : "â‰¤8"} kratek${chased ? " i goni" : ""} na mapie PvP! Ewakuacja!`, "#ff5252");
+                    if (window.logExp) window.logExp(`🚨 UWAGA! Wróg ${nearestThreatDist <= 7 ? "≤7" : "≤8"} kratek${chased ? " i goni" : ""} na mapie PvP! Ewakuacja!`, "#ff5252");
 
-                    // Banujemy mapÄ™ w logice pÄ™tli na rĂłwne 10 minut
+                    // Banujemy mapę w logice pętli na równe 10 minut
                     let banTime = Date.now() + 10 * 60 * 1000;
                     window.__bannedMaps = window.__bannedMaps || {};
                     window.__bannedMaps[Engine.map.d.name] = banTime;
@@ -12774,7 +12856,7 @@ window.openShopAsync = async (namePart) => {
                     if (!window.mapClearTimes) window.mapClearTimes = {};
                     window.mapClearTimes[Engine.map.d.name] = banTime;
 
-                    // Przerywamy obecnÄ… akcjÄ™ i wymuszamy natychmiastowe obliczenie nowej drogi
+                    // Przerywamy obecną akcję i wymuszamy natychmiastowe obliczenie nowej drogi
                     expCurrentTargetId = null;
                     window.expCurrentTargetGroupKey = null;
                     window.expLastMoveTx = -1;
@@ -12786,30 +12868,30 @@ window.openShopAsync = async (namePart) => {
                     if (typeof Engine.hero.stop === 'function') Engine.hero.stop();
                     const nearestSafe = getNearestSafeMapFromCurrent(Engine.map.d.name);
                     if (nearestSafe && nearestSafe !== Engine.map.d.name && typeof window.rushToMap === 'function') {
-                        window.logExp?.(`đź›ˇď¸Ź Uciekam na najbliĹĽszÄ… bezpiecznÄ… mapÄ™: [${nearestSafe}]`, "#80cbc4");
+                        window.logExp?.(`🛡️ Uciekam na najbliższą bezpieczną mapę: [${nearestSafe}]`, "#80cbc4");
                         window.rushToMap(nearestSafe);
                     }
                 } else {
                     // Tradycyjne powiadomienia i (ewentualne) zatrzymanie bota
                     if (checkBrowser) {
-                        if (window.logExp) window.logExp(`đź‘ď¸Ź Wykryto obcych:<br> &nbsp;&nbsp;&nbsp; â†ł ${logBody}`, "#ffb300");
+                        if (window.logExp) window.logExp(`👁️ Wykryto obcych:<br> &nbsp;&nbsp;&nbsp; ↳ ${logBody}`, "#ffb300");
                         if (Notification.permission === "granted") new Notification(msgTitle, { body: msgBody });
                     }
                     if (checkDiscord) {
                         let mapName = typeof Engine !== 'undefined' ? Engine.map.d.name : "Nieznana Mapa";
                         window.sendDiscordWebhook(msgTitle, `${msgBody}\n**Mapa:** ${mapName}`, 16711680);
                     }
-                    // JeĹ›li ucieczka NIE zadziaĹ‚aĹ‚a, ale opcja Stopu jest wĹ‚Ä…czona
+                    // Jeśli ucieczka NIE zadziałała, ale opcja Stopu jest włączona
                     if (botSettings.exp.playerAlertStopBot || botSettings.discord?.stop?.player) {
                         if (typeof stopPatrol === 'function') stopPatrol(true);
                         if (window.isExping) { let btn = document.getElementById('btnStartExp'); if (btn) btn.click(); }
-                        if (window.logExp) window.logExp(`đź›‘ Zatrzymano bota, poniewaĹĽ wykryto intruzĂłw!`, "#f44336");
+                        if (window.logExp) window.logExp(`🛑 Zatrzymano bota, ponieważ wykryto intruzów!`, "#f44336");
                     }
                 }
             }
             if (shouldFlee && newPlayers.length === 0) {
                 const chased = threatPlayers.some(t => t.chase);
-                if (window.logExp) window.logExp(`đźš¨ PoĹ›cig na PvP (${nearestThreatDist} kr.). KontynuujÄ™ ewakuacjÄ™${chased ? " (gracz siÄ™ zbliĹĽa)" : ""}.`, "#ff7043");
+                if (window.logExp) window.logExp(`🚨 Pościg na PvP (${nearestThreatDist} kr.). Kontynuuję ewakuację${chased ? " (gracz się zbliża)" : ""}.`, "#ff7043");
                 let banTime = Date.now() + 10 * 60 * 1000;
                 window.__bannedMaps = window.__bannedMaps || {};
                 window.__bannedMaps[Engine.map.d.name] = banTime;
@@ -12834,7 +12916,7 @@ window.openShopAsync = async (namePart) => {
             window.__playerThreatMemory = {};
         }
     }, 1000);
-    // --- CZÄĹšÄ† 3: OBSERWATOR CZATU PRYWATNEGO (MutationObserver) ---
+    // --- CZĘŚĆ 3: OBSERWATOR CZATU PRYWATNEGO (MutationObserver) ---
         window.__chatDomObserver?.disconnect?.();
         window.__seenPrivs = window.__seenPrivs || new Set();
 
@@ -12853,13 +12935,13 @@ window.openShopAsync = async (namePart) => {
             return (typeof Engine !== 'undefined' && Engine.hero && Engine.hero.d) ? Engine.hero.d.nick : null;
         }
 
-        // Zainicjuj listÄ™ widzianych wiadomoĹ›ci przy starcie, aby nie spamowaÄ‡ starymi privami
+        // Zainicjuj listę widzianych wiadomości przy starcie, aby nie spamować starymi privami
         for (const line of getPrivateChatLines()) {
             window.__seenPrivs.add(line);
         }
 
         window.__chatDomObserver = new MutationObserver(() => {
-            // DziaĹ‚a tylko gdy bot pracuje (Exp lub Patrol) i opcja jest ON
+            // Działa tylko gdy bot pracuje (Exp lub Patrol) i opcja jest ON
             let isBotActive = window.isExping || (typeof isPatrolling !== 'undefined' && isPatrolling);
            let checkBrowser = botSettings.exp?.chatAlert;
             let checkDiscord = botSettings.discord?.alerts?.chat;
@@ -12872,30 +12954,30 @@ window.openShopAsync = async (namePart) => {
                 if (window.__seenPrivs.has(line)) continue;
                 window.__seenPrivs.add(line);
 
-                // Sprawdzamy czy wiadomoĹ›Ä‡ jest DO NAS (nadawca -> Ja:)
+                // Sprawdzamy czy wiadomość jest DO NAS (nadawca -> Ja:)
                 if (line.includes(`-> ${myNick}:`)) {
-                    // WyciÄ…ganie nadawcy i treĹ›ci
-                    // Format: [Prywatny] Nadawca -> Ja: TreĹ›Ä‡ wiadomoĹ›ci
+                    // Wyciąganie nadawcy i treści
+                    // Format: [Prywatny] Nadawca -> Ja: Treść wiadomości
                     const senderMatch = line.match(/\[Prywatny\]\s+(.*?)\s+->/);
-                    const sender = senderMatch ? senderMatch[1] : "KtoĹ›";
+                    const sender = senderMatch ? senderMatch[1] : "Ktoś";
                     const message = line.split(`${myNick}:`)[1]?.trim() || "...";
 
-                  // NiezaleĹĽna PrzeglÄ…darka
+                  // Niezależna Przeglądarka
                     if (checkBrowser) {
                         if (window.logExp) window.logExp(`đź“© PRIV od ${sender}: ${message}`, "#e040fb");
-                        if (Notification.permission === "granted") new Notification(`đź“© Nowa wiadomoĹ›Ä‡ (Margo)`, { body: `${sender}: ${message}`, icon: 'https://www.margonem.pl/favicon.ico' });
+                        if (Notification.permission === "granted") new Notification(`📩 Nowa wiadomość (Margo)`, { body: `${sender}: ${message}`, icon: 'https://www.margonem.pl/favicon.ico' });
                     }
 
-                    // NiezaleĹĽny Discord
+                    // Niezależny Discord
                     if (checkDiscord) {
-                        window.sendDiscordWebhook("đź“© Otrzymano WiadomoĹ›Ä‡ PrywatnÄ…", `**Od:** ${sender}\n**TreĹ›Ä‡:** ${message}`, 14828287);
+                        window.sendDiscordWebhook("📩 Otrzymano Wiadomość Prywatną", `**Od:** ${sender}\n**Treść:** ${message}`, 14828287);
                     }
 
-                    // NiezaleĹĽny Stop
+                    // Niezależny Stop
                     if (botSettings.exp.chatAlertStopBot || botSettings.discord?.stop?.chat) {
                         if (typeof stopPatrol === 'function') stopPatrol(true);
                         if (window.isExping) { let btn = document.getElementById('btnStartExp'); if (btn) btn.click(); }
-                        if (window.logExp) window.logExp(`đź›‘ Zatrzymano bota z powodu wiadomoĹ›ci prywatnej!`, "#f44336");
+                        if (window.logExp) window.logExp(`🛑 Zatrzymano bota z powodu wiadomości prywatnej!`, "#f44336");
                     }
                     // 3. Opcjonalne zatrzymanie bota
                     if (botSettings.exp.chatAlertStopBot) {
@@ -12904,17 +12986,17 @@ window.openShopAsync = async (namePart) => {
                             let btn = document.getElementById('btnStartExp');
                             if (btn) btn.click();
                         }
-                        if (window.logExp) window.logExp(`đź›‘ Zatrzymano bota z powodu wiadomoĹ›ci prywatnej!`, "#f44336");
+                        if (window.logExp) window.logExp(`🛑 Zatrzymano bota z powodu wiadomości prywatnej!`, "#f44336");
                     }
                 }
             }
         });
 
-        // PodpiÄ™cie pod okno czatu
+        // Podpięcie pod okno czatu
         const chatContainer = document.querySelector(".new-chat-window") || document.querySelector(".chat-layer") || document.body;
         window.__chatDomObserver.observe(chatContainer, { childList: true, subtree: true });
 
-        // CzyĹ›Ä‡ listÄ™ widzianych wiadomoĹ›ci przy wyĹ‚Ä…czaniu bota, ĹĽeby przy starcie znĂłw byĹ‚ Ĺ›wieĹĽy
+        // Czyść listę widzianych wiadomości przy wyłączaniu bota, żeby przy starcie znów był świeży
         setInterval(() => {
             let isBotActive = window.isExping || (typeof isPatrolling !== 'undefined' && isPatrolling);
             if (!isBotActive) window.__seenPrivs.clear();
@@ -12937,20 +13019,20 @@ window.openShopAsync = async (namePart) => {
                 return;
             }
 
-            // --- KRYTYCZNE WYJÄ„TKI (Kiedy bot stoi CELOWO i nie wolno mu przeszkadzaÄ‡) ---
+            // --- KRYTYCZNE WYJĄTKI (Kiedy bot stoi CELOWO i nie wolno mu przeszkadzać) ---
             if (Engine.battle && Engine.battle.show) { window.stuckIdleCount = 0; return; }
             if (Engine.dead || Engine.hero.d.dead) { window.stuckIdleCount = 0; return; }
             if (window.isHealLocked || window.isRegeneratingToFull) { window.stuckIdleCount = 0; return; }
             if (window.__captchaPhase && window.__captchaPhase !== "none") { window.stuckIdleCount = 0; return; }
 
-            // WyjÄ…tki Sklepowe (Auto-Poty, Auto-SprzedaĹĽ, Bieg do NPC)
+            // Wyjątki Sklepowe (Auto-Poty, Auto-Sprzedaż, Bieg do NPC)
             if (window.autoSellState && window.autoSellState.active) { window.stuckIdleCount = 0; return; }
             if (window.autoPotState && window.autoPotState.active) { window.stuckIdleCount = 0; return; }
             if (window.autoBuyTask) { window.stuckIdleCount = 0; return; }
             if (window.npcWalkInterval) { window.stuckIdleCount = 0; return; }
             if (window.isExpSuspended) { window.stuckIdleCount = 0; return; }
 
-        // WyjÄ…tek Czekania na Respawn / brak celu
+        // Wyjątek Czekania na Respawn / brak celu
 if (
     window.isExping &&
     (
@@ -12971,9 +13053,9 @@ if (
             if (!isMoving) {
                 if (window.lastStuckCheckPos.x === currentX && window.lastStuckCheckPos.y === currentY && window.lastStuckCheckPos.map === currentMap) {
                     window.stuckIdleCount++;
-                    // Odskakuje dopiero po 6 sekundach fizycznego braku ruchu, jeĹ›li ĹĽaden wyjÄ…tek z listy wyĹĽej go nie uchroniĹ‚
+                    // Odskakuje dopiero po 6 sekundach fizycznego braku ruchu, jeśli żaden wyjątek z listy wyżej go nie uchronił
                     if (window.stuckIdleCount >= 6) {
-                        const antiStuckMsg = "đź”„ [Anti-Stuck] Wykryto zaciÄ™cie! Lekko odskakujÄ™...";
+                        const antiStuckMsg = "🔄 [Anti-Stuck] Wykryto zacięcie! Lekko odskakuję...";
                         if (window.isExping && window.logExp) window.logExp(antiStuckMsg, "#00e5ff");
                         else if (window.logHero) window.logHero(antiStuckMsg, "#00e5ff");
 
@@ -12992,7 +13074,7 @@ if (
                                     window.logExp(`đźŽŻ [Anti-Stuck] Zmieniam cel ${stuckTargetId}${suffix}`, "#ffb74d");
                                 }
                             } else if (window.logExp && (window.expCurrentTargetGroupKey || window.expCurrentTargetId || window.expFocusTarget)) {
-                                window.logExp("đźŽŻ [Anti-Stuck] ResetujÄ™ aktualny cel i wybieram nowy.", "#ffb74d");
+                                window.logExp("🎯 [Anti-Stuck] Resetuję aktualny cel i wybieram nowy.", "#ffb74d");
                             }
                             window.expCurrentTargetGroupKey = null;
                             expCurrentTargetId = null;
@@ -13015,56 +13097,56 @@ if (
             }
         }, 1000);
     }
-  // --- DAEMON: ZABEZPIECZENIE PRZED WYBIEGNIÄCIEM POZA LISTÄ (UNDEFINED FIX) ---
+  // --- DAEMON: ZABEZPIECZENIE PRZED WYBIEGNIĘCIEM POZA LISTĘ (UNDEFINED FIX) ---
         if (!window.undefinedMapFixInstalled) {
             window.undefinedMapFixInstalled = true;
 
-            // Zapisujemy w pamiÄ™ci oryginalnÄ… funkcjÄ™ biegania
+            // Zapisujemy w pamięci oryginalną funkcję biegania
             const originalRushToMap = window.rushToMap;
 
             if (typeof originalRushToMap === 'function') {
-                // Nadpisujemy jÄ… naszÄ… mÄ…drzejszÄ… wersjÄ… - TERAZ PRZYJMUJE WSZYSTKIE ARGUMENTY
+                // Nadpisujemy ją naszą mądrzejszą wersją - TERAZ PRZYJMUJE WSZYSTKIE ARGUMENTY
                 window.rushToMap = function(targetMap, tgtX, tgtY, fullPath, resumePatrol) {
 
-                    // JeĹ›li bot zgĹ‚upieje i sprĂłbuje wziÄ…Ä‡ cel spoza listy
+                    // Jeśli bot zgłupieje i spróbuje wziąć cel spoza listy
                     if (!targetMap || String(targetMap).trim() === 'undefined' || String(targetMap).trim() === 'null') {
 
-                        if (window.logHero) window.logHero("đź”„ ZakoĹ„czono pÄ™tlÄ™. Wracam na pierwszÄ… mapÄ™ z trasy!", "#00e5ff");
+                        if (window.logHero) window.logHero("🔄 Zakończono pętlę. Wracam na pierwszą mapę z trasy!", "#00e5ff");
 
-                        // Awaryjne resetowanie licznikĂłw, niezaleĹĽnie jakiej zmiennej uĹĽywa reszta skryptu
+                        // Awaryjne resetowanie liczników, niezależnie jakiej zmiennej używa reszta skryptu
                         if (typeof window.patrolIndex !== 'undefined') window.patrolIndex = 0;
                         if (typeof window.currentPatrolIndex !== 'undefined') window.currentPatrolIndex = 0;
                         if (typeof window.rushIndex !== 'undefined') window.rushIndex = 0;
 
-                        // Pobranie pierwszej mapy z pamiÄ™ci bota
+                        // Pobranie pierwszej mapy z pamięci bota
                         let firstMap = null;
                         if (window.rushFullPath && window.rushFullPath.length > 0) firstMap = window.rushFullPath[0];
                         else if (window.patrolPath && window.patrolPath.length > 0) firstMap = window.patrolPath[0];
                         else if (window.patrolMaps && window.patrolMaps.length > 0) firstMap = window.patrolMaps[0];
 
                         if (firstMap) {
-                            targetMap = firstMap; // ZastÄ™pujemy 'undefined' poprawnÄ… mapÄ…!
+                            targetMap = firstMap; // Zastępujemy 'undefined' poprawną mapą!
                         } else {
-                            // Twardy stop, jeĹ›li tablice sÄ… caĹ‚kowicie puste
-                            if (window.logHero) window.logHero("âťŚ Brak map do patrolowania! ZatrzymujÄ™ bota.", "#f44336");
+                            // Twardy stop, jeśli tablice są całkowicie puste
+                            if (window.logHero) window.logHero("❌ Brak map do patrolowania! Zatrzymuję bota.", "#f44336");
                             if (typeof stopPatrol === 'function') stopPatrol(true);
                             return;
                         }
                     }
 
-                    // KLUCZOWE: Odpalamy prawdziwy bieg z juĹĽ NAPRAWIONYM celem i PRZEKAZUJEMY FLAGÄ WZNOWIENIA PATROLU!
+                    // KLUCZOWE: Odpalamy prawdziwy bieg z już NAPRAWIONYM celem i PRZEKAZUJEMY FLAGĘ WZNOWIENIA PATROLU!
                     return originalRushToMap(targetMap, tgtX, tgtY, fullPath, resumePatrol);
                 };
             }
         }
-    // --- ĹATKA: EGZORCYZMY NA SKLONOWANYCH OKNACH I NAPRAWA PRZYCISKĂ“W ---
+    // --- ŁATKA: EGZORCYZMY NA SKLONOWANYCH OKNACH I NAPRAWA PRZYCISKÓW ---
         setTimeout(() => {
-            // 1. Usuwanie "duchĂłw" - sklonowanych interfejsĂłw, ktĂłre blokowaĹ‚y przyciski
+            // 1. Usuwanie "duchów" - sklonowanych interfejsów, które blokowały przyciski
             const windowsToClean = ['heroNavGUI', 'heroSettingsGUI', 'heroGatewaysGUI', 'heroGoToGUI', 'heroExpBaseGUI', 'heroExpRecGUI', 'heroInternalMapGUI', 'heroTeleportsGUI'];
             windowsToClean.forEach(id => {
                 let copies = document.querySelectorAll('#' + id);
                 if (copies.length > 1) {
-                    // Usuwamy wszystkie OPRĂ“CZ ostatniego (bo to ostatnie jest widoczne)
+                    // Usuwamy wszystkie OPRÓCZ ostatniego (bo to ostatnie jest widoczne)
                     for (let i = 0; i < copies.length - 1; i++) {
                         copies[i].remove();
                     }
@@ -13072,7 +13154,7 @@ if (
             });
         }, 3000);
 
-        // 2. Kuloodporne podpiÄ™cie klikniÄ™Ä‡ (Nadpisuje stare, zepsute eventy)
+        // 2. Kuloodporne podpięcie kliknięć (Nadpisuje stare, zepsute eventy)
         document.addEventListener('click', (e) => {
             if (e.target && e.target.closest('#btnOpenBrowserAlertsModule')) {
                 e.stopPropagation();
@@ -13101,9 +13183,9 @@ if (
                 }
             }
         }, true);
-    // --- OSTATECZNA ĹATKA UI (TELEPORTY + PRZEĹąROCZYSTOĹšÄ†) ---
+    // --- OSTATECZNA ŁATKA UI (TELEPORTY + PRZEŹROCZYSTOŚĆ) ---
         setTimeout(() => {
-            // 1. Kasujemy "Duchy" - usuwamy okna z klasÄ… 'hero-window' ktĂłre wiszÄ… luzem
+            // 1. Kasujemy "Duchy" - usuwamy okna z klasą 'hero-window' które wiszą luzem
             document.querySelectorAll('body > .hero-window#heroTeleportsGUI').forEach(el => el.remove());
 
             const windowsToClean = ['heroNavGUI', 'heroSettingsGUI', 'heroGatewaysGUI', 'heroGoToGUI', 'heroExpBaseGUI', 'heroExpRecGUI', 'heroInternalMapGUI', 'browserAlertsSettingsGUI', 'discordSettingsGUI', 'heroTeleportsGUI'];
@@ -13114,14 +13196,14 @@ if (
                 }
             });
 
-            // 2. Naprawiamy przycisk TeleportĂłw (WyĹ›wietlanie w dobrej zakĹ‚adce)
+            // 2. Naprawiamy przycisk Teleportów (Wyświetlanie w dobrej zakładce)
             let properTpContainer = document.querySelector('#teleportsContainer #heroTeleportsGUI');
             let btnTp = document.getElementById('btnOpenTeleports');
 
             if (btnTp && properTpContainer) {
-                // Nadpisujemy oryginalnÄ… funkcjÄ™ rysujÄ…cÄ…, by na pewno trafiaĹ‚a do dobrego diva
+                // Nadpisujemy oryginalną funkcję rysującą, by na pewno trafiała do dobrego diva
                 window.renderTeleportList = function() {
-                    let tpList = typeof getKnownTeleportMaps === 'function' ? getKnownTeleportMaps().sort() : (typeof ZAKONNICY !== 'undefined' ? Object.keys(ZAKONNICY).sort() : ["Ithan", "Torneg", "Karka-han", "Werbin", "Eder", "Mythar", "Tuzmer", "Port Tuzmer", "Wioska Pszczelarzy", "Nithal", "Podgrodzie Nithal", "Thuzal", "Gildia KupcĂłw - czÄ™Ĺ›Ä‡ zachodnia", "Brama PĂłĹ‚nocy", "Zniszczone Opactwo", "Kwieciste PrzejĹ›cie", "WzgĂłrze PĹ‚aczek", "Nizinne Sady"]);
+                    let tpList = typeof getKnownTeleportMaps === 'function' ? getKnownTeleportMaps().sort() : (typeof ZAKONNICY !== 'undefined' ? Object.keys(ZAKONNICY).sort() : ["Ithan", "Torneg", "Karka-han", "Werbin", "Eder", "Mythar", "Tuzmer", "Port Tuzmer", "Wioska Pszczelarzy", "Nithal", "Podgrodzie Nithal", "Thuzal", "Gildia Kupców - część zachodnia", "Brama Północy", "Zniszczone Opactwo", "Kwieciste Przejście", "Wzgórze Płaczek", "Nizinne Sady"]);
                     let myNick = (typeof Engine !== 'undefined' && Engine.hero && Engine.hero.d && Engine.hero.d.nick) ? Engine.hero.d.nick : "Nieznany";
                     let html = `<div style="color:#a99a75; font-size:10px; margin-bottom:5px; text-align:center;">Zaznacz odblokowane teleporty dla: <b style="color:#00acc1;">${myNick}</b></div><div id="tpCheckboxes" style="display:flex; flex-direction:column; gap:6px; overflow-y:auto; max-height: 250px;">`;
 
@@ -13150,7 +13232,7 @@ if (
                 });
             }
 
-            // 3. WĹ‚Ä…czamy PrzeĹşroczystoĹ›Ä‡ tĹ‚a w czasie rzeczywistym
+            // 3. Włączamy Przeźroczystość tła w czasie rzeczywistym
             function setWindowOpacity(val) {
                 let style = document.getElementById('dynamic-bg-opacity');
                 if (!style) {
@@ -13181,21 +13263,21 @@ if (
                 opacitySlider.addEventListener('input', (e) => setWindowOpacity(e.target.value));
             }
         }, 1500);
-    // --- OSTATECZNA ĹATKA TELEPORTĂ“W ---
+    // --- OSTATECZNA ŁATKA TELEPORTÓW ---
         setTimeout(() => {
-            // 1. Brutalne zniszczenie pĹ‚ywajÄ…cego okna TP
+            // 1. Brutalne zniszczenie pływającego okna TP
             document.querySelectorAll('.hero-window#heroTeleportsGUI').forEach(el => {
                 if (el.parentElement === document.body) {
-                    el.remove(); // Niszczy okno doczepione do gĹ‚Ăłwnego ekranu gry
+                    el.remove(); // Niszczy okno doczepione do głównego ekranu gry
                 }
             });
 
-            // 2. Naprawa funkcji rysujÄ…cej (UĹĽywamy Ĺ›cisĹ‚ego querySelector zamiast getElementById)
+            // 2. Naprawa funkcji rysującej (Używamy ścisłego querySelector zamiast getElementById)
             window.renderTeleportList = function() {
                 let container = document.querySelector('#teleportsContainer #heroTeleportsGUI');
                 if (!container) return;
 
-                let tpList = typeof getKnownTeleportMaps === 'function' ? getKnownTeleportMaps().sort() : (typeof ZAKONNICY !== 'undefined' ? Object.keys(ZAKONNICY).sort() : ["Ithan", "Torneg", "Karka-han", "Werbin", "Eder", "Mythar", "Tuzmer", "Port Tuzmer", "Wioska Pszczelarzy", "Nithal", "Podgrodzie Nithal", "Thuzal", "Gildia KupcĂłw - czÄ™Ĺ›Ä‡ zachodnia", "Brama PĂłĹ‚nocy", "Zniszczone Opactwo", "Kwieciste PrzejĹ›cie", "WzgĂłrze PĹ‚aczek", "Nizinne Sady"]);
+                let tpList = typeof getKnownTeleportMaps === 'function' ? getKnownTeleportMaps().sort() : (typeof ZAKONNICY !== 'undefined' ? Object.keys(ZAKONNICY).sort() : ["Ithan", "Torneg", "Karka-han", "Werbin", "Eder", "Mythar", "Tuzmer", "Port Tuzmer", "Wioska Pszczelarzy", "Nithal", "Podgrodzie Nithal", "Thuzal", "Gildia Kupców - część zachodnia", "Brama Północy", "Zniszczone Opactwo", "Kwieciste Przejście", "Wzgórze Płaczek", "Nizinne Sady"]);
                 let myNick = (typeof Engine !== 'undefined' && Engine.hero && Engine.hero.d && Engine.hero.d.nick) ? Engine.hero.d.nick : "Nieznany";
                 let html = `<div style="color:#a99a75; font-size:10px; margin-bottom:5px; text-align:center;">Zaznacz odblokowane teleporty dla: <b style="color:#00acc1;">${myNick}</b></div><div style="display:flex; flex-direction:column; gap:6px; overflow-y:auto; max-height:250px;">`;
 
@@ -13208,23 +13290,23 @@ if (
                 container.innerHTML = html;
             };
 
-            // 3. Naprawa przycisku (dziaĹ‚a jak wĹ‚Ä…cz/wyĹ‚Ä…cz)
+            // 3. Naprawa przycisku (działa jak włącz/wyłącz)
             let btnTp = document.getElementById('btnOpenTeleports');
             if (btnTp) {
-                // Klonujemy przycisk, ĹĽeby usunÄ…Ä‡ z niego stare, zepsute eventy (kradnÄ…ce klikniÄ™cia)
+                // Klonujemy przycisk, żeby usunąć z niego stare, zepsute eventy (kradnące kliknięcia)
                 let newBtn = btnTp.cloneNode(true);
                 btnTp.parentNode.replaceChild(newBtn, btnTp);
 
                 newBtn.addEventListener('click', (e) => {
                     e.preventDefault(); e.stopPropagation();
 
-                    // Ukryj resztÄ™ zakĹ‚adek (Eq, Potki, Sklepy), jeĹ›li sÄ… wĹ‚Ä…czone
+                    // Ukryj resztę zakładek (Eq, Potki, Sklepy), jeśli są włączone
                     ['recommendedEqList', 'potionsList', 'shopsSearchWrapper'].forEach(id => {
                         let el = document.getElementById(id);
                         if (el) el.style.display = 'none';
                     });
 
-                    // ZnajdĹş i przeĹ‚Ä…cz wĹ‚aĹ›ciwy, wewnÄ™trzny kontener
+                    // Znajdź i przełącz właściwy, wewnętrzny kontener
                     let innerContainer = document.querySelector('#teleportsContainer #heroTeleportsGUI');
                     if (innerContainer) {
                         if (innerContainer.style.display === 'flex') {
@@ -13238,7 +13320,7 @@ if (
             }
         }, 2000);
 
-    // --- STRAĹ»NIK RUCHU (Ochrona przed paraliĹĽem na bramach) ---
+    // --- STRAŻNIK RUCHU (Ochrona przed paraliżem na bramach) ---
     setTimeout(() => {
         if (!window.__movementGuardInstalled && typeof Engine !== 'undefined' && Engine.hero) {
             window.__movementGuardInstalled = true;
@@ -13250,10 +13332,10 @@ if (
         }
     }, 3000);
   // ==========================================
-        // GWARANTOWANY ZAPIS I PODPIÄCIE MODUĹĂ“W (AUTO-ZAPIS)
+        // GWARANTOWANY ZAPIS I PODPIĘCIE MODUŁÓW (AUTO-ZAPIS)
         // ==========================================
         setTimeout(() => {
-            // Wymuszona struktura pamiÄ™ci
+            // Wymuszona struktura pamięci
             if (!botSettings.discord) botSettings.discord = { enabled: false, url: '', userId: '', alerts: {}, stop: {} };
             if (!botSettings.discord.alerts) botSettings.discord.alerts = { hero: true, player: true, chat: true, captcha: true };
             if (!botSettings.discord.stop) botSettings.discord.stop = { hero: true, player: false, chat: false, captcha: true };
@@ -13310,7 +13392,7 @@ if (
                 if (el) el.checked = c.val;
             });
 
-            // 3. TWARDE AUTO-ZAPISYWANIE PRZEGLÄ„DARKI
+            // 3. TWARDE AUTO-ZAPISYWANIE PRZEGLĄDARKI
             document.querySelectorAll('#browserAlertsSettingsGUI input[type="checkbox"]').forEach(chk => {
                 chk.addEventListener('change', (e) => {
                     let id = e.target.id;
@@ -13319,7 +13401,7 @@ if (
                     if (id === 'playerAlertStopBot') botSettings.exp.playerAlertStopBot = e.target.checked;
                     if (id === 'chatAlert') { botSettings.exp.chatAlert = e.target.checked; if (e.target.checked && Notification.permission !== "granted") Notification.requestPermission(); }
                     if (id === 'chatAlertStopBot') botSettings.exp.chatAlertStopBot = e.target.checked;
-                    saveSettings(); // Wpychamy do pamiÄ™ci przy kaĹĽdym klikniÄ™ciu!
+                    saveSettings(); // Wpychamy do pamięci przy każdym kliknięciu!
                 });
             });
 
@@ -13340,7 +13422,7 @@ if (
                 if (el) {
                     el.addEventListener('change', (e) => {
                         botSettings.discord[cfg.type][cfg.key] = e.target.checked;
-                        saveSettings(); // Zapisuje dokĹ‚adnie w chwili klikniÄ™cia!
+                        saveSettings(); // Zapisuje dokładnie w chwili kliknięcia!
                     });
                 }
             });
@@ -13360,26 +13442,26 @@ if (
                 });
             }
 
-            // 5. Osobisty StraĹĽnik - od teraz sĹ‚uĹĽy tylko do testĂłw
+            // 5. Osobisty Strażnik - od teraz służy tylko do testów
             let btnSaveDiscord = document.getElementById('btnSaveDiscord');
             if (btnSaveDiscord) {
                 let freshSaveBtn = btnSaveDiscord.cloneNode(true);
                 btnSaveDiscord.parentNode.replaceChild(freshSaveBtn, btnSaveDiscord);
 
-                freshSaveBtn.innerText = "đźš€ WYĹšLIJ WIADOMOĹšÄ† TESTOWÄ„";
+                freshSaveBtn.innerText = "🚀 WYŚLIJ WIADOMOŚĆ TESTOWĄ";
 
                 freshSaveBtn.addEventListener('click', (e) => {
                     e.preventDefault(); e.stopPropagation();
                     if(botSettings.discord.enabled) {
-                        window.sendDiscordWebhook("đźź˘ TEST POWIADOMIEĹ", "Wszystko dziaĹ‚a! Twoje ustawienia sÄ… automatycznie zapisywane.", 5763719);
-                        heroAlert("WysĹ‚ano wiadomoĹ›Ä‡ testowÄ… na TwĂłj kanaĹ‚ Discord!");
+                        window.sendDiscordWebhook("🟢 TEST POWIADOMIEŃ", "Wszystko działa! Twoje ustawienia są automatycznie zapisywane.", 5763719);
+                        heroAlert("Wysłano wiadomość testową na Twój kanał Discord!");
                     } else {
-                        heroAlert("BĹ‚Ä…d: UzupeĹ‚nij URL Webhooka, by testowaÄ‡ wysyĹ‚anie.");
+                        heroAlert("Błąd: Uzupełnij URL Webhooka, by testować wysyłanie.");
                     }
                 });
             }
         }, 1500);
-    // --- STRAĹ»NIK RUCHU (Ochrona przed paraliĹĽem na bramach) ---
+    // --- STRAŻNIK RUCHU (Ochrona przed paraliżem na bramach) ---
     setTimeout(() => {
         if (!window.__movementGuardInstalled && typeof Engine !== 'undefined' && Engine.hero) {
             window.__movementGuardInstalled = true;
@@ -13396,7 +13478,7 @@ if (
         let lastLostCloseTime = 0;
 
         setInterval(() => {
-            // 1. Sprawdzamy, czy w ogĂłle jesteĹ›my w trakcie wyĹ›wietlanej walki
+            // 1. Sprawdzamy, czy w ogóle jesteśmy w trakcie wyświetlanej walki
             if (typeof Engine === 'undefined' || !Engine.battle || !Engine.battle.show) return;
 
             const battleText = normalizeUiText(document.body?.innerText || document.body?.textContent || "");
@@ -13412,7 +13494,7 @@ if (
 
             if (lostOrEnded) {
                 const now = Date.now();
-                if (now - lastLostCloseTime < 1500) return; // Cooldown na klikniÄ™cie
+                if (now - lastLostCloseTime < 1500) return; // Cooldown na kliknięcie
 
                 lastLostCloseTime = now;
                 if (window.isExping || window.isRushing || (typeof isRushing !== 'undefined' && isRushing)) {
@@ -13425,7 +13507,7 @@ if (
         }, 500);
     }
 // ==========================================
-// PĹYWAJÄ„CY RADAR TAKTYCZNY (DRAG & RESIZE)
+// PŁYWAJĄCY RADAR TAKTYCZNY (DRAG & RESIZE)
 // ==========================================
 window.margoWalkableMask = new Set();
 window.radarCompactMode = false;
@@ -13502,7 +13584,7 @@ function initFloatingRadarUI() {
     let header = document.createElement('div');
     header.style.cssText = 'background:#111; padding:8px 10px; cursor:move; color:#00acc1; font-weight:bold; font-size:12px; border-bottom:1px solid #333; display:flex; justify-content:space-between; align-items:center; user-select:none; font-family:Tahoma,sans-serif;';
     header.innerHTML = `
-        <span>đźŽŻ PodglÄ…d Mapy</span>
+        <span>🎯 Podgląd Mapy</span>
         <div style="display:flex; align-items:center; gap:6px; font-size:11px;">
             <label style="display:flex; align-items:center; gap:3px; cursor:pointer;">
                 <input type="checkbox" id="radarCompactToggle">
@@ -13510,9 +13592,9 @@ function initFloatingRadarUI() {
             </label>
             <label style="display:flex; align-items:center; gap:3px; cursor:pointer;">
                 <input type="checkbox" id="radarGatewaysToggle" checked>
-                PrzejĹ›cia
+                Przejścia
             </label>
-            <span id="closeRadarBtn" style="cursor:pointer; color:#e53935; padding:0 5px; font-size:14px;">âś–</span>
+            <span id="closeRadarBtn" style="cursor:pointer; color:#e53935; padding:0 5px; font-size:14px;">✖</span>
         </div>
     `;
     win.appendChild(header);
@@ -13611,7 +13693,7 @@ function initFloatingRadarUI() {
 
 function isCollisionSafe(x, y) {
     if (typeof Engine === 'undefined' || !Engine.map) return false;
-    // Bezpieczne sprawdzanie kolizji (dziaĹ‚a na Starym i Nowym Interfejsie)
+    // Bezpieczne sprawdzanie kolizji (działa na Starym i Nowym Interfejsie)
     if (typeof Engine.map.checkCollision === 'function') return Engine.map.checkCollision(x, y);
     if (Engine.map.col && typeof Engine.map.col.check === 'function') return Engine.map.col.check(x, y);
     return false;
@@ -13619,7 +13701,7 @@ function isCollisionSafe(x, y) {
 
 function isCollisionSafe(x, y) {
     if (typeof Engine === 'undefined' || !Engine.map) return false;
-    // Uniwersalne sprawdzanie kolizji (dziaĹ‚a na Starym i Nowym Interfejsie)
+    // Uniwersalne sprawdzanie kolizji (działa na Starym i Nowym Interfejsie)
     if (typeof Engine.map.checkCollision === 'function') return Engine.map.checkCollision(x, y);
     if (Engine.map.col && typeof Engine.map.col.check === 'function') return Engine.map.col.check(x, y);
     return false;
@@ -13651,7 +13733,7 @@ function updateWalkableArea() {
                 let nk = getKey(nx, ny);
                 if (!visited.has(nk)) {
                     if (Math.abs(d[0]) === 1 && Math.abs(d[1]) === 1) {
-                        // Zabezpieczenie przed przechodzeniem przez Ĺ›ciany na ukos
+                        // Zabezpieczenie przed przechodzeniem przez ściany na ukos
                         if (isCollisionSafe(cx + d[0], cy) && isCollisionSafe(cx, cy + d[1])) continue;
                     }
                     visited.add(nk);
@@ -13675,7 +13757,7 @@ function buildDistanceMapFromHero() {
     if (window._walkMaskMapName !== currentMapName) {
         window.margoWalkableMask.clear();
         if (typeof updateWalkableArea === 'function') {
-            HERO_LOG.info(`OdĹ›wieĹĽam maskÄ™ przejĹ›cia dla mapy: ${currentMapName}`);
+            HERO_LOG.info(`Odświeżam maskę przejścia dla mapy: ${currentMapName}`);
             updateWalkableArea();
         }
     }
@@ -13787,7 +13869,7 @@ function refreshRadarGroupsCache(force = false) {
             type: n.type,
             ranga: getMobRank(n),
             grp: n.grp,
-            nick: (n.nick || n.name || "PotwĂłr").replace(/<[^>]*>?/gm, '').trim()
+            nick: (n.nick || n.name || "Potwór").replace(/<[^>]*>?/gm, '').trim()
         });
     }
 
@@ -13826,7 +13908,7 @@ function getCurrentMapGatewaysForRadar(distMap, options = {}) {
     const currentMap = Engine?.map?.d?.name || '';
     const filterExpMaps = !!options.filterExpMaps;
     const onlyExpMaps = (filterExpMaps && window.isExping) ? getExpAllowedMapSet() : null;
-    const toCleanName = (raw) => String(raw || '').replace(/<br\s*[\/]?>/gi, '\n').replace(/<[^>]*>?/gm, '').split('\n')[0].replace('PrzejĹ›cie do:', '').replace('PrzejĹ›cie do ', '').split('PrzejĹ›cie dostÄ™pne')[0].trim();
+    const toCleanName = (raw) => String(raw || '').replace(/<br\s*[\/]?>/gi, '\n').replace(/<[^>]*>?/gm, '').split('\n')[0].replace('Przejście do:', '').replace('Przejście do ', '').split('Przejście dostępne')[0].trim();
 
     const pushGateway = (x, y, targetMap, source = 'scan') => {
         if (x === undefined || y === undefined) return;
@@ -14150,7 +14232,7 @@ function renderTacticalRadar() {
             }
         }
         else if (typeof window.isPatrolling !== 'undefined' && window.isPatrolling && typeof window.patrolIndex !== 'undefined' && typeof currentCordsList !== 'undefined' && currentCordsList[window.patrolIndex]) {
-            // Linia do punktu na mapie (PATROL HEROSĂ“W)
+            // Linia do punktu na mapie (PATROL HEROSÓW)
             let pTarget = currentCordsList[window.patrolIndex];
             let tx = offsetX + (pTarget[0] * scale) + (scale / 2);
             let ty = offsetY + (pTarget[1] * scale) + (scale / 2);
@@ -14201,9 +14283,9 @@ function renderTacticalRadar() {
                             color:${isCurrent ? '#00e5ff' : '#d7d7d7'};
                             font-weight:${isCurrent ? 'bold' : 'normal'};
                         ">
-                            ${isCurrent ? 'đźŽŻ CEL: ' : 'â€˘ '}
+                            ${isCurrent ? '🎯 CEL: ' : '• '}
                             ${label}
-                            <span style="color:#999;"> â€” dystans: ${dist}, score: ${score}</span>
+                            <span style="color:#999;"> — dystans: ${dist}, score: ${score}</span>
                         </div>
                     `;
                 }).join('');
@@ -14212,12 +14294,12 @@ function renderTacticalRadar() {
     } catch (e) {}
 }
 
-// GĹ‚Ăłwna pÄ™tla taktujÄ…ca
+// Główna pętla taktująca
 setInterval(() => {
     if (typeof initFloatingRadarUI === 'function') initFloatingRadarUI();
 
     if (typeof Engine !== 'undefined' && Engine.hero && Engine.map) {
-        // ZABEZPIECZENIE: Tworzy maskÄ™ jako prawdziwy zbiĂłr danych (Set)
+        // ZABEZPIECZENIE: Tworzy maskę jako prawdziwy zbiór danych (Set)
         if (!(window.margoWalkableMask instanceof Set)) {
             window.margoWalkableMask = new Set();
         }
