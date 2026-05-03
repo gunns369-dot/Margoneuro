@@ -3849,7 +3849,7 @@ window.executeRushStep = function() {
             window._lastRushTargetLog = null;
             if (typeof syncBerserkState === 'function') syncBerserkState('rush_target_reached');
             let btn = document.getElementById('btnStartStop');
-            if (btn) { btn.innerHTML = '<span class="btn-icon">▶</span><span>START</span>'; btn.style.color = "#4caf50"; btn.style.borderColor = "#4caf50"; }
+            if (btn) { btn.innerHTML = '<span class="btn-icon">▶</span><span>START HEROSI</span>'; btn.style.color = "#4caf50"; btn.style.borderColor = "#4caf50"; }
 
             if (rushTargetX !== null && rushTargetY !== null) {
                 setTimeout(() => safeGoTo(rushTargetX, rushTargetY, false), 500);
@@ -3858,7 +3858,7 @@ window.executeRushStep = function() {
             if (window.resumePatrolAfterRush) {
                 window.resumePatrolAfterRush = false;
                 isPatrolling = true;
-                if (btn) { btn.innerHTML = '<span class="btn-icon">⏹</span><span>STOP</span>'; btn.style.color = "#f44336"; btn.style.borderColor = "#f44336"; }
+                if (btn) { btn.innerHTML = '<span class="btn-icon">⏹</span><span>STOP HEROSI</span>'; btn.style.color = "#f44336"; btn.style.borderColor = "#f44336"; }
                 if (window.logHero) window.logHero(`✅ Dotarto na nową mapę. Analizuję teren...`, "#4caf50");
                 setTimeout(() => { if (typeof executePatrolStep === 'function') executePatrolStep(); }, 1500);
             }
@@ -5256,7 +5256,6 @@ function initGUI() {
             <div class="gui-header">
                 <div id="guiHeaderTitle" style="margin-right:5px; color:#00e5ff; text-shadow: 0 0 5px #00e5ff; font-weight:900;">MargoNeuro</div>
                <div class="header-buttons">
-                    <button id="btnStartStop" style="color:#4caf50; border-color:#4caf50;"><span class="btn-icon">&gt;</span><span>START</span></button>
                     <button id="btnGoToTop" style="color:#00acc1; border-color:#00acc1;"><span class="btn-icon">Idź</span><span>DO</span></button>
                     <button id="btnOpenMaps" style="color:#2196f3; border-color:#2196f3;"><span class="btn-icon">Mapy</span><span>Mapy</span></button>
                     <button id="btnToggleRadar" style="color:#9c27b0; border-color:#9c27b0;"><span class="btn-icon">Radar</span><span>Radar</span></button>
@@ -5305,6 +5304,7 @@ function initGUI() {
                         </div>
                     </div>
                     <div class="nav-row" style="margin-top: 10px; display: flex; flex-direction: column;"><label style="color:#d4af37;">Koordynaty (zasięg: 7 kratek):</label><div id="cordsListContainer"></div></div>
+                    <button id="btnStartStop" class="btn btn-go-sepia" style="margin-top:auto; padding: 6px; font-size: 12px; border: 1px solid #4caf50; color: #4caf50; font-weight:bold;">START HEROSI</button>
                 </div>
                 <div id="e2Container" style="display:none; flex-direction:column; flex:1; min-height:0;">
                     <div id="e2SuitableContainer" style="background:rgba(156,39,176,0.1); border:1px solid #9c27b0; padding:6px; margin-bottom:8px; border-radius:2px;"><span style="color:#777; font-size:10px;">Ładowanie podpowiedzi levelowych...</span></div>
@@ -5329,7 +5329,7 @@ function initGUI() {
                    <div class="accordion-header" id="accBerserk" data-exp-section="berserk" onclick="toggleSettingsAcc('accBerserk')" style="background: rgba(255, 152, 0, 0.2); border-color: #ff9800; color: #ff9800; margin-bottom: 0;">Kieszonkowy Berserk</div>
                     <div id="accBerserkContent" style="display:none; padding: 8px; background: rgba(0,0,0,0.3); border: 1px solid #ff9800; border-top: none; margin-bottom: 5px;">
                         <label style="color:#ff9800; font-weight:bold; display:flex; align-items:center; gap:5px; margin-bottom: 8px; cursor: pointer;">
-                            <input type="checkbox" id="berserkEnabled" ${botSettings.berserk?.enabled ? 'checked' : ''}> Aktywuj Berserka
+                            <input type="checkbox" id="berserkEnabled" ${botSettings.berserk?.userEnabled ? 'checked' : ''}> Aktywuj Berserka
                         </label>
                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding-left: 5px; margin-bottom: 8px;">
                             <label style="color:#e0d8c0; font-size:10px; cursor: pointer;"><input type="checkbox" id="berserkCommon" ${botSettings.berserk?.common ? 'checked' : ''}> Zwykłe potwory</label>
@@ -5849,6 +5849,11 @@ if (btnExp) {
 
             if (window.isExping) {
                 window.margoneuroStoppedManually = false;
+                window.botRunning = true;
+                window.expRunning = true;
+                window.margoneuroCurrentMode = "EXP";
+                window.rushNextMap = null;
+                window.__pvpEscapeActive = false;
                 window.expRunId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2,6)}`;
             window.expCycleId = 0;
             this.innerHTML = "⏹ STOP";
@@ -5876,6 +5881,12 @@ expEmptyScans = 0;
             expLastMapName = "";
             expCurrentMapOrderIndex = -1;
             window.expGlobalTargetMap = null;
+            console.log("[EXP] START expienia/trasy");
+            console.log("[EXP] Tryb ustawiony na EXP");
+            if (typeof window.logExp === 'function') {
+                window.logExp("[EXP] START expienia/trasy", "#4caf50");
+                window.logExp("[EXP] Tryb ustawiony na EXP", "#4caf50");
+            }
             if (typeof window.logExp === 'function') window.logExp("đźš€ Uruchomiono tryb automatyczny!", "#4caf50");
             HeroLogger.emit('INFO', 'ROUTE_START', 'START ekspienia/trasy', "#4caf50", { category: 'ROUTE' });
 
@@ -5890,6 +5901,10 @@ expEmptyScans = 0;
             }
         } else {
             if (!window.__stoppingForCaptcha) window.margoneuroStoppedManually = true;
+            window.botRunning = false;
+            window.expRunning = false;
+            window.margoneuroCurrentMode = "IDLE";
+            window.rushNextMap = null;
             window.expRunId = null;
             this.innerHTML = "▶ START";
             this.style.borderColor = "#4caf50";
@@ -5899,6 +5914,8 @@ expEmptyScans = 0;
             if (window.rushInterval) clearTimeout(window.rushInterval);
             if (typeof stopPatrol === 'function') stopPatrol(true); // Wciska fizyczny hamulec na mapie
 
+            console.log("[EXP] STOP expienia/trasy");
+            if (typeof window.logExp === 'function') window.logExp("[EXP] STOP expienia/trasy", "#f44336");
             if (typeof window.logExp === 'function') window.logExp("đź›‘ Zatrzymano tryb automatyczny.", "#f44336");
             HeroLogger.emit('INFO', 'ROUTE_STOP', 'STOP ekspienia/trasy', "#f44336", { category: 'ROUTE' });
 
@@ -6119,7 +6136,7 @@ bindChange('useTeleportsEq', (e) => { botSettings.exp.useTeleportsEq = e.target.
             chk.checked = desiredAuto;
             chk.title = desiredAuto
                 ? (activeNow ? 'Berserk aktywny' : 'Berserk auto-aktywny (chwilowo OFF poza EXP/trasą)')
-                : 'Berserk wyłączony';
+                : 'Auto-berserk dla EXP wyłączony';
         }
 
         // Nowa, ostateczna funkcja do wysyłania komend natywnego Berserka bezpośrednio do gry
@@ -7269,7 +7286,7 @@ function stopPatrol(hardStop = true) {
 
         let btn = document.getElementById('btnStartStop');
         if (btn) {
-            btn.innerHTML = '<span class="btn-icon">▶</span><span>START</span>';
+            btn.innerHTML = '<span class="btn-icon">▶</span><span>START HEROSI</span>';
             btn.style.color = "#4caf50";
             btn.style.borderColor = "#4caf50";
         }
@@ -7290,6 +7307,10 @@ function stopPatrol(hardStop = true) {
 
         if (window.isExping) {
             window.isExping = false;
+            window.botRunning = false;
+            window.expRunning = false;
+            window.margoneuroCurrentMode = "IDLE";
+            window.rushNextMap = null;
             window.expRunId = null;
             const expBtn = document.getElementById('btnStartExp');
             if (expBtn) {
@@ -7321,7 +7342,7 @@ function stopPatrol(hardStop = true) {
        isPatrolling = true; patrolIndex = 0; checkedPoints.clear(); heroFoundAlerted = false;
        window.isPatrolling = true;
 
-        let btn = document.getElementById('btnStartStop'); btn.innerHTML = '<span class="btn-icon">⏹</span><span>STOP</span>'; btn.style.color = "#f44336"; btn.style.borderColor = "#f44336";
+        let btn = document.getElementById('btnStartStop'); btn.innerHTML = '<span class="btn-icon">⏹</span><span>STOP HEROSI</span>'; btn.style.color = "#f44336"; btn.style.borderColor = "#f44336";
 
         window.logHero(`Rozpoczęto patrol (Heros: ${hero}).`, "#4caf50");
         executePatrolStep();
@@ -7483,6 +7504,9 @@ function executePatrolStep() {
 
 
  window.isExping = false;
+window.expRunning = false;
+window.botRunning = false;
+window.margoneuroCurrentMode = "IDLE";
 
 let expMapTransitionCooldown = 0;
 
@@ -7715,7 +7739,35 @@ const BerserkController = {
 };
 window.BerserkController = BerserkController;
 
-function logBerserkDecision(message, color = "#ffcc80") {
+function getBerserkDecisionMessage(decision) {
+    if (!decision) return "Brak decyzji";
+    if (decision.reason === 'auto_berserk_option_off') return "Auto-berserk wyłączony w ustawieniach";
+    if (decision.reason === 'ok_exp_map') return "decision active=true reason=ok_exp_map";
+    return `decision active=${!!decision.active} reason=${decision.reason}`;
+}
+
+function logBerserkDecision(decision) {
+    const now = Date.now();
+    const key = `${!!decision?.active}:${decision?.reason || 'unknown'}`;
+    const last = window.__lastBerserkDecisionLog || { key: "", at: 0 };
+    if (last.key === key) {
+        if (decision?.reason === 'auto_berserk_option_off') return;
+        if (now - last.at < 10000) return;
+    }
+
+    window.__lastBerserkDecisionLog = { key, at: now };
+    const message = getBerserkDecisionMessage(decision);
+    const color = decision?.active ? "#81c784" : (decision?.reason === 'auto_berserk_option_off' ? "#a99a75" : "#ffb74d");
+    console.log(`[Berserk] ${message}`);
+    if (window.logExp) window.logExp(`[Berserk] ${message}`, color);
+}
+
+function logBerserkAction(message, color = "#ffcc80", dedupeMs = 3000) {
+    const now = Date.now();
+    const key = String(message || "");
+    window.__berserkActionLogState = window.__berserkActionLogState || {};
+    if (window.__berserkActionLogState[key] && now - window.__berserkActionLogState[key] < dedupeMs) return;
+    window.__berserkActionLogState[key] = now;
     console.log(`[Berserk] ${message}`);
     if (window.logExp) window.logExp(`[Berserk] ${message}`, color);
 }
@@ -7740,11 +7792,16 @@ window.isCurrentMapInExpRoute = isCurrentMapInExpRoute;
 
 function shouldBerserkBeActive() {
     const now = Date.now();
-    const botRunning = !!window.isExping;
+    const chk = document.getElementById('berserkEnabled');
+    const autoBerserkOptionEnabled = chk ? !!chk.checked : !!botSettings?.berserk?.userEnabled;
+    if (!autoBerserkOptionEnabled) return { active: false, reason: 'auto_berserk_option_off' };
+
+    const currentMode = window.isExping ? "EXP" : (window.margoneuroCurrentMode || "IDLE");
+    const botRunning = !!(window.isExping || window.expRunning || (window.botRunning && currentMode === "EXP"));
     if (!botRunning) return { active: false, reason: 'bot_not_running' };
-    if (!botSettings?.berserk?.userEnabled) return { active: false, reason: 'berserk_disabled_by_user' };
 
     const currentTask = window.autoSellState?.active ? 'SELL' : (window.autoPotState?.active ? 'SHOP' : 'EXP');
+    if (currentMode !== "EXP" && currentTask === 'EXP') return { active: false, reason: 'not_exp_mode' };
     if (currentTask !== 'EXP') return { active: false, reason: 'not_exp_mode' };
 
     const mapInRoute = isCurrentMapInExpRoute();
@@ -7778,40 +7835,46 @@ function logBerserkNoChange() {
     const now = Date.now();
     if (now - (window.__lastBerserkNoChangeLogAt || 0) < 12000) return;
     window.__lastBerserkNoChangeLogAt = now;
-    logBerserkDecision("Bez zmian, stan poprawny", "#a99a75");
+    logBerserkAction("Bez zmian, stan poprawny", "#a99a75", 12000);
 }
 
 function ensureBerserkEnabled(reason = 'sync') {
     if (getCurrentBerserkActive()) {
-        logBerserkNoChange();
+        logBerserkAction("Berserk już włączony", "#81c784", 30000);
         return false;
     }
     const now = Date.now();
-    if (now - (window.__lastBerserkSyncToggleAt || 0) < 2200) return false;
+    if (now - (window.__lastBerserkSyncToggleAt || 0) < 3000) return false;
     window.__lastBerserkSyncToggleAt = now;
-    logBerserkDecision("Włączam berserka", "#81c784");
-    return window.BerserkController?.setBotBerserkState?.(true, reason);
+    logBerserkAction("Włączam berserka", "#81c784", 3000);
+    const result = window.BerserkController?.setBotBerserkState?.(true, reason);
+    setTimeout(() => {
+        if (getCurrentBerserkActive()) logBerserkAction("Berserk już włączony", "#81c784", 10000);
+    }, 700);
+    return result;
 }
 
 function ensureBerserkDisabled(reason = 'sync') {
     if (!getCurrentBerserkActive()) {
-        logBerserkNoChange();
+        if (reason !== 'auto_berserk_option_off') {
+            logBerserkAction("Berserk już wyłączony", "#a99a75", 30000);
+        }
         return false;
     }
     const now = Date.now();
-    if (now - (window.__lastBerserkSyncToggleAt || 0) < 1800) return false;
+    if (now - (window.__lastBerserkSyncToggleAt || 0) < 3000) return false;
     window.__lastBerserkSyncToggleAt = now;
-    logBerserkDecision(`Wyłączam berserka reason=${reason}`, "#ffb74d");
-    return window.BerserkController?.setBotBerserkState?.(false, reason);
+    logBerserkAction(`Wyłączam berserka: ${reason}`, "#ffb74d", 3000);
+    const result = window.BerserkController?.setBotBerserkState?.(false, reason);
+    setTimeout(() => {
+        if (!getCurrentBerserkActive()) logBerserkAction("Berserk już wyłączony", "#a99a75", 10000);
+    }, 700);
+    return result;
 }
 
 function syncBerserkState(reason = 'sync') {
     const decision = shouldBerserkBeActive();
-    const key = `${decision.active}:${decision.reason}:${getCurrentBerserkActive() ? 1 : 0}`;
-    if (window.__lastBerserkDecisionKey !== key || reason !== 'poll') {
-        logBerserkDecision(`decision active=${decision.active} reason=${decision.reason}`, decision.active ? "#81c784" : "#ffb74d");
-        window.__lastBerserkDecisionKey = key;
-    }
+    logBerserkDecision(decision);
     if (decision.active) return ensureBerserkEnabled(decision.reason);
     return ensureBerserkDisabled(decision.reason);
 }
@@ -8979,7 +9042,7 @@ function stopRushBecauseExpMapReached(currMap, reason = 'exp_route_reached') {
     if (typeof Engine?.hero?.stop === 'function') Engine.hero.stop();
     const btn = document.getElementById('btnStartStop');
     if (btn) {
-        btn.innerHTML = '<span class="btn-icon">▶</span><span>START</span>';
+        btn.innerHTML = '<span class="btn-icon">▶</span><span>START HEROSI</span>';
         btn.style.color = "#4caf50";
         btn.style.borderColor = "#4caf50";
     }
@@ -9631,7 +9694,12 @@ function runExpLogic() {
             } else {
                 if (window.logExp) window.logExp("🛑 Brak osiągalnej mapy do backtracku. Zatrzymuję EXP.", "#e53935");
                 if (typeof stopPatrol === 'function') stopPatrol(true);
-                else window.isExping = false;
+                else {
+                    window.isExping = false;
+                    window.expRunning = false;
+                    window.botRunning = false;
+                    window.margoneuroCurrentMode = "IDLE";
+                }
             }
         }
     }
@@ -11636,6 +11704,9 @@ window.renderEqItems = function(filterType = 'Wszystkie') {
 
         if (snap.exping) {
             window.isExping = true;
+            window.expRunning = true;
+            window.botRunning = true;
+            window.margoneuroCurrentMode = "EXP";
             window.expRunId = snap.expRunId || window.expRunId || `death-resume-${now}`;
             window.isExpSuspended = false;
             window.isRushingToShop = false;
@@ -12846,7 +12917,7 @@ window.openShopAsync = async (namePart) => {
         function setPatrolButtonStateForTrap(running) {
             const btn = document.getElementById('btnStartStop');
             if (!btn) return;
-            btn.innerHTML = running ? '<span>STOP</span>' : '<span>START</span>';
+            btn.innerHTML = running ? '<span>STOP HEROSI</span>' : '<span>START HEROSI</span>';
             btn.style.color = running ? "#f44336" : "#4caf50";
             btn.style.borderColor = running ? "#f44336" : "#4caf50";
         }
@@ -12873,6 +12944,9 @@ window.openShopAsync = async (namePart) => {
 
             if (snap.exping) {
                 window.isExping = false;
+                window.expRunning = false;
+                window.botRunning = false;
+                window.margoneuroCurrentMode = "IDLE";
                 setExpButtonStateForTrap(false);
             }
 
@@ -12934,7 +13008,7 @@ window.openShopAsync = async (namePart) => {
 
             const btn = document.getElementById('btnStartStop');
             if (btn) {
-                btn.innerHTML = '<span class="btn-icon">⏱</span><span>STOP</span>';
+                btn.innerHTML = '<span class="btn-icon">⏱</span><span>STOP HEROSI</span>';
                 btn.style.color = "#f44336";
                 btn.style.borderColor = "#f44336";
             }
@@ -12952,6 +13026,9 @@ window.openShopAsync = async (namePart) => {
             const now = Date.now();
 
             window.isExping = true;
+            window.expRunning = true;
+            window.botRunning = true;
+            window.margoneuroCurrentMode = "EXP";
             window.expRunId = snap.expRunId || window.expRunId || `captcha-resume-${now}`;
             window.expCycleId = 0;
             window.isExpSuspended = false;
