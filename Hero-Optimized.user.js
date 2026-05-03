@@ -20,7 +20,7 @@
 (async function() {
     'use strict';
 
-    const MARGONEURO_LICENSE_API_BASE_URL = 'https://margoneuro.pl/api/license/verify';
+    const MARGONEURO_LICENSE_API_BASE_URL = 'https://www.margoneuro.pl/api/license/verify';
     const MARGONEURO_LICENSE_PRODUCT_SLUG = 'margoneuro';
     const MARGONEURO_LICENSE_SCRIPT_VERSION = '64.6';
     const MARGONEURO_LICENSE_KEY_STORAGE = 'margo_license_key_margoneuro';
