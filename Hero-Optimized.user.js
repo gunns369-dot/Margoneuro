@@ -122,6 +122,37 @@
 
         return margoneuroPromptLicenseKey();
     }
+
+    function isMargonemGameReady() {
+        return (
+            typeof window.Engine !== 'undefined' &&
+            window.Engine &&
+            window.Engine.map &&
+            window.Engine.map.d &&
+            window.Engine.map.d.id &&
+            window.Engine.hero &&
+            window.Engine.hero.d
+        );
+    }
+
+    function waitForMargonemGameReady({ timeoutMs = 60000, intervalMs = 500 } = {}) {
+        return new Promise((resolve) => {
+            const startedAt = Date.now();
+            const timer = setInterval(() => {
+                if (isMargonemGameReady()) {
+                    clearInterval(timer);
+                    resolve(true);
+                    return;
+                }
+
+                if (Date.now() - startedAt >= timeoutMs) {
+                    clearInterval(timer);
+                    resolve(false);
+                }
+            }, intervalMs);
+        });
+    }
+
     function margoneuroPostJson(url, payload) {
         return new Promise((resolve, reject) => {
             GM_xmlhttpRequest({
@@ -182,7 +213,17 @@
     }
 
     async function margoneuroVerifyLicenseBeforeStart() {
-        let licenseKey = margoneuroGetLicenseKey();
+        console.log('[License] Wczytuję zapisany klucz');
+        let licenseKey = margoneuroReadStorage(MARGONEURO_LICENSE_KEY_STORAGE);
+        let keyCameFromStorage = !!(licenseKey && licenseKey.trim());
+
+        if (keyCameFromStorage) {
+            licenseKey = licenseKey.trim();
+            console.log('[License] Znaleziono zapisany klucz, sprawdzam aktywność');
+        } else {
+            licenseKey = margoneuroPromptLicenseKey();
+            keyCameFromStorage = false;
+        }
 
         while (licenseKey) {
             console.log('[Margoneuro License] Weryfikacja licencji...');
@@ -191,38 +232,37 @@
             if (result.ok && result.data && result.data.active === true) {
                 margoneuroWriteStorage(MARGONEURO_LICENSE_KEY_STORAGE, licenseKey.trim());
                 console.log('[License] Klucz aktywny, zapisuję i uruchamiam Margoneuro');
+                if (keyCameFromStorage) {
+                    console.log('[Margoneuro License] Zapisany klucz aktywny');
+                }
                 console.log('[Margoneuro License] Licencja aktywna');
                 return true;
             }
 
             console.log('[License] Klucz odrzucony, proszę o nowy');
             console.warn('[Margoneuro License] Licencja odrzucona', result.data);
-            margoneuroDeleteStorage(MARGONEURO_LICENSE_KEY_STORAGE);
 
             const status = result.data?.status || 'invalid';
             const apiMessage = result.data?.message || 'Licencja jest nieważna, wygasła albo cofnięta.';
             const message = status === 'device_mismatch'
-                ? 'Ten klucz jest już przypisany do innego urządzenia. Wygeneruj nowy klucz albo skontaktuj się z administratorem.'
+                ? 'Ten klucz jest przypisany do innego urządzenia. Czy chcesz wprowadzić inny klucz?'
                 : apiMessage;
 
-            const shouldRetry = window.confirm(`${message}\n\nCzy chcesz wprowadzić nowy klucz?`);
+            const shouldRetry = status === 'device_mismatch'
+                ? window.confirm(message)
+                : window.confirm(`${message}\n\nCzy chcesz wprowadzić nowy klucz?`);
             if (!shouldRetry) {
                 return false;
             }
 
+            margoneuroDeleteStorage(MARGONEURO_LICENSE_KEY_STORAGE);
             licenseKey = margoneuroPromptLicenseKey('Wprowadź nowy klucz licencyjny Margoneuro:');
+            keyCameFromStorage = false;
         }
 
         console.warn('[Margoneuro License] Licencja odrzucona');
-        window.alert('Brak klucza licencyjnego. Margoneuro nie zostanie uruchomione.');
         return false;
     }
-
-    if (!(await margoneuroVerifyLicenseBeforeStart())) {
-        return;
-    }
-
-    console.log('[Margoneuro] Licencja OK, inicjalizuję UI');
     const HERO_LOG = {
         info(message, details) {
             if (details !== undefined) console.log(`ℹ️ [HERO] ${message}`, details);
@@ -2086,9 +2126,20 @@ function isMapKnownInGatewayBase(mapName) {
 
     // ==========================================
 
-   const bootloader = setInterval(() => {
-        if (typeof Engine !== 'undefined' && Engine.hero && Engine.hero.d && Engine.map && Engine.map.d && Engine.map.d.id) {
-            clearInterval(bootloader);
+   async function bootMargoneuroWhenGameReady() {
+        console.log('[Margoneuro Boot] Czekam na załadowanie gry...');
+        while (!(await waitForMargonemGameReady({ timeoutMs: 60000, intervalMs: 500 }))) {
+            // Na ekranie logowania, wyboru postaci i stronie głównej nie pokazujemy promptów licencji.
+            // Po minucie wracamy do pasywnego czekania bez blokowania strony.
+        }
+
+        console.log('[Margoneuro Boot] Gra gotowa, sprawdzam licencję');
+        if (!(await margoneuroVerifyLicenseBeforeStart())) {
+            return;
+        }
+
+        console.log('[Margoneuro Boot] Uruchamiam UI bota');
+        console.log('[Margoneuro] Licencja OK, inicjalizuję UI');
             loadData();
             cleanOldGateways();
             initGUI();
@@ -2119,8 +2170,9 @@ function isMapKnownInGatewayBase(mapName) {
                         if (window.logHero) window.logHero("🔄 Automatycznie wznowiono Patrol po odświeżeniu gry!", "#4caf50");
                     }
                 }, 1500); // 1.5 sekundy opóźnienia, żeby gra "odetchnęła" po wczytaniu
-            }
-        }, 2000);
+    }
+
+    bootMargoneuroWhenGameReady();
 
     // Zabezpieczenie brakującej funkcji, naprawia krytyczny CRASH!
     function setupMapClickListener() {
@@ -4869,7 +4921,7 @@ function initGUI() {
                     <div id="expConsole" style="background:#080808; border:1px solid #333; padding:4px; font-size:10px; color:#a99a75; height:55px; min-height: 55px; max-height: 250px; resize: vertical; overflow-y:auto; font-family:monospace; box-shadow:inset 0 1px 3px #000; margin-bottom:2px;">
                         <span style="color:#777;">[System]</span> Włączony moduł Smart-Roam (dynamiczne czyszczenie)...
                     </div>
-                    <div class="accordion-header" id="accBerserk" onclick="toggleSettingsAcc('accBerserk')" style="background: rgba(255, 152, 0, 0.2); border-color: #ff9800; color: #ff9800; margin-bottom: 0;">Kieszonkowy Berserk</div>
+                   <div class="accordion-header" id="accBerserk" data-exp-section="berserk" onclick="toggleSettingsAcc('accBerserk')" style="background: rgba(255, 152, 0, 0.2); border-color: #ff9800; color: #ff9800; margin-bottom: 0;">Kieszonkowy Berserk</div>
                     <div id="accBerserkContent" style="display:none; padding: 8px; background: rgba(0,0,0,0.3); border: 1px solid #ff9800; border-top: none; margin-bottom: 5px;">
                         <label style="color:#ff9800; font-weight:bold; display:flex; align-items:center; gap:5px; margin-bottom: 8px; cursor: pointer;">
                             <input type="checkbox" id="berserkEnabled" ${botSettings.berserk?.enabled ? 'checked' : ''}> Aktywuj Berserka
@@ -4885,7 +4937,7 @@ function initGUI() {
                             <label style="color:#a99a75; font-size:10px; flex:1;">Mniejszy od nas o lvl:<br><input type="number" id="berserkMinLvl" value="${Math.abs(botSettings.berserk?.minLvlOffset ?? 20)}" style="width:100%; padding:2px; font-size:10px; text-align:center;"></label>
                         </div>
                     </div>
-                    <div class="accordion-header" id="accAutoheal" onclick="toggleSettingsAcc('accAutoheal')" style="background: rgba(76, 175, 80, 0.2); border-color: #4caf50; color: #4caf50; margin-bottom: 0;">Autoheal i auto-sprzedaż</div>
+                   <div class="accordion-header" id="accAutoheal" data-exp-section="autoheal" onclick="toggleSettingsAcc('accAutoheal')" style="background: rgba(76, 175, 80, 0.2); border-color: #4caf50; color: #4caf50; margin-bottom: 0;">Autoheal i auto-sprzedaż</div>
                     <div id="accAutohealContent" style="display:none; padding: 8px; background: rgba(0,0,0,0.3); border: 1px solid #4caf50; border-top: none; margin-bottom: 5px;">
                         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                             <div style="display:flex; gap:10px; align-items:center;">
@@ -4915,7 +4967,7 @@ function initGUI() {
                             </div>
                         </div>
                     </div>
-                 <div class="accordion-header" id="accAlerts" onclick="toggleSettingsAcc('accAlerts')" style="background: rgba(33, 150, 243, 0.2); border-color: #2196f3; color: #2196f3; margin-top: 5px; margin-bottom: 0;">Alarmy i powiadomienia</div>
+                 <div class="accordion-header" id="accAlerts" data-exp-section="alarms" onclick="toggleSettingsAcc('accAlerts')" style="background: rgba(33, 150, 243, 0.2); border-color: #2196f3; color: #2196f3; margin-top: 5px; margin-bottom: 0;">Alarmy i powiadomienia</div>
                     <div id="accAlertsContent" style="display:none; padding: 8px; background: rgba(0,0,0,0.3); border: 1px solid #2196f3; border-top: none; margin-bottom: 5px;">
                         <div style="display:flex; flex-direction:column; gap:6px;">
                             <button id="btnOpenBrowserAlertsModule" class="btn-sepia" style="background:#ff9800; border-color:#f57c00; width:100%; padding:6px; font-weight:bold; font-size:11px;">Powiadomienia przeglądarki</button>
@@ -4923,7 +4975,7 @@ function initGUI() {
                         </div>
                     </div>
 
-                    <div class="accordion-header" id="accExpRules" onclick="toggleSettingsAcc('accExpRules')" style="background: rgba(156, 39, 176, 0.2); border-color: #9c27b0; color: #ba68c8; margin-top: 5px; margin-bottom: 0;">Zasady walki i bezpieczeństwo</div>
+                   <div class="accordion-header" id="accExpRules" data-exp-section="rules" onclick="toggleSettingsAcc('accExpRules')" style="background: rgba(156, 39, 176, 0.2); border-color: #9c27b0; color: #ba68c8; margin-top: 5px; margin-bottom: 0;">Zasady walki i bezpieczeństwo</div>
                     <div id="accExpRulesContent" style="display:none; padding: 8px; background: rgba(0,0,0,0.3); border: 1px solid #9c27b0; border-top: none; margin-bottom: 5px;">
                         <label style="color:#a99a75; font-size:10px; margin-bottom:0; margin-top:2px;">Przedział poziomowy (automatyczny +1 przy awansie):</label>
                         <div class="nav-row" style="display:grid; grid-template-columns: 1fr 1fr; gap:5px; margin-bottom:2px;">
@@ -4940,7 +4992,7 @@ function initGUI() {
                             <label style="color:#e040fb; font-size:10px; cursor:pointer; display:block; margin-top:4px;" title="Zezwala na używanie zwojów teleportacji z ekwipunku podczas expienia."><input type="checkbox" id="useTeleportsEq" ${botSettings.exp.useTeleportsEq ? 'checked' : ''}> Używaj teleportów z EQ (tylko w EXP)</label>
                         </div>
                     </div>
-                    <div class="accordion-header" id="accRoute" onclick="toggleSettingsAcc('accRoute')" style="background: rgba(0, 150, 136, 0.2); border-color: #009688; color: #009688; margin-top: 5px; margin-bottom: 0;">Trasa expowiska</div>
+                   <div class="accordion-header" id="accRoute" data-exp-section="route" onclick="toggleSettingsAcc('accRoute')" style="background: rgba(0, 150, 136, 0.2); border-color: #009688; color: #009688; margin-top: 5px; margin-bottom: 0;">Trasa expowiska</div>
                     <div id="accRouteContent" style="display:none; padding: 8px; background: rgba(0,0,0,0.3); border: 1px solid #009688; border-top: none; margin-bottom: 5px;">
                         <label style="color:#00e5ff; font-size:10px; cursor:pointer; font-weight:bold; margin-bottom:6px; display:block;"><input type="checkbox" id="autoChangeExpRoute" ${botSettings.exp.autoChangeRoute ? 'checked' : ''}> Automatyczna zmiana expowiska</label>
                         <input type="hidden" id="expRange" value="999">
@@ -5055,6 +5107,31 @@ function initGUI() {
             c.style.display = isHidden ? 'block' : 'none';
             h.innerText = `${isHidden ? 'v' : '>'} ${sectionName}`;
         };
+
+        if (!window.margoneuroExpDelegationInstalled) {
+            window.margoneuroExpDelegationInstalled = true;
+            document.addEventListener('click', function(event) {
+                const clickTarget = event.target && event.target.closest ? event.target : event.target?.parentElement;
+                const section = clickTarget?.closest?.('[data-exp-section]');
+                if (!section) return;
+
+                event.preventDefault();
+                event.stopImmediatePropagation();
+
+                const map = {
+                    berserk: 'accBerserk',
+                    autoheal: 'accAutoheal',
+                    alarms: 'accAlerts',
+                    rules: 'accExpRules',
+                    route: 'accRoute'
+                };
+                const sectionKey = section.getAttribute('data-exp-section');
+                const accordionId = map[sectionKey] || section.id;
+                console.log(`[EXP UI] Kliknięto sekcję: ${sectionKey}`);
+                console.log(`[EXP UI] Toggle sekcji: ${sectionKey}`);
+                window.toggleSettingsAcc(accordionId);
+            }, true);
+        }
 
         const gatewaysGui = document.createElement('div'); gatewaysGui.id = 'heroGatewaysGUI'; gatewaysGui.className = 'hero-window'; gatewaysGui.style.display = 'none';
         gatewaysGui.innerHTML = `
