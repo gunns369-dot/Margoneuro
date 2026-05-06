@@ -271,6 +271,8 @@
         });
     }
 
+    window.margoneuroLicenseStatus = window.margoneuroLicenseStatus || { status: 'Nieaktywna', lastMessage: '', lastVerifiedAt: 0 };
+
     async function margoneuroVerifySingleLicenseKey(licenseKey) {
         try {
             return await margoneuroPostJson(
@@ -313,6 +315,7 @@
             const result = await margoneuroVerifySingleLicenseKey(licenseKey);
 
             if (result.ok && result.data && result.data.active === true) {
+                window.margoneuroLicenseStatus = { status: 'Aktywna', data: result.data, lastMessage: result.data?.message || 'OK', lastVerifiedAt: Date.now() };
                 margoneuroWriteStorage(MARGONEURO_LICENSE_KEY_STORAGE, licenseKey.trim());
                 console.log('[License] Klucz aktywny, zapisuję i uruchamiam Margoneuro');
                 if (keyCameFromStorage) {
@@ -326,6 +329,7 @@
             console.log('[License] Klucz odrzucony, proszę o nowy');
             console.warn('[Margoneuro License] Licencja odrzucona', result.data);
 
+            window.margoneuroLicenseStatus = { status: 'Nieaktywna', data: result.data, lastMessage: result.data?.message || 'Nieaktywna', lastVerifiedAt: Date.now() };
             const status = result.data?.status || 'invalid';
             const apiMessage = result.data?.message || 'Licencja jest nieważna, wygasła albo cofnięta.';
             const message = status === 'device_mismatch'
@@ -344,6 +348,7 @@
             keyCameFromStorage = false;
         }
 
+        window.margoneuroLicenseStatus = { status: 'Błąd', lastMessage: 'Brak klucza lub anulowano', lastVerifiedAt: Date.now() };
         console.warn('[Margoneuro License] Licencja odrzucona');
         return false;
     }
@@ -3035,7 +3040,7 @@ function cleanOldGateways() {
 
         b.style.cssText = "position:fixed; top:20%; left:50%; transform:translateX(-50%); background:rgba(200, 0, 0, 0.95); border:4px solid #ffeb3b; color:#fff; padding:30px 50px; font-size:30px; font-weight:bold; z-index:999999; border-radius:10px; text-shadow:2px 2px 5px #000; text-align:center; animation: blinker 1s linear infinite;";
 
-        b.innerHTML = `đźš¨ ZNALEZIONO CEL! đźš¨<br><br><span style="color:#ffcc00; font-size:40px;">${heroName}</span><br><br><span style="font-size:16px;cursor:pointer;display:block;margin-top:20px; text-decoration:underline;" onclick="this.parentElement.remove()">[ZAMKNIJ ALARM]</span>`;
+        b.innerHTML = `🚨 ZNALEZIONO CEL! 🚨<br><br><span style="color:#ffcc00; font-size:40px;">${heroName}</span><br><br><span style="font-size:16px;cursor:pointer;display:block;margin-top:20px; text-decoration:underline;" onclick="this.parentElement.remove()">[ZAMKNIJ ALARM]</span>`;
 
         document.body.appendChild(b);
 
@@ -3074,8 +3079,10 @@ let attackInterval = null;
 
         // METODA GARGONEMA - Włącza natywnego auto-ataka prosto na serwerze gry
 
-        if (window.BerserkController?.enable) window.BerserkController.enable(`attack_target:${reason}`);
-        if (typeof window._g === 'function' && (!window.RouteCombatFSM || window.RouteCombatFSM.canAutoAttack())) window._g(`fight&a=attack&id=${targetId}`);
+        if (typeof window.updateServerBerserk === 'function') window.updateServerBerserk('attack_target');
+        if (!window.RouteCombatFSM || window.RouteCombatFSM.canAutoAttack()) sendGameCommand(`fight&a=attack&id=${targetId}`, reason);
+        window.margoneuroBerserkDiag.lastTargetId = targetId;
+        window.margoneuroBerserkDiag.lastAttackCommand = `fight&a=attack&id=${targetId}`;
 
         attackInterval = setInterval(() => {
 
@@ -3157,7 +3164,7 @@ let attackInterval = null;
                     if (!window.RouteCombatFSM || window.RouteCombatFSM.canAutoAttack()) {
                         if (Engine.npcs && typeof Engine.npcs.interact === 'function') Engine.npcs.interact(targetId);
                         if (Engine.npcs && typeof Engine.npcs.clickNpc === 'function') Engine.npcs.clickNpc(targetId);
-                        if (typeof window._g === 'function') window._g(`fight&a=attack&id=${targetId}`);
+                        sendGameCommand(`fight&a=attack&id=${targetId}`, 'attack_target_retry');
                     }
 
                     let confirmBtn = document.querySelector(".green.button, .podejdz-btn, .zaatakuj-btn");
@@ -5488,7 +5495,7 @@ function initGUI() {
                 <div class="nav-row"><label>Skrót klawiszowy (Chowaj/Pokaż bota):</label><input type="text" id="inpToggleKey" value="${botSettings.toggleKey || 'Kliknij i wciśnij klawisz...'}" readonly style="cursor:pointer; text-align:center;"></div>
 
               <div style="display:flex; gap:4px;">
-                    <button id="btnSaveSettings" class="btn btn-go-sepia" style="flex:1; padding:6px 2px; font-size:9px;">đź’ľ Zapisz opcje</button>
+                    <button id="btnSaveSettings" class="btn btn-go-sepia" style="flex:1; padding:6px 2px; font-size:9px;">Zapisz opcje</button>
                     <button id="btnExportFile" class="btn btn-sepia" style="flex:1; padding:6px 2px; font-size:9px; background:#00838f; border-color:#00acc1;" title="Zapisuje bazę do pliku na dysk">📥 Pobierz plik</button>
                     <button id="btnImportFile" class="btn btn-sepia" style="flex:1; padding:6px 2px; font-size:9px; background:#e65100; border-color:#ef6c00;" title="Wczytuje bazę z pliku">📂 Wgraj plik</button>
                 </div>
@@ -5920,7 +5927,7 @@ expEmptyScans = 0;
                 window.logExp("[EXP] START expienia/trasy", "#4caf50");
                 window.logExp("[EXP] Tryb ustawiony na EXP", "#4caf50");
             }
-            if (typeof window.logExp === 'function') window.logExp("đźš€ Uruchomiono tryb automatyczny!", "#4caf50");
+            if (typeof window.logExp === 'function') window.logExp("Uruchomiono tryb automatyczny.", "#4caf50");
             HeroLogger.emit('INFO', 'ROUTE_START', 'START ekspienia/trasy', "#4caf50", { category: 'ROUTE' });
 
             if (botSettings.berserk) {
@@ -5931,7 +5938,12 @@ expEmptyScans = 0;
                     window.BerserkController.onBotStart('exp_start');
                     window.BerserkController.onExpStart();
                 }
-                if (botSettings.berserk.userEnabled && window.logExp) window.logExp("[BERSERK] enabled for EXP", "#81c784");
+                if (botSettings.berserk.userEnabled) {
+                    botSettings.berserk.enabled = true;
+                    if (typeof saveSettings === 'function') saveSettings();
+                    if (typeof window.updateServerBerserk === 'function') window.updateServerBerserk('exp_start');
+                    if (window.logExp) window.logExp("[BERSERK] real enable sent for EXP", "#81c784");
+                }
             }
         } else {
             if (!window.__stoppingForCaptcha) window.margoneuroStoppedManually = true;
@@ -5950,14 +5962,21 @@ expEmptyScans = 0;
 
             console.log("[EXP] STOP expienia/trasy");
             if (typeof window.logExp === 'function') window.logExp("[EXP] STOP expienia/trasy", "#f44336");
-            if (typeof window.logExp === 'function') window.logExp("đź›‘ Zatrzymano tryb automatyczny.", "#f44336");
+            if (typeof window.logExp === 'function') window.logExp("Zatrzymano tryb automatyczny.", "#f44336");
             HeroLogger.emit('INFO', 'ROUTE_STOP', 'STOP ekspienia/trasy', "#f44336", { category: 'ROUTE' });
 
             if (window.BerserkController) {
                 window.BerserkController.onBotStop('exp_stop');
                 window.BerserkController.onExpStop();
             }
-            if (window.logExp) window.logExp("[BERSERK] disabled after EXP stop", "#ffb74d");
+            if (botSettings.berserk) {
+                botSettings.berserk.enabled = false;
+                if (typeof saveSettings === 'function') saveSettings();
+                if (typeof window.updateServerBerserk === 'function') window.updateServerBerserk('exp_stop');
+                sendGameCommand("settings&action=update&id=34&v=0", "exp_stop_force_disable");
+                sendGameCommand("settings&action=update&id=35&v=0", "exp_stop_force_disable");
+            }
+            if (window.logExp) window.logExp("[BERSERK] real disable sent after EXP stop", "#ffb74d");
         }
     });
 }
@@ -6165,6 +6184,41 @@ bindChange('useTeleportsEq', (e) => { botSettings.exp.useTeleportsEq = e.target.
                 if (typeof window.renderExpMaps === 'function') window.renderExpMaps();
             });
         }
+        window.margoneuroBerserkDiag = window.margoneuroBerserkDiag || { gAvailable: false, gSource: 'none', lastNativeCommand: '', lastNativeCommandTime: 0, lastAttackCommand: '', lastError: '', lastTargetId: null, battleDetected: false };
+        function getPageWindowForGameCommands() {
+            if (typeof unsafeWindow !== 'undefined' && unsafeWindow) return unsafeWindow;
+            if (typeof margoneuroGetPageWindow === 'function') return margoneuroGetPageWindow();
+            return window;
+        }
+        function getGameCommandFunction() {
+            let source = 'none'; let fn = null;
+            if (typeof unsafeWindow !== 'undefined' && typeof unsafeWindow._g === 'function') { source = 'unsafeWindow._g'; fn = unsafeWindow._g.bind(unsafeWindow); }
+            else if (typeof window._g === 'function') { source = 'window._g'; fn = window._g.bind(window); }
+            else {
+                const pw = getPageWindowForGameCommands();
+                if (pw && typeof pw._g === 'function') { source = 'pageWindow._g'; fn = pw._g.bind(pw); }
+            }
+            window.margoneuroBerserkDiag.gAvailable = !!fn;
+            window.margoneuroBerserkDiag.gSource = source;
+            console.log(`[BERSERK_DIAG] _g source: ${source}`);
+            if (!fn) console.warn('[BERSERK_DIAG] _g unavailable');
+            return fn;
+        }
+        function sendGameCommand(command, reason = 'unknown') {
+            const g = getGameCommandFunction();
+            if (!g) return false;
+            try {
+                g(command);
+                window.margoneuroBerserkDiag.lastNativeCommand = command;
+                window.margoneuroBerserkDiag.lastNativeCommandTime = Date.now();
+                if (command.startsWith('fight&a=attack')) window.margoneuroBerserkDiag.lastAttackCommand = command;
+                console.log(`[BERSERK_DIAG] native command sent: ${command} reason=${reason}`);
+                return true;
+            } catch (e) {
+                window.margoneuroBerserkDiag.lastError = String(e?.message || e);
+                return false;
+            }
+        }
         function syncBerserkToggleVisual() {
             const chk = document.getElementById('berserkEnabled');
             if (!chk) return;
@@ -6177,18 +6231,18 @@ bindChange('useTeleportsEq', (e) => { botSettings.exp.useTeleportsEq = e.target.
         }
 
         // Nowa, ostateczna funkcja do wysyłania komend natywnego Berserka bezpośrednio do gry
-        window.updateServerBerserk = function() {
-            if (typeof window._g !== 'function') return;
+        window.updateServerBerserk = function(reason = 'manual') {
             let b = botSettings.berserk;
+            console.log(`[BERSERK] ${b.enabled ? 'enable' : 'disable'} reason=${reason}`);
 
             [34, 35].forEach(id => {
-                window._g(`settings&action=update&id=${id}&v=${b.enabled ? 1 : 0}`);
+                sendGameCommand(`settings&action=update&id=${id}&v=${b.enabled ? 1 : 0}`, `berserk_${reason}`);
                 if (b.enabled) {
-                    window._g(`settings&action=update&id=${id}&key=common&v=${b.common ? 1 : 0}`);
-                    window._g(`settings&action=update&id=${id}&key=elite&v=${b.e1 ? 1 : 0}`);
-                    window._g(`settings&action=update&id=${id}&key=elite2&v=${(b.e2 || b.hero) ? 1 : 0}`);
-                    window._g(`settings&action=update&id=${id}&key=lvlmin&v=${b.minLvlOffset}`);
-                    window._g(`settings&action=update&id=${id}&key=lvlmax&v=${b.maxLvlOffset}`);
+                    sendGameCommand(`settings&action=update&id=${id}&key=common&v=${b.common ? 1 : 0}`, `berserk_${reason}`);
+                    sendGameCommand(`settings&action=update&id=${id}&key=elite&v=${b.e1 ? 1 : 0}`, `berserk_${reason}`);
+                    sendGameCommand(`settings&action=update&id=${id}&key=elite2&v=${(b.e2 || b.hero) ? 1 : 0}`, `berserk_${reason}`);
+                    sendGameCommand(`settings&action=update&id=${id}&key=lvlmin&v=${b.minLvlOffset}`, `berserk_${reason}`);
+                    sendGameCommand(`settings&action=update&id=${id}&key=lvlmax&v=${b.maxLvlOffset}`, `berserk_${reason}`);
                 }
             });
 
@@ -6223,16 +6277,18 @@ bindChange('useTeleportsEq', (e) => { botSettings.exp.useTeleportsEq = e.target.
 
         bindChange('berserkEnabled', (e) => {
             botSettings.berserk.userEnabled = e.target.checked;
+            botSettings.berserk.enabled = e.target.checked;
             if (typeof saveSettings === 'function') saveSettings();
+            if (typeof window.updateServerBerserk === 'function') window.updateServerBerserk('checkbox_change');
             if (window.RouteCombatFSM) {
                 window.RouteCombatFSM.update({ berserkCheckbox: !!e.target.checked }, 'checkbox_change');
                 window.RouteCombatFSM.syncRuntimeContext('checkbox_runtime_sync');
             }
         });
-        bindChange('berserkCommon', (e) => { botSettings.berserk.common = e.target.checked; saveSettings(); if (typeof window.updateServerBerserk === 'function') window.updateServerBerserk(); });
-        bindChange('berserkE1', (e) => { botSettings.berserk.e1 = e.target.checked; saveSettings(); if (typeof window.updateServerBerserk === 'function') window.updateServerBerserk(); });
-        bindChange('berserkE2', (e) => { botSettings.berserk.e2 = e.target.checked; saveSettings(); if (typeof window.updateServerBerserk === 'function') window.updateServerBerserk(); });
-        bindChange('berserkHero', (e) => { botSettings.berserk.hero = e.target.checked; saveSettings(); if (typeof window.updateServerBerserk === 'function') window.updateServerBerserk(); });
+        bindChange('berserkCommon', (e) => { botSettings.berserk.common = e.target.checked; saveSettings(); if (typeof window.updateServerBerserk === 'function') window.updateServerBerserk('checkbox_common'); });
+        bindChange('berserkE1', (e) => { botSettings.berserk.e1 = e.target.checked; saveSettings(); if (typeof window.updateServerBerserk === 'function') window.updateServerBerserk('checkbox_e1'); });
+        bindChange('berserkE2', (e) => { botSettings.berserk.e2 = e.target.checked; saveSettings(); if (typeof window.updateServerBerserk === 'function') window.updateServerBerserk('checkbox_e2'); });
+        bindChange('berserkHero', (e) => { botSettings.berserk.hero = e.target.checked; saveSettings(); if (typeof window.updateServerBerserk === 'function') window.updateServerBerserk('checkbox_hero'); });
         bindChange('berserkMaxLvl', (e) => { botSettings.berserk.maxLvlOffset = parseInt(e.target.value, 10) || 100; saveSettings(); if (typeof window.updateServerBerserk === 'function') window.updateServerBerserk(); });
         bindChange('berserkMinLvl', (e) => { botSettings.berserk.minLvlOffset = -(parseInt(e.target.value, 10) || 20); saveSettings(); if (typeof window.updateServerBerserk === 'function') window.updateServerBerserk(); });
 
@@ -6357,6 +6413,39 @@ selHero.addEventListener('change', (e) => {
         // OKNA I PRZYCISKI POMOCNICZE
 
         document.getElementById('btnOpenSettings').addEventListener('click', () => { let p = document.getElementById('heroSettingsGUI'); p.style.display = p.style.display === 'flex' ? 'none' : 'flex'; });
+        function renderBerserkDiagnosticsPanel() {
+            const host = document.getElementById('heroSettingsGUI');
+            if (!host || document.getElementById('berserkDiagPanel')) return;
+            const box = document.createElement('div');
+            box.id = 'berserkDiagPanel';
+            box.style.cssText = 'margin:8px;border:1px solid #555;padding:6px;font-size:10px;color:#ddd;';
+            box.innerHTML = `<div style="font-weight:bold;">Diagnostyka Berserka</div><div id="berserkDiagContent"></div>
+            <div style="display:grid;gap:4px;margin-top:6px;">
+            <button id="btnBerserkTestOn">Test: włącz Berserka</button><button id="btnBerserkTestOff">Test: wyłącz Berserka</button>
+            <button id="btnBerserkTestAttack">Test: atakuj najbliższego moba</button><button id="btnBerserkRefresh">Odśwież diagnostykę</button></div>
+            <div style="font-weight:bold;margin-top:8px;">Licencja Margoneuro</div><div id="licenseDiagContent"></div>
+            <button id="btnLicenseCheck">Sprawdź licencję</button><button id="btnLicenseChange">Zmień klucz</button>`;
+            host.appendChild(box);
+            const refresh = () => {
+                const d = window.margoneuroBerserkDiag || {};
+                const s = Engine?.settings?.d || {};
+                const chk = document.getElementById('berserkEnabled');
+                document.getElementById('berserkDiagContent').innerHTML = `_g: ${d.gAvailable ? 'yes' : 'no'} (${d.gSource || 'none'})<br>Engine: ${typeof Engine !== 'undefined' ? 'yes' : 'no'}<br>Engine.settings.d: ${s ? 'yes' : 'no'}<br>solo=${s.fight_auto_solo ?? '-'} elite=${s.fight_auto_elites ?? '-'} elite2=${s.fight_auto_elites2 ?? '-'}<br>enabled=${!!botSettings?.berserk?.enabled} userEnabled=${!!botSettings?.berserk?.userEnabled} checkbox=${!!chk?.checked}<br>last cmd=${d.lastNativeCommand || '-'}<br>last cmd time=${d.lastNativeCommandTime ? new Date(d.lastNativeCommandTime).toLocaleString() : '-'}<br>last attack=${d.lastAttackCommand || '-'} error=${d.lastError || '-'}`;
+                const lic = window.margoneuroLicenseStatus || {};
+                const key = (margoneuroReadStorage(MARGONEURO_LICENSE_KEY_STORAGE) || '').trim();
+                const masked = key ? `${key.slice(0,4)}...${key.slice(-4)}` : '-';
+                const dev = margoneuroGetOrCreateDeviceId();
+                document.getElementById('licenseDiagContent').innerHTML = `status=${lic.status || 'Nieaktywna'}<br>product_slug=${MARGONEURO_LICENSE_PRODUCT_SLUG}<br>key=${masked}<br>device=${String(dev).slice(0,8)}...<br>expires=${lic.data?.expires_at || 'Brak daty wygaśnięcia w odpowiedzi API'}<br>last verify=${lic.lastVerifiedAt ? new Date(lic.lastVerifiedAt).toLocaleString() : '-'}<br>msg=${lic.lastMessage || '-'}`;
+            };
+            document.getElementById('btnBerserkRefresh').onclick = refresh;
+            document.getElementById('btnBerserkTestOn').onclick = () => { botSettings.berserk.enabled = true; window.updateServerBerserk('test_enable'); refresh(); };
+            document.getElementById('btnBerserkTestOff').onclick = () => { botSettings.berserk.enabled = false; window.updateServerBerserk('test_disable'); refresh(); };
+            document.getElementById('btnBerserkTestAttack').onclick = () => { const npcs = Engine?.npcs?.check ? Engine.npcs.check() : (Engine?.npcs?.d || {}); const first = Object.keys(npcs)[0]; if (first) attackTarget(parseInt(first,10), 'diag_test'); refresh(); };
+            document.getElementById('btnLicenseCheck').onclick = async () => { const k = margoneuroReadStorage(MARGONEURO_LICENSE_KEY_STORAGE); if (k) window.margoneuroLicenseStatus = { status: 'Błąd', lastMessage: 'Trwa sprawdzanie...', lastVerifiedAt: Date.now() }; if (k) await margoneuroVerifySingleLicenseKey(k); refresh(); };
+            document.getElementById('btnLicenseChange').onclick = () => { margoneuroDeleteStorage(MARGONEURO_LICENSE_KEY_STORAGE); const k = margoneuroPromptLicenseKey('Wprowadź nowy klucz licencyjny Margoneuro:'); if (k) margoneuroWriteStorage(MARGONEURO_LICENSE_KEY_STORAGE, k.trim()); refresh(); };
+            refresh();
+        }
+        setTimeout(renderBerserkDiagnosticsPanel, 250);
 
         document.getElementById('btnOpenMaps').addEventListener('click', () => { let p = document.getElementById('heroGatewaysGUI'); p.style.display = p.style.display === 'flex' ? 'none' : 'flex'; if(p.style.display === 'flex') renderGatewaysDatabase(); });
 
