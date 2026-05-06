@@ -5290,7 +5290,7 @@ function initGUI() {
         const mainGui = document.createElement('div'); mainGui.id = 'heroNavGUI'; mainGui.className = 'hero-window';
         mainGui.innerHTML = `
             <div class="gui-header">
-                <div id="guiHeaderTitle" style="margin-right:5px; color:#00e5ff; text-shadow: 0 0 5px #00e5ff; font-weight:900;">MargoNeuro</div>
+                <div id="guiHeaderTitle" style="margin-right:5px; color:#00e5ff; text-shadow: 0 0 5px #00e5ff; font-weight:900;">Margoneuro / Radar v64.6</div>
                <div class="header-buttons">
                     <button id="btnGoToTop" style="color:#00acc1; border-color:#00acc1;"><span class="btn-icon">Idź</span><span>DO</span></button>
                     <button id="btnOpenMaps" style="color:#2196f3; border-color:#2196f3;"><span class="btn-icon">Mapy</span><span>Mapy</span></button>
@@ -5327,14 +5327,7 @@ function initGUI() {
                     <div class="nav-row" style="display: flex; flex-direction: column; flex-grow: 1;">
                         <label style="color:#00acc1;">Kolejność przechodzenia map:</label>
                         <div id="heroMapListContainer"><div style="padding:5px;text-align:center;color:#777;">Wybierz herosa</div></div>
-                        <div id="inlineTransitEditor" style="display:none; padding:8px; border:1px solid #00acc1; background:rgba(0, 172, 193, 0.1); margin-top:5px; border-radius:2px;">
-                            <label style="color:#00acc1; font-weight:bold; margin-bottom:4px; display:block;">Dodaj przejście:</label>
-                            <input type="text" id="newTransitMapName" placeholder="Nazwa mapy docelowej..." style="margin-bottom:4px;">
-                            <input type="number" id="newTransitPos" placeholder="Pozycja na liście (puste = na koniec)" style="margin-bottom:6px;">
-                            <div style="display:flex; gap:4px; margin-bottom:6px;"><input type="number" id="newTransitX" placeholder="X" style="width:40px;"><input type="number" id="newTransitY" placeholder="Y" style="width:40px;"><button class="btn-sepia" style="flex-grow:1;" onclick="document.getElementById('newTransitX').value = Engine.hero.d.x; document.getElementById('newTransitY').value = Engine.hero.d.y;">Stąd</button></div>
-                            <div style="display:flex; gap:4px;"><button class="btn-sepia btn-go-sepia" style="flex-grow:1;" onclick="saveNewTransit()">Zapisz mapę</button><button class="btn-sepia" style="background:#8e0000; width:30px;" onclick="document.getElementById('inlineTransitEditor').style.display='none'">x</button></div>
-                        </div>
-                        <div style="display:flex; gap:5px; margin-top:5px;">
+                                                <div style="display:flex; gap:5px; margin-top:5px;">
                             <button id="btnAutoRoute" class="btn btn-go-sepia" style="flex-grow:1;" onclick="openAutoRouteModal()">Kreator trasy</button>
                             <button id="btnResetRoute" class="btn btn-sepia" style="background:#8e0000; width: auto;" title="Zresetuj pętlę i przywróć z bazy">Resetuj bazę</button>
                         </div>
@@ -6595,9 +6588,9 @@ selHero.addEventListener('change', (e) => {
 
         // Event Listenery globalne
 
-        window.openInlineEditor = function(targetMapName) { editingGatewayFor = targetMapName; updateUI(); };
+        window.openInlineEditor = function() { heroAlert('Ręczna edycja kordów przejść została ukryta. Użyj skanowania mapy.'); };
 
-        window.saveInlineGateway = function(targetMapName) { let currentMap = lastMapName; let x = parseInt(document.getElementById('gw_edit_x').value); let y = parseInt(document.getElementById('gw_edit_y').value); if (isNaN(x) || isNaN(y)) return heroAlert("Wpisz poprawne liczby w pola X i Y!"); saveGatewayToDB(currentMap, targetMapName, x, y); editingGatewayFor = null; updateUI(); };
+        window.saveInlineGateway = function() { return; };
 
         window.cancelInlineGateway = function() { editingGatewayFor = null; updateUI(); };
 
@@ -10401,7 +10394,7 @@ window.renderMapOrderList = () => {
                                value="${index + 1}"
                                onchange="window.changeMapOrder(${index}, this.value)"
                                style="width:35px; text-align:center; font-size:10px; padding:2px; background:#111; color:#d4af37; border:1px solid #444; border-radius:4px;">
-                        <button class="icon-btn" onclick="window.openInlineEditor('${safeMapName}')" title="Ręczna edycja kordów">🚪</button>
+                        
                     </div>
                 </div>`;
             }
@@ -10472,7 +10465,7 @@ window.renderMapOrderList = () => {
                         ${baseBadge}
                     </div>
                     <div class="buttons-wrapper">
-                        <button class="icon-btn" onclick="window.openInlineEditor('${safeMapName}')" title="Ręczna edycja kordów (opcjonalne)">🚪</button>
+                        
                     </div>
                 </div>`;
             }
@@ -13353,8 +13346,8 @@ window.openShopAsync = async (namePart) => {
                 const clickerOnline = await checkMargoclickerAlive();
                 if (!clickerOnline) {
                     window.__captchaPhase = "manual_waiting";
-                    if (window.logExp) window.logExp("🛑 MargoClicker nie działa — nie rozwiązuję zapadki automatycznie.", "#ff9800");
-                    if (window.logHero) window.logHero("🛑 MargoClicker nie działa — czekam na ręczne rozwiązanie zapadki.", "#ff9800");
+                    if (window.logExp) window.logExp("🛑 Margoneuro nie działa — nie rozwiązuję zapadki automatycznie.", "#ff9800");
+                    if (window.logHero) window.logHero("🛑 Margoneuro nie działa — czekam na ręczne rozwiązanie zapadki.", "#ff9800");
                     window.__captchaLock = false;
                     return;
                 }
@@ -13400,7 +13393,7 @@ window.openShopAsync = async (namePart) => {
                 const clickerOnline = await checkMargoclickerAlive();
                 if (!clickerOnline) {
                     window.__captchaPhase = "manual_waiting";
-                    if (window.logExp) window.logExp("🛑 MargoClicker nie działa — pomijam auto-rozwiązywanie zapadki.", "#ff9800");
+                    if (window.logExp) window.logExp("🛑 Margoneuro nie działa — pomijam auto-rozwiązywanie zapadki.", "#ff9800");
                     if (window.logHero) window.logHero("🛑 Brak margoclicker.py: czekam na ręczne rozwiązanie.", "#ff9800");
                     window.__captchaLock = false;
                     return;
