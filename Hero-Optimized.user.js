@@ -8818,7 +8818,9 @@ function isMapTemporarilyCleared(mapName) {
     if (!window.mapClearTimes) window.mapClearTimes = {};
 
     const mapKey = getMapClearKey(mapName);
-    const ts = window.mapClearTimes[mapKey] || window.mapClearTimes[mapName];
+    const entry = window.mapClearTimes[mapKey] || window.mapClearTimes[mapName];
+    if (!entry) return false;
+    const ts = (typeof entry === 'object' && entry !== null) ? Number(entry.ts || entry.time || 0) : Number(entry);
     if (!ts) return false;
     const clearTtlMs = 70 * 1000;
     if (Date.now() - ts > clearTtlMs) {
@@ -8834,16 +8836,48 @@ function markMapTemporarilyCleared(mapName) {
     if (!window.mapClearTimes) window.mapClearTimes = {};
     const now = Date.now();
     const mapKey = getMapClearKey(mapName);
-    window.mapClearTimes[mapKey] = now;
-    // Backward compatibility ze starszym formatem klucza.
-    window.mapClearTimes[mapName] = now;
+    window.mapClearTimes[mapKey] = { ts: now, name: mapName, reason: 'clean' };
+    window.mapClearTimes[mapName] = window.mapClearTimes[mapKey];
+    HeroLogger.emit('INFO', 'EXP_MAP_CLEAN_MARK', `[EXP] Mapa oznaczona jako czysta: ${mapName}`, "#81c784", { category: 'EXP', dedupeMs: 1200 });
 }
 
-function unmarkMapTemporarilyCleared(mapName) {
+function unmarkMapTemporarilyCleared(mapName, reason = 'manual') {
     if (!mapName || !window.mapClearTimes) return;
     const mapKey = getMapClearKey(mapName);
     delete window.mapClearTimes[mapKey];
     delete window.mapClearTimes[mapName];
+    HeroLogger.emit('INFO', 'EXP_MAP_CLEAN_UNMARK', `[EXP] Mapa odblokowana, bo pojawił się mob: ${mapName} (${reason})`, "#64b5f6", { category: 'EXP', dedupeMs: 1200 });
+}
+
+function unmarkMapCleared(mapName, reason = 'manual') {
+    unmarkMapTemporarilyCleared(mapName, reason);
+}
+
+function getUnclearedExpMaps(currentMap, mapsPool) {
+    const currNorm = normMapName(currentMap);
+    return (Array.isArray(mapsPool) ? mapsPool : [])
+        .filter(m => m && normMapName(m) !== currNorm && !isMapTemporarilyCleared(m))
+        .filter(m => !(window.__bannedMaps && window.__bannedMaps[m] && Date.now() < window.__bannedMaps[m]));
+}
+
+function resetClearedMapIfMobSeen(mapName, visibleTargets) {
+    if (!mapName || !isMapTemporarilyCleared(mapName)) return false;
+    if (Number(visibleTargets) > 0) {
+        unmarkMapTemporarilyCleared(mapName, 'mob_seen');
+        return true;
+    }
+    return false;
+}
+
+function pickNextExpMapAfterClean(currentMap, mapsPool) {
+    const pool = Array.isArray(mapsPool) ? mapsPool : [];
+    const uncleared = getUnclearedExpMaps(currentMap, pool);
+    if (!uncleared.length) return null;
+    const best = pickNextUnclearedExpMap(currentMap, uncleared);
+    if (best?.targetMap) return { targetMap: best.targetMap, path: best.path || null, reason: 'route_order_uncleared' };
+    const nearest = getClosestExpMapPath(currentMap, uncleared);
+    if (nearest?.targetMap) return { targetMap: nearest.targetMap, path: nearest.path || null, reason: 'nearest_uncleared' };
+    return null;
 }
 
 function resetExpMapClearProbe(mapName = null) {
@@ -8986,7 +9020,10 @@ function pickNextUnclearedExpMap(currMap, mapsPool) {
     for (let i = 0; i < orderedCandidates.length; i++) {
         const candidate = orderedCandidates[i];
         if (!candidate || normMapName(candidate) === currNorm) continue;
-        if (isMapTemporarilyCleared(candidate)) continue;
+        if (isMapTemporarilyCleared(candidate)) {
+            HeroLogger.emit('DEBUG', 'EXP_SKIP_CLEARED_MAP', `[EXP] Pomijam czystą mapę: ${candidate}`, "#90a4ae", { category: 'EXP', dedupeMs: 1500 });
+            continue;
+        }
         if (window.__bannedMaps && window.__bannedMaps[candidate] && now < window.__bannedMaps[candidate]) continue;
 
         const path = typeof getShortestPath === 'function' ? getShortestPath(currMap, candidate, routePathOptions()) : null;
@@ -9417,7 +9454,7 @@ function runExpLogic() {
     }
 
     if (isExpMap && liveVisibleValidCount > 0) {
-        unmarkMapTemporarilyCleared(currMap);
+        resetClearedMapIfMobSeen(currMap, liveVisibleValidCount);
         resetExpMapClearProbe(currMap);
         expEmptyScans = 0;
         window.expAllMapsClearedAt = 0;
@@ -9503,7 +9540,7 @@ function runExpLogic() {
     HeroLogger.emit('DEBUG', 'EXP_REACHABLE_CANDIDATES', `[EXP] reachable candidates count=${validMobs.length}`, "#90caf9", { category: 'EXP', dedupeMs: 1200 });
     HeroLogger.emit('DEBUG', 'EXP_REMEMBERED_CANDIDATES', `[EXP] remembered candidates count=${rememberedCandidatesCount}`, "#90caf9", { category: 'EXP', dedupeMs: 1200 });
     if (isExpMap && validMobs.length > 0) {
-        unmarkMapTemporarilyCleared(currMap);
+        resetClearedMapIfMobSeen(currMap, validMobs.length);
         resetExpMapClearProbe(currMap);
         expEmptyScans = 0;
         window.expAllMapsClearedAt = 0;
@@ -9761,8 +9798,8 @@ function runExpLogic() {
         // Bezpiecznik: po zmianie mapy tranzytowej czasem silnik "staje" bez decyzji.
         // Po krótkim timeoutcie wymuszamy ponowne obrane celu mapowego.
         if (!isExpMap && !window.isRushing && window.expMapEnteredAt && (now - window.expMapEnteredAt > 4200)) {
-            const unclearedMaps = (mapsPool || []).filter(m => m && !isMapTemporarilyCleared(m));
-            const nearestExpPath = getClosestExpMapPath(currMap, unclearedMaps.length ? unclearedMaps : mapsPool);
+            const unclearedMaps = getUnclearedExpMaps(currMap, mapsPool);
+            const nearestExpPath = getClosestExpMapPath(currMap, unclearedMaps);
             if (nearestExpPath?.targetMap) {
                 if (window.logExp && window._lastTransitRecoverLog !== `${currMap}->${nearestExpPath.targetMap}`) {
                     window.logExp(`🧭 [Recovery] Tranzyt zatrzymał się po zmianie mapy, ponawiam bieg do: [${nearestExpPath.targetMap}]`, "#ffb74d");
@@ -9789,27 +9826,32 @@ function runExpLogic() {
             }
 
             markMapTemporarilyCleared(currMap);
-            HeroLogger.emit('INFO', 'EXP_MAP_CLEAN', `[EXP] map considered clean: ${currMap}`, "#81c784", { category: 'EXP', dedupeMs: 1200 });
+            expCurrentTargetId = null;
+            window.expFocusTarget = null;
+            window.expCurrentTargetGroupKey = null;
+            expLastLoggedTargetId = null;
+            expLastActionTime = now + 700;
             if (window.logExp && window._lastClearedMapLog !== currMap) {
                 window.logExp(`🧹 Mapa wyczyszczona: [${currMap}] — szukam kolejnego expowiska.`, "#81c784");
                 window._lastClearedMapLog = currMap;
             }
         }
 
-        const unclearedMaps = (mapsPool || []).filter(m => m && !isMapTemporarilyCleared(m));
-        const bestTransit = pickNextUnclearedExpMap(currMap, unclearedMaps.length ? unclearedMaps : mapsPool);
+        const unclearedMaps = getUnclearedExpMaps(currMap, mapsPool);
+        if (unclearedMaps.length === 0 && areAllExpMapsTemporarilyCleared(mapsPool) && !window.expAllMapsClearedAt) window.expAllMapsClearedAt = now;
+        const bestAfterClean = pickNextExpMapAfterClean(currMap, mapsPool);
         window.expDecisionInfo = `Mapa pusta: ${currMap} -> szukam przejścia w trasie`;
-        let bestTargetMap = bestTransit ? bestTransit.targetMap : null;
+        let bestTargetMap = bestAfterClean ? bestAfterClean.targetMap : null;
 
         // Jeśli startujemy poza expowiskiem, dobijamy najpierw do najbliższej mapy z kolejności,
         // ale priorytetowo ignorujemy mapy świeżo wyczyszczone.
         if (!bestTargetMap && !isExpMap) {
-            const nearestExpPath = getClosestExpMapPath(currMap, unclearedMaps.length ? unclearedMaps : mapsPool);
+            const nearestExpPath = getClosestExpMapPath(currMap, unclearedMaps);
             if (nearestExpPath?.targetMap) bestTargetMap = nearestExpPath.targetMap;
         }
 
         if (!bestTargetMap) {
-            const fallbackRoute = pickNextReachableMapFromRoute(currMap, unclearedMaps.length ? unclearedMaps : mapsPool);
+            const fallbackRoute = pickNextReachableMapFromRoute(currMap, unclearedMaps);
             if (fallbackRoute?.nextMap) bestTargetMap = fallbackRoute.nextMap;
         }
 
@@ -9825,7 +9867,8 @@ function runExpLogic() {
         }
 
         if (bestTargetMap && !window.isRushing) {
-            HeroLogger.emit('INFO', 'EXP_TRANSIT', `[EXP] going to transition: ${currMap} -> ${bestTargetMap}`, "#64b5f6", { category: 'EXP', dedupeMs: 1000 });
+            HeroLogger.emit('INFO', 'EXP_TRANSIT', `[EXP] Tranzyt przez: ${currMap}`, "#64b5f6", { category: 'EXP', dedupeMs: 1000 });
+            HeroLogger.emit('INFO', 'EXP_TRANSIT_TARGET', `[EXP] Cel tranzytu: ${bestTargetMap}`, "#64b5f6", { category: 'EXP', dedupeMs: 1000 });
             if (window.logExp && window._lastTransitMapLog !== bestTargetMap) {
                 window.logExp(`🏃 Bieg do: [${bestTargetMap}]`, "#90caf9");
                 window._lastTransitMapLog = bestTargetMap;
@@ -9936,6 +9979,33 @@ function runExpLogic() {
     }
 }
 setInterval(runExpLogic, 400);
+window.expDebugRouteState = function() {
+    const currMap = Engine?.map?.d?.name || null;
+    const selectedMaps = (typeof getCurrentExpHuntMaps === 'function') ? getCurrentExpHuntMaps() : [];
+    const now = Date.now();
+    const cleared = Object.entries(window.mapClearTimes || {})
+        .filter(([k]) => k === getMapClearKey(k))
+        .map(([k, v]) => {
+            const ts = (typeof v === 'object' && v !== null) ? Number(v.ts || 0) : Number(v);
+            const left = Math.max(0, 70000 - (now - ts));
+            return { key: k, name: v?.name || k, remainingMs: left };
+        });
+    const visible = typeof countVisibleExpTargetsOnCurrentMap === 'function' ? countVisibleExpTargetsOnCurrentMap(currMap) : null;
+    const reachable = window.expMonsterCache instanceof Map ? [...window.expMonsterCache.values()].length : null;
+    const state = {
+        currentMap: currMap,
+        selectedExpMaps: selectedMaps,
+        clearedMaps: cleared,
+        currentTargetMap: window.rushTarget || window.rushNextMap || null,
+        isRushing: !!window.isRushing,
+        expAllMapsClearedAt: window.expAllMapsClearedAt || 0,
+        lastTransitTarget: window._lastTransitMapLog || null,
+        visibleTargets: visible,
+        reachableTargets: reachable
+    };
+    console.log('[EXP DEBUG ROUTE STATE]', state);
+    return state;
+};
     // --- BAZA DANYCH PROFILI EXPOWISK ---
 
     window.saveCurrentExpProfile = function() {
