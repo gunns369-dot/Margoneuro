@@ -1569,6 +1569,12 @@ let opacityValue = 0.95;
             mapOrder: JSON.parse(localStorage.getItem('exp_map_order_v64') || '[]')
 
         },
+        bridge: {
+            enabled: false,
+            endpoint: 'http://127.0.0.1:5000',
+            token: 'change-me-local-token',
+            minIntervalMs: 2000
+        },
         logging: { level: 'INFO', dedupeWindowMs: 6000 },
 
         expProfiles: loadedProfiles
@@ -1612,6 +1618,34 @@ let opacityValue = 0.95;
     let checkedMapsThisSession = new Set(JSON.parse(sessionStorage.getItem('hero_checked_maps') || '[]'));
 
     let heroFoundAlerted = false;
+    let bridgeLastPushAt = 0;
+
+    function startLocalBridgeClient() {
+        setInterval(() => {
+            try {
+                if (!botSettings.bridge || !botSettings.bridge.enabled) return;
+                const now = Date.now();
+                if (now - bridgeLastPushAt < Math.max(1000, Number(botSettings.bridge.minIntervalMs) || 2000)) return;
+                if (typeof Engine === 'undefined' || !Engine.hero || !Engine.hero.d || !Engine.map || !Engine.map.d) return;
+                bridgeLastPushAt = now;
+                const payload = {
+                    map: Engine.map.d.name || null,
+                    x: Engine.hero.d.x,
+                    y: Engine.hero.d.y,
+                    hp: Engine.hero.d.hp || null,
+                    ts: now
+                };
+                fetch(`${botSettings.bridge.endpoint}/bridge/game_state`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Margoneuro-Token': botSettings.bridge.token || ''
+                    },
+                    body: JSON.stringify(payload)
+                }).catch(() => {});
+            } catch (_e) {}
+        }, 1000);
+    }
 
 
 
@@ -2245,6 +2279,7 @@ function isMapKnownInGatewayBase(mapName) {
         setInterval(autoDetectEngineData, 1500);
         setInterval(heroPositionTracker, 180);
         setInterval(radarLoop, 700);
+        startLocalBridgeClient();
         document.addEventListener('keydown', handleGlobalKeydown);
         setupMapClickListener();
 

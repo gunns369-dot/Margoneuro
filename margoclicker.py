@@ -5,6 +5,7 @@ import json
 import logging
 import hashlib
 import random
+import os
 import subprocess
 import sys
 import threading
@@ -96,8 +97,29 @@ app = Flask(__name__)
 if FLASK_AVAILABLE:
     CORS(app, resources={r"/*": {"origins": "*"}})
 config_lock = threading.Lock()
-SETTINGS_PATH = Path(__file__).with_name("margoclicker_settings.json")
-DATA_DIR = Path(__file__).with_name("data")
+APP_NAME = "MargoClicker"
+
+
+def _app_base_dir() -> Path:
+    if sys.platform == "win32":
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        if local_app_data:
+            return Path(local_app_data) / APP_NAME
+    return Path(__file__).resolve().parent
+
+
+BASE_DIR = _app_base_dir()
+SETTINGS_PATH = BASE_DIR / "margoclicker_settings.json"
+DATA_DIR = BASE_DIR / "data"
+
+
+def bundled_path(name: str) -> Path:
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return Path(getattr(sys, "_MEIPASS")) / name
+    return Path(__file__).with_name(name)
+
+
+SOURCE_SETTINGS_PATH = bundled_path("margoclicker_settings.json")
 
 
 @dataclass
@@ -186,6 +208,10 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "target_title_required_keywords": ["margonem"],
     "target_exclude_process_names": ["python.exe"],
     "target_exclude_title_keywords": ["MargoClicker", "Codex", "GitHub", "DevTools"],
+    "bridge_enabled": False,
+    "bridge_token": "change-me-local-token",
+    "bridge_host": "127.0.0.1",
+    "bridge_port": 5000,
 }
 config: Dict[str, Any] = dict(DEFAULT_CONFIG)
 
@@ -249,6 +275,8 @@ runtime_state = {
     "watcher_running": False,
     "watcher_thread": None,
     "force_answers_scan": False,
+    "bridge_last_game_state": None,
+    "bridge_last_push_at": 0.0,
 }
 
 
@@ -293,9 +321,23 @@ class MONITORINFOEXW(ctypes.Structure):
     ]
 
 
-def log_event(message: str) -> None:
+_log_repeat_state: Dict[str, Any] = {"last_message": None, "last_ts": 0.0, "repeat_count": 0}
+
+
+def log_event(message: str, category: str = "BUILD", throttle_sec: float = 0.0) -> None:
+    now = time.time()
+    if throttle_sec > 0:
+        if _log_repeat_state["last_message"] == message and (now - float(_log_repeat_state["last_ts"])) < throttle_sec:
+            _log_repeat_state["repeat_count"] = int(_log_repeat_state["repeat_count"]) + 1
+            return
+        if _log_repeat_state["repeat_count"] > 0:
+            repeated = f"repeated x{_log_repeat_state['repeat_count']}: {_log_repeat_state['last_message']}"
+            print(f"[{time.strftime('%H:%M:%S')}] [{category}] {repeated}")
+        _log_repeat_state["last_message"] = message
+        _log_repeat_state["last_ts"] = now
+        _log_repeat_state["repeat_count"] = 0
     timestamp = time.strftime("%H:%M:%S")
-    line = f"[{timestamp}] {message}"
+    line = f"[{timestamp}] [{category}] {message}"
     print(line)
     hook = runtime_state.get("log_hook")
     if callable(hook):
@@ -1550,6 +1592,52 @@ def health():
     return jsonify({"status": "OK", "paused": bool(runtime_state.get("paused")), "api_enabled": api_enabled, "hotkey": hotkey}), 200
 
 
+def _bridge_guard():
+    with config_lock:
+        bridge_enabled = bool(config.get("bridge_enabled", False))
+        bridge_token = str(config.get("bridge_token", "")).strip()
+    auth = request.headers.get("X-Margoneuro-Token", "")
+    if not bridge_enabled:
+        return make_response(jsonify({"ok": False, "error": "bridge_disabled"}), 403), None
+    if not bridge_token or auth != bridge_token:
+        return make_response(jsonify({"ok": False, "error": "unauthorized"}), 401), None
+    return None, bridge_token
+
+
+@app.route("/bridge/health", methods=["GET"])
+def bridge_health():
+    with config_lock:
+        enabled = bool(config.get("bridge_enabled", False))
+    return jsonify({"ok": True, "bridge_enabled": enabled, "status": "up"}), 200
+
+
+@app.route("/bridge/game_state", methods=["POST"])
+def bridge_game_state():
+    fail, _token = _bridge_guard()
+    if fail:
+        return fail
+    runtime_state["bridge_last_game_state"] = request.get_json(silent=True) or {}
+    runtime_state["bridge_last_push_at"] = time.time()
+    log_event("Received Margoneuro game state", category="BRIDGE", throttle_sec=5.0)
+    return jsonify({"ok": True}), 200
+
+
+@app.route("/bridge/clicker_state", methods=["GET"])
+def bridge_clicker_state():
+    fail, _token = _bridge_guard()
+    if fail:
+        return fail
+    return jsonify({
+        "ok": True,
+        "state": {
+            "paused": bool(runtime_state.get("paused")),
+            "watcher_state": runtime_state.get("watcher_state"),
+            "last_match": runtime_state.get("last_match"),
+            "bridge_last_game_state_at": runtime_state.get("bridge_last_push_at"),
+        },
+    }), 200
+
+
 @app.route("/fullscreen", methods=["GET", "POST", "OPTIONS"])
 def fullscreen():
     if request.method == "OPTIONS":
@@ -1959,6 +2047,12 @@ def _normalize_config(raw: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def load_settings_from_disk() -> None:
+    if not SETTINGS_PATH.exists() and SOURCE_SETTINGS_PATH.exists():
+        try:
+            SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
+            SETTINGS_PATH.write_text(SOURCE_SETTINGS_PATH.read_text(encoding="utf-8"), encoding="utf-8")
+        except Exception:
+            pass
     if not SETTINGS_PATH.exists():
         return
     try:
@@ -1974,6 +2068,7 @@ def save_settings_to_disk() -> None:
     with config_lock:
         payload = dict(config)
     try:
+        SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
         SETTINGS_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception as e:
         log_event(f"Nie udało się zapisać ustawień: {e}")
@@ -2408,7 +2503,10 @@ def run_console_policy() -> None:
 
 
 def start_http_server() -> None:
-    app.run(port=5000, host="127.0.0.1", debug=False, use_reloader=False)
+    with config_lock:
+        host = str(config.get("bridge_host", "127.0.0.1")).strip() or "127.0.0.1"
+        port = int(config.get("bridge_port", 5000))
+    app.run(port=port, host=host, debug=False, use_reloader=False)
 
 
 def check_required_dependencies() -> bool:
