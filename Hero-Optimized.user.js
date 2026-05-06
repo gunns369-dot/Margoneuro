@@ -3066,6 +3066,7 @@ let attackInterval = null;
 
 
         let targetId = parseInt(npcId, 10);
+        if (!Number.isFinite(targetId) || targetId <= 0) return false;
 
         HERO_LOG.info(`Cel namierzony (ID: ${targetId}). Włączam Kieszonkowego Berserka...`);
 
@@ -3073,7 +3074,7 @@ let attackInterval = null;
 
         // METODA GARGONEMA - Włącza natywnego auto-ataka prosto na serwerze gry
 
-        if (window.BerserkController?.enable) window.BerserkController.enable(reason);
+        if (window.BerserkController?.enable) window.BerserkController.enable(`attack_target:${reason}`);
         if (typeof window._g === 'function' && (!window.RouteCombatFSM || window.RouteCombatFSM.canAutoAttack())) window._g(`fight&a=attack&id=${targetId}`);
 
         attackInterval = setInterval(() => {
@@ -3106,7 +3107,8 @@ let attackInterval = null;
 
 
 
-            if (!window.isExping || Date.now() - startedAt > 12000) {
+            const mapChanged = !!(window.expLastMapName && getCurrentMapName && window.expLastMapName !== getCurrentMapName());
+            if (!window.isExping || mapChanged || Date.now() - startedAt > 12000) {
                 clearInterval(attackInterval);
                 return;
             }
@@ -3307,7 +3309,7 @@ let attackInterval = null;
 
                     botSettings.radarEnabled = false;
 
-                    saveSettings();
+                    if (typeof saveSettings === 'function') saveSettings();
 
 
 
@@ -3588,7 +3590,7 @@ function autoDetectEngineData() {
             let elMin = document.getElementById('expMinL'); let elMax = document.getElementById('expMaxL');
             if (elMin) elMin.value = botSettings.exp.minLvl; if (elMax) elMax.value = botSettings.exp.maxLvl;
 
-            saveSettings();
+            if (typeof saveSettings === 'function') saveSettings();
             if (typeof window.updateServerBerserk === 'function') window.updateServerBerserk();
             if (botSettings.exp.useAggro && typeof window.toggleNativeAggroVisuals === 'function') window.toggleNativeAggroVisuals(true);
         }
@@ -5922,16 +5924,14 @@ expEmptyScans = 0;
             HeroLogger.emit('INFO', 'ROUTE_START', 'START ekspienia/trasy', "#4caf50", { category: 'ROUTE' });
 
             if (botSettings.berserk) {
-                botSettings.berserk.userEnabled = true;
-                botSettings.berserk.enabled = true;
-                if (chk) chk.checked = true;
-                saveSettings();
+                if (chk) chk.checked = !!botSettings.berserk.userEnabled;
+                if (typeof saveSettings === 'function') saveSettings();
                 if (window.RouteCombatFSM) window.RouteCombatFSM.syncFromSettings();
-                if (window.BerserkController) {
+                if (window.BerserkController && botSettings.berserk.userEnabled) {
                     window.BerserkController.onBotStart('exp_start');
-                    window.BerserkController.enable('exp_start');
+                    window.BerserkController.onExpStart();
                 }
-                if (window.logExp) window.logExp("[BERSERK] enabled for EXP", "#81c784");
+                if (botSettings.berserk.userEnabled && window.logExp) window.logExp("[BERSERK] enabled for EXP", "#81c784");
             }
         } else {
             if (!window.__stoppingForCaptcha) window.margoneuroStoppedManually = true;
@@ -5955,7 +5955,7 @@ expEmptyScans = 0;
 
             if (window.BerserkController) {
                 window.BerserkController.onBotStop('exp_stop');
-                window.BerserkController.disable('exp_stop');
+                window.BerserkController.onExpStop();
             }
             if (window.logExp) window.logExp("[BERSERK] disabled after EXP stop", "#ffb74d");
         }
@@ -5978,7 +5978,7 @@ expEmptyScans = 0;
 // Inicjalizacja braku zmiennej, jeśli to pierwszy start z nową aktualizacją
 if (!botSettings.berserk) {
             botSettings.berserk = { enabled: false, userEnabled: false, common: true, e1: false, e2: false, hero: false, minLvlOffset: -20, maxLvlOffset: 100, disableBerserkOnStop: false };
-            saveSettings();
+            if (typeof saveSettings === 'function') saveSettings();
         }
         if (botSettings.berserk.userEnabled === undefined) botSettings.berserk.userEnabled = botSettings.berserk.enabled;
         if (botSettings.berserk.disableBerserkOnStop === undefined) botSettings.berserk.disableBerserkOnStop = false;
@@ -6035,7 +6035,7 @@ bindChange('useTeleportsEq', (e) => { botSettings.exp.useTeleportsEq = e.target.
             botSettings.discord.stop.chat = document.getElementById('discordStop_Chat').checked;
             botSettings.discord.stop.captcha = document.getElementById('discordStop_Captcha').checked;
 
-            saveSettings();
+            if (typeof saveSettings === 'function') saveSettings();
 
             if(botSettings.discord.enabled) {
                 window.sendDiscordWebhook("🟢 MARGONEURO ZSYNCHRONIZOWANE", "Powiadomienia Discord zostały skonfigurowane poprawnie i działają niezależnie od przeglądarki!\nOd teraz to okno jest gotowe do odbierania sygnałów.", 5763719);
@@ -6052,7 +6052,7 @@ bindChange('useTeleportsEq', (e) => { botSettings.exp.useTeleportsEq = e.target.
         // Natychmiastowa reakcja po kliknięciu "Automatyczna zmiana Expowiska"
         bindChange('autoChangeExpRoute', (e) => {
             botSettings.exp.autoChangeRoute = e.target.checked;
-            saveSettings();
+            if (typeof saveSettings === 'function') saveSettings();
             if (e.target.checked) {
                 if (typeof window.checkAndLoadBestExpProfile === 'function') window.checkAndLoadBestExpProfile(true);
             } else {
@@ -6093,7 +6093,7 @@ bindChange('useTeleportsEq', (e) => { botSettings.exp.useTeleportsEq = e.target.
                 }
 
                 window.mapClearTimes = {}; expCurrentTargetId = null; window.expCurrentTargetGroupKey = null; expMapTransitionCooldown = 0; expLastActionTime = 0; expAntiLagTime = 0;
-                saveSettings();
+                if (typeof saveSettings === 'function') saveSettings();
                 expNoMobScans = 0; expLastTargetMap = ""; expLastTargetPos = null; window.lastExpMap = null; window.isRushing = false; window.isRushingToShop = false;
 
                 // Bezwarunkowe narysowanie zaktualizowanej trasy
@@ -6146,7 +6146,7 @@ bindChange('useTeleportsEq', (e) => { botSettings.exp.useTeleportsEq = e.target.
 
             newChk.addEventListener('change', function(e) {
                 botSettings.exp.autoChangeRoute = e.target.checked;
-                saveSettings();
+                if (typeof saveSettings === 'function') saveSettings();
 
                 if (e.target.checked) {
                     window.checkAndLoadBestExpProfile(true);
@@ -6223,7 +6223,7 @@ bindChange('useTeleportsEq', (e) => { botSettings.exp.useTeleportsEq = e.target.
 
         bindChange('berserkEnabled', (e) => {
             botSettings.berserk.userEnabled = e.target.checked;
-            saveSettings();
+            if (typeof saveSettings === 'function') saveSettings();
             if (window.RouteCombatFSM) {
                 window.RouteCombatFSM.update({ berserkCheckbox: !!e.target.checked }, 'checkbox_change');
                 window.RouteCombatFSM.syncRuntimeContext('checkbox_runtime_sync');
@@ -6498,7 +6498,7 @@ selHero.addEventListener('change', (e) => {
 
 
 
-            saveSettings();
+            if (typeof saveSettings === 'function') saveSettings();
 
             heroAlert("Ustawienia zostały zapisane.");
 
@@ -6759,7 +6759,7 @@ let btnAddRec = document.getElementById('btnAddSelectedRec');
                         let eMax = document.getElementById('expMaxL');
                         if (eMin) eMin.value = botSettings.exp.minLvl;
                         if (eMax) eMax.value = botSettings.exp.maxLvl;
-                        saveSettings();
+                        if (typeof saveSettings === 'function') saveSettings();
                         if(botSettings.exp.useAggro && typeof window.toggleNativeAggroVisuals === 'function') window.toggleNativeAggroVisuals(true);
                     }
 
@@ -6839,7 +6839,7 @@ let btnAddRec = document.getElementById('btnAddSelectedRec');
                 botSettings.discord.stop.chat = document.getElementById('discordStop_Chat').checked;
                 botSettings.discord.stop.captcha = document.getElementById('discordStop_Captcha').checked;
 
-                saveSettings();
+                if (typeof saveSettings === 'function') saveSettings();
 
                 if(botSettings.discord.enabled) {
                     window.sendDiscordWebhook("🟢 MARGONEURO ZSYNCHRONIZOWANE", "Powiadomienia Discord zostały skonfigurowane poprawnie i działają niezależnie od przeglądarki!", 5763719);
@@ -7742,8 +7742,37 @@ const BerserkController = {
         if (window.logExp) window.logExp(`[BERSERK] ${message} (${reason})`, color);
         console.log(`[BERSERK] ${message} (${reason})`);
     },
-    enable(reason = 'manual') { return this.setBotBerserkState(true, reason); },
-    disable(reason = 'manual') { return this.setBotBerserkState(false, reason); },
+    enable(reason = 'manual') {
+        this._log(`enable reason=${reason}`, reason, "#81c784", 2200);
+        return this.setBotBerserkState(true, reason);
+    },
+    disable(reason = 'manual') {
+        this._log(`disable reason=${reason}`, reason, "#ffb74d", 2200);
+        return this.setBotBerserkState(false, reason);
+    },
+    setTargetTypes(options = {}, reason = 'target_types_sync') {
+        if (!botSettings?.berserk) return false;
+        botSettings.berserk.common = options.common !== undefined ? !!options.common : !!botSettings.berserk.common;
+        botSettings.berserk.e1 = options.e1 !== undefined ? !!options.e1 : !!botSettings.berserk.e1;
+        botSettings.berserk.e2 = options.e2 !== undefined ? !!options.e2 : !!botSettings.berserk.e2;
+        botSettings.berserk.hero = options.hero !== undefined ? !!options.hero : !!botSettings.berserk.hero;
+        this.syncUiFromState();
+        if (typeof saveSettings === 'function') saveSettings();
+        if (typeof window.updateServerBerserk === 'function') window.updateServerBerserk();
+        this._log(`target types synced reason=${reason}`, reason, "#90caf9", 2500);
+        return true;
+    },
+    syncUiFromState() {
+        const chkMain = document.getElementById('berserkEnabled');
+        if (chkMain) chkMain.checked = !!botSettings?.berserk?.userEnabled;
+        const byId = (id, val) => { const el = document.getElementById(id); if (el) el.checked = !!val; };
+        byId('berserkCommon', botSettings?.berserk?.common);
+        byId('berserkE1', botSettings?.berserk?.e1);
+        byId('berserkE2', botSettings?.berserk?.e2);
+        byId('berserkHero', botSettings?.berserk?.hero);
+    },
+    onExpStart() { return this.enable('exp_start'); },
+    onExpStop() { return this.disable('exp_stop'); },
     syncFromSettings() { if (window.RouteCombatFSM) window.RouteCombatFSM.syncFromSettings(); },
     onMapChange(reason = 'map_change') { if (!window.isExping || !isCurrentMapInExpRoute()) this.disable(reason); },
     onSupplyRun(reason = 'supply_run') { this.disable(reason); },
@@ -7759,13 +7788,14 @@ const BerserkController = {
             if (chk) chk.checked = !!botSettings.berserk.userEnabled;
             if (typeof window._g === 'function') {
                 window._g(`settings&action=update&id=34&v=${isOn ? 1 : 0}`);
+                this._log(`native setting id=34 v=${isOn ? 1 : 0} sent`, reason, isOn ? "#81c784" : "#ffb74d", 1500);
                 if (isOn) {
                     window._g(`settings&action=update&id=34&key=elite&v=${botSettings?.berserk?.e1 ? 1 : 0}`);
                     const strong = !!(botSettings?.berserk?.e2 || botSettings?.berserk?.hero);
                     window._g(`settings&action=update&id=34&key=elite2&v=${strong ? 1 : 0}`);
                 }
             }
-            saveSettings();
+            if (typeof saveSettings === 'function') saveSettings();
             if (window.updateServerBerserk) window.updateServerBerserk();
             this._log(isOn ? 'enabled' : 'disabled', reason, isOn ? "#81c784" : "#ffb74d");
         }, { retries: 2, baseDelay: 250 });
@@ -9845,7 +9875,7 @@ setInterval(runExpLogic, 400);
             expMapTransitionCooldown = 0;
             expLastActionTime = 0;
             expAntiLagTime = 0;
-            saveSettings();
+            if (typeof saveSettings === 'function') saveSettings();
  expNoMobScans = 0;
             expLastTargetMap = "";
             expLastTargetPos = null;
@@ -9916,7 +9946,7 @@ setInterval(runExpLogic, 400);
 
 
 
-            saveSettings();
+            if (typeof saveSettings === 'function') saveSettings();
             expCurrentTargetId = null;
             expMapTransitionCooldown = 0;
             expLastActionTime = 0;
@@ -10659,7 +10689,7 @@ window.toggleTeleportLock = function(city, isChecked) {
                 let allTps = JSON.parse(localStorage.getItem('hero_teleports_by_nick_v64') || '{}');
                 allTps[nick] = botSettings.unlockedTeleports;
                 localStorage.setItem('hero_teleports_by_nick_v64', JSON.stringify(allTps));
-                saveSettings();
+                if (typeof saveSettings === 'function') saveSettings();
                 if (window.logHero) window.logHero(`✅ Zapisano ustawienia teleportów dla: ${nick}!`, "#4caf50");
                 e.target.innerText = "✅ ZAPISANO!";
                 setTimeout(() => { if(e.target) e.target.innerText = "đź’ľ ZAPISZ TELEPORTY"; }, 1500);
@@ -11856,7 +11886,7 @@ window.renderEqItems = function(filterType = 'Wszystkie') {
             }
             if (botSettings?.berserk) {
                 botSettings.berserk.enabled = false;
-                saveSettings();
+                if (typeof saveSettings === 'function') saveSettings();
             }
             if (typeof window.toggleNativeAggroVisuals === 'function') {
                 window.toggleNativeAggroVisuals(false);
@@ -14170,7 +14200,7 @@ if (
                     if (id === 'playerAlertStopBot') botSettings.exp.playerAlertStopBot = e.target.checked;
                     if (id === 'chatAlert') { botSettings.exp.chatAlert = e.target.checked; if (e.target.checked && Notification.permission !== "granted") Notification.requestPermission(); }
                     if (id === 'chatAlertStopBot') botSettings.exp.chatAlertStopBot = e.target.checked;
-                    saveSettings(); // Wpychamy do pamięci przy każdym kliknięciu!
+                    if (typeof saveSettings === 'function') saveSettings(); // Wpychamy do pamięci przy każdym kliknięciu!
                 });
             });
 
@@ -14191,7 +14221,7 @@ if (
                 if (el) {
                     el.addEventListener('change', (e) => {
                         botSettings.discord[cfg.type][cfg.key] = e.target.checked;
-                        saveSettings(); // Zapisuje dokładnie w chwili kliknięcia!
+                        if (typeof saveSettings === 'function') saveSettings(); // Zapisuje dokładnie w chwili kliknięcia!
                     });
                 }
             });
@@ -14201,13 +14231,13 @@ if (
                 urlInput.addEventListener('input', (e) => {
                     botSettings.discord.url = e.target.value.trim();
                     botSettings.discord.enabled = botSettings.discord.url.length > 10;
-                    saveSettings();
+                    if (typeof saveSettings === 'function') saveSettings();
                 });
             }
             if (idInput) {
                 idInput.addEventListener('input', (e) => {
                     botSettings.discord.userId = e.target.value.trim();
-                    saveSettings();
+                    if (typeof saveSettings === 'function') saveSettings();
                 });
             }
 
