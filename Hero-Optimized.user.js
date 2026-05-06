@@ -3304,7 +3304,7 @@ let attackInterval = null;
                     if (botSettings.discord?.alerts?.hero) {
                         let mapName = typeof Engine !== 'undefined' ? Engine.map.d.name : lastMapName;
                         window.sendDiscordWebhook(
-                            "đźš¨ WYKRYTO CEL NA RADARZE!",
+                            "WYKRYTO CEL NA RADARZE!",
                             `**Znalazłem:** ${foundName}\n**Lokalizacja:** ${mapName} [X: ${nData.x}, Y: ${nData.y}]`,
                             16753920 // Złoty kolor
                         );
@@ -5301,7 +5301,7 @@ function initGUI() {
         const mainGui = document.createElement('div'); mainGui.id = 'heroNavGUI'; mainGui.className = 'hero-window';
         mainGui.innerHTML = `
             <div class="gui-header">
-                <div id="guiHeaderTitle" style="margin-right:5px; color:#00e5ff; text-shadow: 0 0 5px #00e5ff; font-weight:900;">Margoneuro / Radar <span style="color:#a99a75; font-size:10px; font-weight:700;">v64.6</span></div>
+                <div id="guiHeaderTitle" style="margin-right:5px; color:#00e5ff; text-shadow: 0 0 5px #00e5ff; font-weight:900;">Margoneuro <span style="color:#a99a75; font-size:10px; font-weight:700;">v64.6</span></div>
                <div class="header-buttons">
                     <button id="btnGoToTop" style="color:#00acc1; border-color:#00acc1;"><span class="btn-icon">📍</span><span>IDŹ DO</span></button>
                     <button id="btnOpenMaps" style="color:#2196f3; border-color:#2196f3;"><span class="btn-icon">🗺️</span><span>Mapy</span></button>
@@ -5417,6 +5417,25 @@ function initGUI() {
                         <div style="display:flex; flex-direction:column; gap:6px;">
                             <button id="btnOpenBrowserAlertsModule" class="btn-sepia" style="background:#ff9800; border-color:#f57c00; width:100%; padding:6px; font-weight:bold; font-size:11px;">Powiadomienia przeglądarki</button>
                             <button id="btnOpenDiscordModule" class="btn-sepia" style="background:#5865F2; border-color:#4752C4; width:100%; padding:6px; font-weight:bold; font-size:11px;">Konfiguracja Discord</button>
+                        </div>
+                    </div>
+
+
+                   <div class="accordion-header" id="accLicense" data-exp-section="license" onclick="toggleSettingsAcc('accLicense')" style="background: rgba(255, 193, 7, 0.2); border-color: #ffc107; color: #ffd54f; margin-top: 5px; margin-bottom: 0;">Licencja Margoneuro</div>
+                    <div id="accLicenseContent" style="display:none; padding: 8px; background: rgba(0,0,0,0.3); border: 1px solid #ffc107; border-top: none; margin-bottom: 5px;">
+                        <div id="licenseInfoGrid" style="display:grid; grid-template-columns: 120px 1fr; gap:4px 8px; font-size:10px; color:#e0d8c0; margin-bottom:8px;">
+                            <span style="color:#a99a75;">Status:</span><span id="licenseStatusValue">-</span>
+                            <span style="color:#a99a75;">Produkt:</span><span id="licenseProductValue">-</span>
+                            <span style="color:#a99a75;">Klucz:</span><span id="licenseKeyValue">-</span>
+                            <span style="color:#a99a75;">Urządzenie:</span><span id="licenseDeviceValue">-</span>
+                            <span style="color:#a99a75;">Wygasa:</span><span id="licenseExpiresValue">brak danych</span>
+                            <span style="color:#a99a75;">Pozostało:</span><span id="licenseRemainingValue">brak danych</span>
+                            <span style="color:#a99a75;">Ostatnie sprawdzenie:</span><span id="licenseLastVerifyValue">-</span>
+                            <span style="color:#a99a75;">Wiadomość:</span><span id="licenseMessageValue">-</span>
+                        </div>
+                        <div style="display:flex; gap:5px;">
+                            <button id="btnLicenseCheck" class="btn-sepia" style="flex:1; background:#00897b; border-color:#00695c; padding:6px;">Sprawdź licencję</button>
+                            <button id="btnLicenseChange" class="btn-sepia" style="flex:1; background:#8d6e63; border-color:#6d4c41; padding:6px;">Zmień klucz</button>
                         </div>
                     </div>
 
@@ -5700,13 +5719,13 @@ function initGUI() {
         browserAlertsGui.innerHTML = `
             <div class="gui-header" style="color:#ff9800;">🔔 Powiadomienia Przeglądarki <button class="btn-close" onclick="document.getElementById('browserAlertsSettingsGUI').style.display='none'">✖</button></div>
             <div class="gui-content" style="gap:8px;">
-                <label style="color:#ff5252; font-size:11px; cursor:pointer; font-weight:bold;"><input type="checkbox" id="captchaAlert" ${botSettings.exp.captchaAlert ? 'checked' : ''}> đźš¨ Wybudzanie Alarmem Captcha</label>
+                <label style="color:#ff5252; font-size:11px; cursor:pointer; font-weight:bold;"><input type="checkbox" id="captchaAlert" ${botSettings.exp.captchaAlert ? 'checked' : ''}> Wybudzanie alarmem CAPTCHA</label>
                 <div style="border-top:1px solid #333; padding-top:6px;">
                     <label style="color:#ffb300; font-size:11px; cursor:pointer; font-weight:bold;"><input type="checkbox" id="playerAlert" ${botSettings.exp.playerAlert ? 'checked' : ''}> 👁️ Alarm na Graczy</label>
                     <label style="color:#e0d8c0; font-size:10px; cursor:pointer; padding-left:20px; margin-top:3px;"><input type="checkbox" id="playerAlertStopBot" ${botSettings.exp.playerAlertStopBot ? 'checked' : ''}> Zatrzymuj bota przy wykryciu</label>
                 </div>
                 <div style="border-top:1px solid #333; padding-top:6px;">
-                    <label style="color:#e040fb; font-size:11px; cursor:pointer; font-weight:bold;"><input type="checkbox" id="chatAlert" ${botSettings.exp.chatAlert ? 'checked' : ''}> đź“© Alarm Czat (Prywatne)</label>
+                    <label style="color:#e040fb; font-size:11px; cursor:pointer; font-weight:bold;"><input type="checkbox" id="chatAlert" ${botSettings.exp.chatAlert ? 'checked' : ''}> Alarm czatu (prywatne)</label>
                     <label style="color:#e0d8c0; font-size:10px; cursor:pointer; padding-left:20px; margin-top:3px;"><input type="checkbox" id="chatAlertStopBot" ${botSettings.exp.chatAlertStopBot ? 'checked' : ''}> Zatrzymuj bota przy wiadomości</label>
                 </div>
             </div>
@@ -5736,15 +5755,15 @@ function initGUI() {
                         <div style="padding-left:20px; margin-top:3px;"><label style="color:#aaa; font-size:10px; cursor:pointer;"><input type="checkbox" id="discordStop_Player" ${botSettings.discord?.stop?.player ? 'checked' : ''}> Zatrzymuj bota</label></div>
                     </div>
                     <div style="margin-bottom:6px; background:#111; border:1px solid #333; padding:4px; border-radius:3px;">
-                        <label style="color:#e040fb; font-size:11px; font-weight:bold; cursor:pointer;"><input type="checkbox" id="discordAlert_Chat" ${botSettings.discord?.alerts?.chat ? 'checked' : ''}> đź“© Czat (Wiad. Prywatne)</label>
+                        <label style="color:#e040fb; font-size:11px; font-weight:bold; cursor:pointer;"><input type="checkbox" id="discordAlert_Chat" ${botSettings.discord?.alerts?.chat ? 'checked' : ''}> Czat (wiad. prywatne)</label>
                         <div style="padding-left:20px; margin-top:3px;"><label style="color:#aaa; font-size:10px; cursor:pointer;"><input type="checkbox" id="discordStop_Chat" ${botSettings.discord?.stop?.chat ? 'checked' : ''}> Zatrzymuj bota</label></div>
                     </div>
                     <div style="margin-bottom:6px; background:#111; border:1px solid #333; padding:4px; border-radius:3px;">
-                        <label style="color:#ff5252; font-size:11px; font-weight:bold; cursor:pointer;"><input type="checkbox" id="discordAlert_Captcha" ${botSettings.discord?.alerts?.captcha ? 'checked' : ''}> đźš¨ Zapadka / Captcha</label>
+                        <label style="color:#ff5252; font-size:11px; font-weight:bold; cursor:pointer;"><input type="checkbox" id="discordAlert_Captcha" ${botSettings.discord?.alerts?.captcha ? 'checked' : ''}> Zapadka / CAPTCHA</label>
                         <div style="padding-left:20px; margin-top:3px;"><label style="color:#aaa; font-size:10px; cursor:pointer;"><input type="checkbox" id="discordStop_Captcha" ${botSettings.discord?.stop?.captcha !== false ? 'checked' : ''}> Zatrzymuj bota (Zalecane)</label></div>
                     </div>
                 </div>
-                <button id="btnSaveDiscord" class="btn-sepia" style="background:#5865F2; border-color:#4752C4; width:100%; padding:8px; margin-top:auto;">đź’ľ ZAPISZ DISCORDA I TESTUJ</button>
+                <button id="btnSaveDiscord" class="btn-sepia" style="background:#5865F2; border-color:#4752C4; width:100%; padding:8px; margin-top:auto;">ZAPISZ DISCORDA I TESTUJ</button>
             </div>
         `;
         document.body.appendChild(discordGui);
@@ -6413,39 +6432,65 @@ selHero.addEventListener('change', (e) => {
         // OKNA I PRZYCISKI POMOCNICZE
 
         document.getElementById('btnOpenSettings').addEventListener('click', () => { let p = document.getElementById('heroSettingsGUI'); p.style.display = p.style.display === 'flex' ? 'none' : 'flex'; });
-        function renderBerserkDiagnosticsPanel() {
-            const host = document.getElementById('heroSettingsGUI');
-            if (!host || document.getElementById('berserkDiagPanel')) return;
-            const box = document.createElement('div');
-            box.id = 'berserkDiagPanel';
-            box.style.cssText = 'margin:8px;border:1px solid #555;padding:6px;font-size:10px;color:#ddd;';
-            box.innerHTML = `<div style="font-weight:bold;">Diagnostyka Berserka</div><div id="berserkDiagContent"></div>
-            <div style="display:grid;gap:4px;margin-top:6px;">
-            <button id="btnBerserkTestOn">Test: włącz Berserka</button><button id="btnBerserkTestOff">Test: wyłącz Berserka</button>
-            <button id="btnBerserkTestAttack">Test: atakuj najbliższego moba</button><button id="btnBerserkRefresh">Odśwież diagnostykę</button></div>
-            <div style="font-weight:bold;margin-top:8px;">Licencja Margoneuro</div><div id="licenseDiagContent"></div>
-            <button id="btnLicenseCheck">Sprawdź licencję</button><button id="btnLicenseChange">Zmień klucz</button>`;
-            host.appendChild(box);
-            const refresh = () => {
-                const d = window.margoneuroBerserkDiag || {};
-                const s = Engine?.settings?.d || {};
-                const chk = document.getElementById('berserkEnabled');
-                document.getElementById('berserkDiagContent').innerHTML = `_g: ${d.gAvailable ? 'yes' : 'no'} (${d.gSource || 'none'})<br>Engine: ${typeof Engine !== 'undefined' ? 'yes' : 'no'}<br>Engine.settings.d: ${s ? 'yes' : 'no'}<br>solo=${s.fight_auto_solo ?? '-'} elite=${s.fight_auto_elites ?? '-'} elite2=${s.fight_auto_elites2 ?? '-'}<br>enabled=${!!botSettings?.berserk?.enabled} userEnabled=${!!botSettings?.berserk?.userEnabled} checkbox=${!!chk?.checked}<br>last cmd=${d.lastNativeCommand || '-'}<br>last cmd time=${d.lastNativeCommandTime ? new Date(d.lastNativeCommandTime).toLocaleString() : '-'}<br>last attack=${d.lastAttackCommand || '-'} error=${d.lastError || '-'}`;
+        function renderLicenseSection() {
+            const formatDate = (value) => {
+                if (!value) return '-';
+                const d = new Date(value);
+                return Number.isNaN(d.getTime()) ? String(value) : d.toLocaleString();
+            };
+            const formatRemaining = (value) => {
+                if (!value) return 'brak danych';
+                const d = new Date(value);
+                if (Number.isNaN(d.getTime())) return 'brak danych';
+                const diff = d.getTime() - Date.now();
+                if (diff <= 0) return 'wygasła';
+                const hours = Math.floor(diff / 3600000);
+                const days = Math.floor(hours / 24);
+                const remHours = hours % 24;
+                return `${days} dni ${remHours} godzin`;
+            };
+            const refreshLicenseInfo = () => {
                 const lic = window.margoneuroLicenseStatus || {};
                 const key = (margoneuroReadStorage(MARGONEURO_LICENSE_KEY_STORAGE) || '').trim();
-                const masked = key ? `${key.slice(0,4)}...${key.slice(-4)}` : '-';
-                const dev = margoneuroGetOrCreateDeviceId();
-                document.getElementById('licenseDiagContent').innerHTML = `status=${lic.status || 'Nieaktywna'}<br>product_slug=${MARGONEURO_LICENSE_PRODUCT_SLUG}<br>key=${masked}<br>device=${String(dev).slice(0,8)}...<br>expires=${lic.data?.expires_at || 'Brak daty wygaśnięcia w odpowiedzi API'}<br>last verify=${lic.lastVerifiedAt ? new Date(lic.lastVerifiedAt).toLocaleString() : '-'}<br>msg=${lic.lastMessage || '-'}`;
+                const maskedKey = key ? `${key.slice(0, 3)}...${key.slice(-3)}` : '-';
+                const dev = String(margoneuroGetOrCreateDeviceId() || '');
+                const maskedDev = dev ? `${dev.slice(0, 4)}...` : '-';
+                const exp = lic.data?.expires_at || '';
+                const statusEl = document.getElementById('licenseStatusValue');
+                if (!statusEl) return;
+                statusEl.textContent = lic.status || 'Nieaktywna';
+                document.getElementById('licenseProductValue').textContent = MARGONEURO_LICENSE_PRODUCT_SLUG || '-';
+                document.getElementById('licenseKeyValue').textContent = maskedKey;
+                document.getElementById('licenseDeviceValue').textContent = maskedDev;
+                document.getElementById('licenseExpiresValue').textContent = exp ? formatDate(exp) : 'brak danych';
+                document.getElementById('licenseRemainingValue').textContent = exp ? formatRemaining(exp) : 'brak danych';
+                document.getElementById('licenseLastVerifyValue').textContent = lic.lastVerifiedAt ? formatDate(lic.lastVerifiedAt) : '-';
+                document.getElementById('licenseMessageValue').textContent = lic.lastMessage || '-';
             };
-            document.getElementById('btnBerserkRefresh').onclick = refresh;
-            document.getElementById('btnBerserkTestOn').onclick = () => { botSettings.berserk.enabled = true; window.updateServerBerserk('test_enable'); refresh(); };
-            document.getElementById('btnBerserkTestOff').onclick = () => { botSettings.berserk.enabled = false; window.updateServerBerserk('test_disable'); refresh(); };
-            document.getElementById('btnBerserkTestAttack').onclick = () => { const npcs = Engine?.npcs?.check ? Engine.npcs.check() : (Engine?.npcs?.d || {}); const first = Object.keys(npcs)[0]; if (first) attackTarget(parseInt(first,10), 'diag_test'); refresh(); };
-            document.getElementById('btnLicenseCheck').onclick = async () => { const k = margoneuroReadStorage(MARGONEURO_LICENSE_KEY_STORAGE); if (k) window.margoneuroLicenseStatus = { status: 'Błąd', lastMessage: 'Trwa sprawdzanie...', lastVerifiedAt: Date.now() }; if (k) await margoneuroVerifySingleLicenseKey(k); refresh(); };
-            document.getElementById('btnLicenseChange').onclick = () => { margoneuroDeleteStorage(MARGONEURO_LICENSE_KEY_STORAGE); const k = margoneuroPromptLicenseKey('Wprowadź nowy klucz licencyjny Margoneuro:'); if (k) margoneuroWriteStorage(MARGONEURO_LICENSE_KEY_STORAGE, k.trim()); refresh(); };
-            refresh();
+            const checkBtn = document.getElementById('btnLicenseCheck');
+            const changeBtn = document.getElementById('btnLicenseChange');
+            if (checkBtn) {
+                checkBtn.onclick = async () => {
+                    const k = margoneuroReadStorage(MARGONEURO_LICENSE_KEY_STORAGE);
+                    if (k) {
+                        window.margoneuroLicenseStatus = { status: 'Błąd', lastMessage: 'Trwa sprawdzanie...', lastVerifiedAt: Date.now() };
+                        refreshLicenseInfo();
+                        await margoneuroVerifySingleLicenseKey(k);
+                    }
+                    refreshLicenseInfo();
+                };
+            }
+            if (changeBtn) {
+                changeBtn.onclick = () => {
+                    margoneuroDeleteStorage(MARGONEURO_LICENSE_KEY_STORAGE);
+                    const k = margoneuroPromptLicenseKey('Wprowadź nowy klucz licencyjny Margoneuro:');
+                    if (k) margoneuroWriteStorage(MARGONEURO_LICENSE_KEY_STORAGE, k.trim());
+                    refreshLicenseInfo();
+                };
+            }
+            refreshLicenseInfo();
         }
-        setTimeout(renderBerserkDiagnosticsPanel, 250);
+        setTimeout(renderLicenseSection, 250);
 
         document.getElementById('btnOpenMaps').addEventListener('click', () => { let p = document.getElementById('heroGatewaysGUI'); p.style.display = p.style.display === 'flex' ? 'none' : 'flex'; if(p.style.display === 'flex') renderGatewaysDatabase(); });
 
