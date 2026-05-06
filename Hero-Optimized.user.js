@@ -3055,12 +3055,13 @@ let attackInterval = null;
 
 
 
-    function attackTarget(npcId) {
+    function attackTarget(npcId, reason = 'attack_target') {
         if (window.RouteCombatFSM && !window.RouteCombatFSM.canAutoAttack()) return;
 
         if (attackInterval) clearInterval(attackInterval);
         let lastManualAttackAt = 0;
         let manualAttackIssued = false;
+        const startedAt = Date.now();
 
 
 
@@ -3072,12 +3073,8 @@ let attackInterval = null;
 
         // METODA GARGONEMA - Włącza natywnego auto-ataka prosto na serwerze gry
 
-        if (typeof window._g === 'function') {
-            window._g(`settings&action=update&id=34&v=1`); // Włącz Berserka
-            window._g(`settings&action=update&id=34&key=elite&v=1`); // Bij Elity
-            window._g(`settings&action=update&id=34&key=elite2&v=1`); // Bij Elity 2 i Herosów
-            if (!window.RouteCombatFSM || window.RouteCombatFSM.canAutoAttack()) window._g(`fight&a=attack&id=${targetId}`); // Wymuś start
-        }
+        if (window.BerserkController?.enable) window.BerserkController.enable(reason);
+        if (typeof window._g === 'function' && (!window.RouteCombatFSM || window.RouteCombatFSM.canAutoAttack())) window._g(`fight&a=attack&id=${targetId}`);
 
         attackInterval = setInterval(() => {
 
@@ -3091,7 +3088,7 @@ let attackInterval = null;
 
                 clearInterval(attackInterval);
 
-                if (typeof window._g === 'function') window._g(`settings&action=update&id=34&v=0`);
+                if (window.BerserkController?.disable) window.BerserkController.disable('fight_started');
 
                 HERO_LOG.success("Walka rozpoczęta. Berserk wyłączony.");
 
@@ -3108,6 +3105,11 @@ let attackInterval = null;
             let targetNpc = npcs ? npcs[npcId] : null;
 
 
+
+            if (!window.isExping || Date.now() - startedAt > 12000) {
+                clearInterval(attackInterval);
+                return;
+            }
 
             if (!targetNpc) {
 
@@ -5290,12 +5292,12 @@ function initGUI() {
         const mainGui = document.createElement('div'); mainGui.id = 'heroNavGUI'; mainGui.className = 'hero-window';
         mainGui.innerHTML = `
             <div class="gui-header">
-                <div id="guiHeaderTitle" style="margin-right:5px; color:#00e5ff; text-shadow: 0 0 5px #00e5ff; font-weight:900;">Margoneuro / Radar v64.6</div>
+                <div id="guiHeaderTitle" style="margin-right:5px; color:#00e5ff; text-shadow: 0 0 5px #00e5ff; font-weight:900;">Margoneuro / Radar <span style="color:#a99a75; font-size:10px; font-weight:700;">v64.6</span></div>
                <div class="header-buttons">
-                    <button id="btnGoToTop" style="color:#00acc1; border-color:#00acc1;"><span class="btn-icon">Idź</span><span>DO</span></button>
-                    <button id="btnOpenMaps" style="color:#2196f3; border-color:#2196f3;"><span class="btn-icon">Mapy</span><span>Mapy</span></button>
-                    <button id="btnToggleRadar" style="color:#9c27b0; border-color:#9c27b0;"><span class="btn-icon">Radar</span><span>Radar</span></button>
-                    <button id="btnOpenSettings"><span class="btn-icon">Opcje</span><span>Opcje</span></button>
+                    <button id="btnGoToTop" style="color:#00acc1; border-color:#00acc1;"><span class="btn-icon">📍</span><span>IDŹ DO</span></button>
+                    <button id="btnOpenMaps" style="color:#2196f3; border-color:#2196f3;"><span class="btn-icon">🗺️</span><span>Mapy</span></button>
+                    <button id="btnToggleRadar" style="color:#9c27b0; border-color:#9c27b0;"><span class="btn-icon">📡</span><span>Radar</span></button>
+                    <button id="btnOpenSettings"><span class="btn-icon">⚙️</span><span>Opcje</span></button>
                     <button id="btnMinimizeMain" style="background:transparent; border:none; color:#777;" onclick="window.toggleMainVisibility()"><span class="btn-icon">x</span></button>
                 </div>
             </div>
@@ -5920,13 +5922,16 @@ expEmptyScans = 0;
             HeroLogger.emit('INFO', 'ROUTE_START', 'START ekspienia/trasy', "#4caf50", { category: 'ROUTE' });
 
             if (botSettings.berserk) {
-                const prevUserEnabled = !!botSettings.berserk.userEnabled;
-                const chkState = chk ? !!chk.checked : prevUserEnabled;
-                botSettings.berserk.userEnabled = chkState;
+                botSettings.berserk.userEnabled = true;
+                botSettings.berserk.enabled = true;
+                if (chk) chk.checked = true;
                 saveSettings();
                 if (window.RouteCombatFSM) window.RouteCombatFSM.syncFromSettings();
-                if (typeof logBerserkAction === 'function') logBerserkAction("Start EXP - sprawdzam warunki", "#ffcc80", 1000);
-                if (window.BerserkController) window.BerserkController.onBotStart('route_start');
+                if (window.BerserkController) {
+                    window.BerserkController.onBotStart('exp_start');
+                    window.BerserkController.enable('exp_start');
+                }
+                if (window.logExp) window.logExp("[BERSERK] enabled for EXP", "#81c784");
             }
         } else {
             if (!window.__stoppingForCaptcha) window.margoneuroStoppedManually = true;
@@ -5948,8 +5953,11 @@ expEmptyScans = 0;
             if (typeof window.logExp === 'function') window.logExp("đź›‘ Zatrzymano tryb automatyczny.", "#f44336");
             HeroLogger.emit('INFO', 'ROUTE_STOP', 'STOP ekspienia/trasy', "#f44336", { category: 'ROUTE' });
 
-            if (typeof logBerserkAction === 'function') logBerserkAction("STOP EXP - wylaczam", "#ffb74d", 1000);
-            if (window.BerserkController) window.BerserkController.onBotStop('route_stop');
+            if (window.BerserkController) {
+                window.BerserkController.onBotStop('exp_stop');
+                window.BerserkController.disable('exp_stop');
+            }
+            if (window.logExp) window.logExp("[BERSERK] disabled after EXP stop", "#ffb74d");
         }
     });
 }
@@ -7725,16 +7733,42 @@ const ActionExecutor = {
 };
 
 const BerserkController = {
+    _lastLogAtByKey: {},
+    _log(message, reason = 'sync', color = "#ff9800", dedupeMs = 1800) {
+        const now = Date.now();
+        const key = `${message}|${reason}`;
+        if (this._lastLogAtByKey[key] && now - this._lastLogAtByKey[key] < dedupeMs) return;
+        this._lastLogAtByKey[key] = now;
+        if (window.logExp) window.logExp(`[BERSERK] ${message} (${reason})`, color);
+        console.log(`[BERSERK] ${message} (${reason})`);
+    },
+    enable(reason = 'manual') { return this.setBotBerserkState(true, reason); },
+    disable(reason = 'manual') { return this.setBotBerserkState(false, reason); },
+    syncFromSettings() { if (window.RouteCombatFSM) window.RouteCombatFSM.syncFromSettings(); },
+    onMapChange(reason = 'map_change') { if (!window.isExping || !isCurrentMapInExpRoute()) this.disable(reason); },
+    onSupplyRun(reason = 'supply_run') { this.disable(reason); },
+    onPvPEscape(reason = 'pvp_escape') { this.disable(reason); },
     setBotBerserkState(nextState, reason = 'fsm') {
+        const isOn = !!nextState;
         const active = !!(Engine?.settings?.d?.fight_auto_solo || botSettings?.berserk?.enabled);
-        if (!!nextState === active) return false;
-        const action = nextState ? 'BERSERK_ON' : 'BERSERK_OFF';
-        return ActionExecutor.runWithRetry('TOGGLE_BERSERK', { state: !!nextState }, () => {
-            botSettings.berserk.enabled = !!nextState;
+        if (isOn === active) return false;
+        return ActionExecutor.runWithRetry('TOGGLE_BERSERK', { state: isOn }, () => {
+            botSettings.berserk.userEnabled = isOn ? true : !!botSettings.berserk.userEnabled;
+            botSettings.berserk.enabled = isOn;
+            const chk = document.getElementById('berserkEnabled');
+            if (chk) chk.checked = !!botSettings.berserk.userEnabled;
+            if (typeof window._g === 'function') {
+                window._g(`settings&action=update&id=34&v=${isOn ? 1 : 0}`);
+                if (isOn) {
+                    window._g(`settings&action=update&id=34&key=elite&v=${botSettings?.berserk?.e1 ? 1 : 0}`);
+                    const strong = !!(botSettings?.berserk?.e2 || botSettings?.berserk?.hero);
+                    window._g(`settings&action=update&id=34&key=elite2&v=${strong ? 1 : 0}`);
+                }
+            }
             saveSettings();
             if (window.updateServerBerserk) window.updateServerBerserk();
-            HeroLogger.emit('INFO', action, `${nextState ? 'Włączono' : 'Wyłączono'} berserka (reason=${reason})`, "#ff9800", { category: 'BERSERK' });
-        }, { retries: 2, baseDelay: 350 });
+            this._log(isOn ? 'enabled' : 'disabled', reason, isOn ? "#81c784" : "#ffb74d");
+        }, { retries: 2, baseDelay: 250 });
     },
     syncObservedState(reason = 'observe') {
         const observedActive = !!Engine?.settings?.d?.fight_auto_solo;
@@ -7754,7 +7788,10 @@ const BerserkController = {
     },
     onBotStop(reason = 'route_stop') {
         if (window.RouteCombatFSM) window.RouteCombatFSM.update({ running: false, currentTask: 'IDLE', inRouteMap: false }, reason, { skipEvaluate: true });
-        this.setBotBerserkState(false, reason);
+        this.disable(reason);
+    },
+    attackTarget(npcId, reason = 'attack_target') {
+        return attackTarget(npcId, reason);
     }
 };
 window.BerserkController = BerserkController;
@@ -9297,6 +9334,10 @@ function runExpLogic() {
         }
         if (reachable) validMobs.push({ ...mob, dist: bestDist });
     }
+    const rememberedCandidatesCount = validMobs.filter(m => m.memoryOnly).length;
+    HeroLogger.emit('DEBUG', 'EXP_VISIBLE_CANDIDATES', `[EXP] visible candidates count=${liveVisibleValidCount}`, "#90caf9", { category: 'EXP', dedupeMs: 1200 });
+    HeroLogger.emit('DEBUG', 'EXP_REACHABLE_CANDIDATES', `[EXP] reachable candidates count=${validMobs.length}`, "#90caf9", { category: 'EXP', dedupeMs: 1200 });
+    HeroLogger.emit('DEBUG', 'EXP_REMEMBERED_CANDIDATES', `[EXP] remembered candidates count=${rememberedCandidatesCount}`, "#90caf9", { category: 'EXP', dedupeMs: 1200 });
     if (isExpMap && validMobs.length > 0) {
         unmarkMapTemporarilyCleared(currMap);
         resetExpMapClearProbe(currMap);
@@ -9542,6 +9583,12 @@ function runExpLogic() {
     if (expRetargetEarliestAt && now < expRetargetEarliestAt) return;
 
     // --- TRANZYT / ZMIANA MAPY ---
+    const mapEntryGraceMs = 1200;
+    const inEntryGrace = !!window.expMapEnteredAt && (now - window.expMapEnteredAt < mapEntryGraceMs);
+    if (inEntryGrace && validMobs.length === 0) {
+        HeroLogger.emit('DEBUG', 'EXP_WAIT_ENTRY_GRACE', `[EXP] waiting after map entry (${mapEntryGraceMs - (now - window.expMapEnteredAt)}ms)`, "#a5d6a7", { category: 'EXP', dedupeMs: 1000 });
+        return;
+    }
     if (!isExpMap || validMobs.length === 0) {
         // POPRAWKA (EXP): jeśli na mapie nie ma żadnego żywego celu (wszystkie spawny są na cooldownie respawnu),
         // nie czekamy sztucznie kilku skanów — od razu zmieniamy mapę.
@@ -9578,6 +9625,7 @@ function runExpLogic() {
             }
 
             markMapTemporarilyCleared(currMap);
+            HeroLogger.emit('INFO', 'EXP_MAP_CLEAN', `[EXP] map considered clean: ${currMap}`, "#81c784", { category: 'EXP', dedupeMs: 1200 });
             if (window.logExp && window._lastClearedMapLog !== currMap) {
                 window.logExp(`🧹 Mapa wyczyszczona: [${currMap}] — szukam kolejnego expowiska.`, "#81c784");
                 window._lastClearedMapLog = currMap;
@@ -9613,6 +9661,7 @@ function runExpLogic() {
         }
 
         if (bestTargetMap && !window.isRushing) {
+            HeroLogger.emit('INFO', 'EXP_TRANSIT', `[EXP] going to transition: ${currMap} -> ${bestTargetMap}`, "#64b5f6", { category: 'EXP', dedupeMs: 1000 });
             if (window.logExp && window._lastTransitMapLog !== bestTargetMap) {
                 window.logExp(`🏃 Bieg do: [${bestTargetMap}]`, "#90caf9");
                 window._lastTransitMapLog = bestTargetMap;
@@ -15032,4 +15081,3 @@ setInterval(() => {
     }
 }, 1000);
 })(); // Koniec kodu
-
