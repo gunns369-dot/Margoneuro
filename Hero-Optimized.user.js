@@ -8877,9 +8877,9 @@ function markTargetIgnoredOnMap(mapName, mob, reason = 'too_hard') {
     const targetKey = getExpTargetIgnoreKey(mob);
     if (!mapKey || !targetKey) return false;
     if (!(window.expIgnoredTargetsByMap[mapKey] instanceof Map)) window.expIgnoredTargetsByMap[mapKey] = new Map();
-    const ttlMs = reason === 'anti_stuck' ? 35000 : 90000;
+    const ttlMs = reason === 'anti_stuck' ? 8000 : 10000;
     window.expIgnoredTargetsByMap[mapKey].set(targetKey, Date.now() + ttlMs);
-    HeroLogger.emit('INFO', 'TARGET_HARD_IGNORED_ON_MAP', `Ignoruję cel ${mob.nick || mob.id || '?'} na mapie [${mapName}] (powód: ${reason}).`, "#ff8a65", { category: 'COMBAT', dedupeMs: 2500 });
+    HeroLogger.emit('INFO', 'TARGET_HARD_IGNORED_ON_MAP', `[ANTI-STUCK] Temporarily skipping target ${mob.nick || mob.id || '?'} for ${Math.round(ttlMs / 1000)}s (powód: ${reason})`, "#ff8a65", { category: 'COMBAT', dedupeMs: 2500 });
     return true;
 }
 
@@ -9636,8 +9636,9 @@ function runExpLogic() {
     // Wybór celu na podstawie Radaru (omijanie ścian)
     let distMap = buildDistanceMapFromHero();
     let validMobs = [];
+    let skippedTemporaryCount = 0;
     for (let [id, mob] of window.expMonsterCache.entries()) {
-        if (isTargetIgnoredOnMap(currMap, mob)) continue;
+        if (isTargetIgnoredOnMap(currMap, mob)) { skippedTemporaryCount++; continue; }
         let bestDist = Infinity;
         let reachable = false;
         for (let dx = -1; dx <= 1; dx++) {
@@ -9649,8 +9650,7 @@ function runExpLogic() {
         if (reachable) validMobs.push({ ...mob, dist: bestDist });
     }
     const rememberedCandidatesCount = validMobs.filter(m => m.memoryOnly).length;
-    HeroLogger.emit('DEBUG', 'EXP_VISIBLE_CANDIDATES', `[EXP] visible candidates count=${liveVisibleValidCount}`, "#90caf9", { category: 'EXP', dedupeMs: 1200 });
-    HeroLogger.emit('DEBUG', 'EXP_REACHABLE_CANDIDATES', `[EXP] reachable candidates count=${validMobs.length}`, "#90caf9", { category: 'EXP', dedupeMs: 1200 });
+    HeroLogger.emit('DEBUG', 'EXP_VISIBLE_CANDIDATES', `[EXP] Visible mobs: ${liveVisibleValidCount}, reachable: ${validMobs.length}, skipped temporary: ${skippedTemporaryCount}`, "#90caf9", { category: 'EXP', dedupeMs: 1200 });
     HeroLogger.emit('DEBUG', 'EXP_REMEMBERED_CANDIDATES', `[EXP] remembered candidates count=${rememberedCandidatesCount}`, "#90caf9", { category: 'EXP', dedupeMs: 1200 });
     if (isExpMap && validMobs.length > 0) {
         resetClearedMapIfMobSeen(currMap, validMobs.length);
@@ -9854,20 +9854,18 @@ function runExpLogic() {
                 approachState.anchorY = hy;
                 approachState.anchorAt = now;
                 approachState.failCount = 0;
-            } else if (now - (approachState.anchorAt || now) > 2600) {
+            } else if (now - (approachState.anchorAt || now) > 3200) {
                 approachState.failCount = (approachState.failCount || 0) + 1;
                 approachState.anchorAt = now;
                 HeroLogger.emit('DEBUG', 'APPROACH_STUCK_RETRY', `Nie mogę dojść do celu ${target.nick || target.id} (próba=${approachState.failCount}).`, "#ffcc80", { category: 'COMBAT', dedupeMs: 1500 });
 
-                if (approachState.failCount >= 3) {
+                if (approachState.failCount >= 2) {
                     const mm = MonsterMemory.onTargetNotFound(currMap, target);
-                    markTargetIgnoredOnMap(currMap, target, 'approach_fail_x3');
-                    if (window.expMonsterCache) window.expMonsterCache.delete(String(target.cacheKey ?? target.id));
-                    if (window.expFocusTarget && String(window.expFocusTarget.id) === String(target.id)) window.expFocusTarget = null;
+                    markTargetIgnoredOnMap(currMap, target, 'approach_fail_retry');
                     window.expLastTargetNotFoundAt = Date.now();
                     expLastMissingTargetId = target.id ?? target.cacheKey ?? null;
                     expRetargetEarliestAt = window.expLastTargetNotFoundAt + Math.floor(Math.random() * 301);
-                    HeroLogger.emit('DEBUG', 'APPROACH_STUCK_TARGET_SKIP', `Pomijam cel ${target.nick || target.id} — stoję w miejscu przy tym samym celu (cooldown=${mm?.cooldownUntil ? 'ON' : 'OFF'}).`, "#ff8a65", { category: 'COMBAT', dedupeMs: 2400 });
+                    HeroLogger.emit('DEBUG', 'APPROACH_STUCK_TARGET_SKIP', `[ANTI-STUCK] Retrying same target failed, temporarily skipping ${target.nick || target.id} (cooldown=${mm?.cooldownUntil ? 'ON' : 'OFF'}).`, "#ff8a65", { category: 'COMBAT', dedupeMs: 2400 });
                     approachState.targetKey = null;
                     return;
                 }
@@ -9883,6 +9881,8 @@ function runExpLogic() {
             const moveRetryTimedOut = !isMoving && window.expLastMoveCommandAt && (now - window.expLastMoveCommandAt > 1200);
 
             if (targetChanged || isStuck || moveRetryTimedOut) {
+                HeroLogger.emit('DEBUG', 'EXP_TARGET_SELECTED', `[EXP] Target selected: ${target.nick || target.id}/${target.id || '?'} at ${target.x},${target.y} -> stand tile ${moveX},${moveY} distance ${targetPathData?.stand?.dist ?? '?'}`, "#ffe082", { category: 'COMBAT', dedupeMs: 900 });
+                HeroLogger.emit('DEBUG', 'EXP_PATH_WALK_STAND', `[PATH] Walking to stand tile ${moveX},${moveY} for target ${target.id || '?'}`, "#81d4fa", { category: 'COMBAT', dedupeMs: 900 });
                 ActionExecutor.run('MOVE', { x: moveX, y: moveY }, () => window.safeGoTo(moveX, moveY, false));
                 window.expLastMoveTx = moveX;
                 window.expLastMoveTy = moveY;
@@ -14188,36 +14188,52 @@ if (
                     window.stuckIdleCount++;
                     // Odskakuje dopiero po 6 sekundach fizycznego braku ruchu, jeśli żaden wyjątek z listy wyżej go nie uchronił
                     if (window.stuckIdleCount >= 6) {
-                        const antiStuckMsg = "🔄 [Anti-Stuck] Wykryto zacięcie! Lekko odskakuję...";
+                        const antiStuckMsg = "[ANTI-STUCK] No movement for ~6000 ms, clearing path and jittering";
                         if (window.isExping && window.logExp) window.logExp(antiStuckMsg, "#00e5ff");
                         else if (window.logHero) window.logHero(antiStuckMsg, "#00e5ff");
 
                         if (window.isExping) {
                             const stuckTargetId = window.expFocusTarget?.id ?? window.expCurrentTargetId ?? null;
                             const currentMapName = Engine?.map?.d?.name;
-                            if (stuckTargetId != null && currentMapName && typeof MonsterMemory !== 'undefined' && MonsterMemory?.onTargetNotFound) {
-                                const mm = MonsterMemory.onTargetNotFound(currentMapName, stuckTargetId);
-                                const stuckMob =
-                                    (window.expMonsterCache && window.expMonsterCache.get(String(stuckTargetId))) ||
-                                    (window.expFocusTarget && String(window.expFocusTarget.id) === String(stuckTargetId) ? window.expFocusTarget : null) ||
-                                    { id: stuckTargetId, nick: String(stuckTargetId), lvl: 0, ranga: '' };
-                                markTargetIgnoredOnMap(currentMapName, stuckMob, 'anti_stuck');
-                                if (window.logExp) {
-                                    const suffix = mm?.cooldownUntil ? " (oznaczony jako trudny / cooldown i ignorowany na tej mapie)." : " (ignorowany na tej mapie).";
-                                    window.logExp(`đźŽŻ [Anti-Stuck] Zmieniam cel ${stuckTargetId}${suffix}`, "#ffb74d");
+                            if (stuckTargetId != null && currentMapName) {
+                                window.expAntiStuckRetryByTarget = window.expAntiStuckRetryByTarget || {};
+                                const retryCount = Number(window.expAntiStuckRetryByTarget[String(stuckTargetId)] || 0);
+                                if (retryCount < 1) {
+                                    window.expAntiStuckRetryByTarget[String(stuckTargetId)] = retryCount + 1;
+                                    if (window.logExp) window.logExp("[ANTI-STUCK] Retrying same target", "#ffb74d");
+                                } else {
+                                    const mm = (typeof MonsterMemory !== 'undefined' && MonsterMemory?.onTargetNotFound) ? MonsterMemory.onTargetNotFound(currentMapName, stuckTargetId) : null;
+                                    const stuckMob =
+                                        (window.expMonsterCache && window.expMonsterCache.get(String(stuckTargetId))) ||
+                                        (window.expFocusTarget && String(window.expFocusTarget.id) === String(stuckTargetId) ? window.expFocusTarget : null) ||
+                                        { id: stuckTargetId, nick: String(stuckTargetId), lvl: 0, ranga: '' };
+                                    markTargetIgnoredOnMap(currentMapName, stuckMob, 'anti_stuck');
+                                    if (window.logExp) window.logExp(`[ANTI-STUCK] Temporarily skipping target for 8s (${stuckTargetId})`, "#ffb74d");
+                                    window.expCurrentTargetGroupKey = null;
+                                    expCurrentTargetId = null;
+                                    window.expFocusTarget = null;
+                                    window.expLastTargetNotFoundAt = Date.now();
                                 }
                             } else if (window.logExp && (window.expCurrentTargetGroupKey || window.expCurrentTargetId || window.expFocusTarget)) {
                                 window.logExp("🎯 [Anti-Stuck] Resetuję aktualny cel i wybieram nowy.", "#ffb74d");
                             }
-                            window.expCurrentTargetGroupKey = null;
-                            expCurrentTargetId = null;
-                            window.expFocusTarget = null;
-                            window.expLastTargetNotFoundAt = Date.now();
                         }
 
-                        let stepX = Math.max(0, currentX + (Math.random() > 0.5 ? 1 : -1));
-                        let stepY = Math.max(0, currentY + (Math.random() > 0.5 ? 1 : -1));
-                        Engine.hero.autoGoTo({x: stepX, y: stepY});
+                        if (typeof Engine?.hero?.clearAutoPathOfHero === 'function') Engine.hero.clearAutoPathOfHero();
+                        const neighbors = [[-1,0],[1,0],[0,-1],[0,1]];
+                        let jitter = null;
+                        for (const [dx, dy] of neighbors) {
+                            const nx = currentX + dx, ny = currentY + dy;
+                            if (typeof Engine?.map?.checkCollision === 'function' && Engine.map.checkCollision(nx, ny)) continue;
+                            jitter = { x: nx, y: ny };
+                            break;
+                        }
+                        if (!jitter) {
+                            const randomNeighbors = [[-1,-1],[-1,1],[1,-1],[1,1]].sort(() => Math.random() - 0.5);
+                            jitter = randomNeighbors.map(([dx, dy]) => ({ x: currentX + dx, y: currentY + dy }))
+                                .find(p => !(typeof Engine?.map?.checkCollision === 'function' && Engine.map.checkCollision(p.x, p.y)));
+                        }
+                        if (jitter && typeof Engine?.hero?.autoGoTo === 'function') Engine.hero.autoGoTo({x: jitter.x, y: jitter.y});
                         window.stuckIdleCount = 0;
                     }
                 } else {
