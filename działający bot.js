@@ -5093,6 +5093,14 @@ window.expLastMoveTy = -1;
 window.expMoveLockUntil = 0;
 
 window.expUnreachableMobs = window.expUnreachableMobs || new Set();
+window.expQueuedTarget = window.expQueuedTarget || null;
+
+function sanitizeRadarLabel(text) {
+    return String(text || "")
+        .replace(/<[^>]*>?/gm, '')
+        .replace(/[\u0000-\u001F\u007F-\u009F\u200B-\u200D\uFEFF]/g, '')
+        .trim();
+}
 
 
   function runExpLogic() {
@@ -5350,7 +5358,7 @@ if (hx !== expLastX || hy !== expLastY) {
 
         rawMobs.push({
             id: n.id, x: n.x, y: n.y, wt: wt, type: n.type, ranga: ranga,
-            nick: (n.nick || n.name).replace(/<[^>]*>?/gm, '').trim(),
+            nick: sanitizeRadarLabel(n.nick || n.name),
             dist: Math.abs(hx - n.x) + Math.abs(hy - n.y)
         });
     });
@@ -5501,13 +5509,26 @@ if (hx !== expLastX || hy !== expLastY) {
 
             window.expLastMoveTx = -1; window.expLastMoveTy = -1; window.expMoveLockUntil = 0;
 
-            if (isHeroMoving && typeof Engine.hero.stop === 'function') Engine.hero.stop();
+            const berserkEnabled = !!(botSettings.berserk && botSettings.berserk.enabled);
+            const nextTarget = rawMobs.length > 1 ? rawMobs[1] : null;
+
+            // Gdy berserk jest aktywny, nie zatrzymuj ruchu na siłę — przygotuj kolejny cel.
+            if (!berserkEnabled && isHeroMoving && typeof Engine.hero.stop === 'function') {
+                Engine.hero.stop();
+            } else if (berserkEnabled && nextTarget && nextTarget.dist > 1) {
+                window.expQueuedTarget = { id: nextTarget.id, x: nextTarget.x, y: nextTarget.y, nick: nextTarget.nick };
+                if (typeof Engine.hero.autoGoTo === 'function') {
+                    Engine.hero.autoGoTo({ x: nextTarget.x, y: nextTarget.y });
+                    window.expLastMoveTx = nextTarget.x;
+                    window.expLastMoveTy = nextTarget.y;
+                }
+            }
 
 
 
             if (expAttackLockUntil === 0) {
 
-                expAttackLockUntil = now + ((botSettings.berserk && botSettings.berserk.enabled) ? 2500 : 0);
+                expAttackLockUntil = now + (berserkEnabled ? 600 : 2500);
 
             } else if (now > expAttackLockUntil) {
 
