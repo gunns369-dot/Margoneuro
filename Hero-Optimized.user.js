@@ -7719,6 +7719,81 @@ window.lastHeroExpLevel = 0;
 
 window.mapClearTimes = window.mapClearTimes || {};
 
+window.margoneuroReloadRecovery = window.margoneuroReloadRecovery || {
+    recoveringAfterReload: false,
+    wasRunningBeforeReload: false,
+    previousMode: 'IDLE',
+    berserkAllowedBeforeReload: false,
+    startedAt: 0
+};
+
+function shouldBerserkBeEnabled() {
+    return window.botRunning === true
+        && !window.margoneuroStoppedManually
+        && !window.__softPauseReason
+        && !window.margoneuroReloadRecovery?.recoveringAfterReload
+        && isCurrentMapInExpRoute()
+        && (window.margoneuroCurrentMode === 'EXP_CLEAR' || window.margoneuroCurrentMode === 'EXP');
+}
+window.shouldBerserkBeEnabled = shouldBerserkBeEnabled;
+
+function saveReloadRecoverySnapshot() {
+    try {
+        const snap = {
+            ts: Date.now(),
+            wasRunningBeforeReload: !!window.isExping,
+            previousMode: window.margoneuroCurrentMode || 'IDLE',
+            berserkAllowedBeforeReload: !!(botSettings?.berserk?.userEnabled),
+            expRunId: window.expRunId || null
+        };
+        sessionStorage.setItem('margoneuro_reload_recovery_v1', JSON.stringify(snap));
+    } catch (e) {}
+}
+
+function bootstrapReloadRecovery() {
+    try {
+        const raw = sessionStorage.getItem('margoneuro_reload_recovery_v1');
+        if (!raw) return;
+        sessionStorage.removeItem('margoneuro_reload_recovery_v1');
+        const snap = JSON.parse(raw);
+        if (!snap || !snap.wasRunningBeforeReload) return;
+
+        window.margoneuroReloadRecovery = {
+            recoveringAfterReload: true,
+            wasRunningBeforeReload: true,
+            previousMode: snap.previousMode || 'EXP',
+            berserkAllowedBeforeReload: !!snap.berserkAllowedBeforeReload,
+            startedAt: Date.now()
+        };
+
+        if (window.BerserkController?.setBotBerserkState) {
+            window.BerserkController.setBotBerserkState(false, 'reload_recovery_pause');
+        }
+
+        const recoverTick = () => {
+            if (!window.margoneuroReloadRecovery?.recoveringAfterReload) return;
+            const ready = !!(typeof Engine !== 'undefined' && Engine?.hero?.d && Engine?.map?.d?.name && !Engine?.map?.isLoading);
+            if (!ready) return setTimeout(recoverTick, 250);
+
+            window.isExping = true;
+            window.expRunning = true;
+            window.botRunning = true;
+            window.margoneuroCurrentMode = window.margoneuroReloadRecovery.previousMode || 'EXP';
+            window.margoneuroStoppedManually = false;
+            window.margoneuroReloadRecovery.recoveringAfterReload = false;
+
+            if (window.margoneuroReloadRecovery.berserkAllowedBeforeReload && botSettings?.berserk) {
+                botSettings.berserk.userEnabled = true;
+            }
+            if (typeof syncBerserkState === 'function') syncBerserkState('reload_recovery_forced_sync');
+            if (typeof runExpLogic === 'function') runExpLogic();
+        };
+        setTimeout(recoverTick, 250);
+    } catch (e) {}
+}
+window.addEventListener('beforeunload', saveReloadRecoverySnapshot);
+
+
 window.expRunId = null;
 window.expCycleId = 0;
 
@@ -8036,6 +8111,8 @@ function shouldBerserkBeActive() {
     if (window.margoneuroTeleportInProgress || now - (window.margoneuroLastTeleportAt || 0) < 9000 || now - (window.__lastEqTeleportAt || 0) < 9000) {
         return { active: false, reason: 'teleporting' };
     }
+    if (window.__softPauseReason || window.margoneuroReloadRecovery?.recoveringAfterReload) return { active: false, reason: 'recovery_pause' };
+    if (window.margoneuroStoppedManually) return { active: false, reason: 'manual_stop' };
     if (window.margoneuroPausedByQuiz || window.__trapBotPausedByCaptcha || (window.__captchaPhase && window.__captchaPhase !== 'none')) {
         return { active: false, reason: 'quiz_active' };
     }
@@ -8102,6 +8179,8 @@ function syncBerserkState(reason = 'sync') {
     return ensureBerserkDisabled(decision.reason);
 }
 window.syncBerserkState = syncBerserkState;
+bootstrapReloadRecovery();
+
 
 setInterval(() => {
     if (window.BerserkController?.syncObservedState) window.BerserkController.syncObservedState('poll');
@@ -9319,7 +9398,7 @@ function stopRushBecauseExpMapReached(currMap, reason = 'exp_route_reached') {
 
 function runExpLogic() {
     if (!window.isExping) return;
-    if (window.__softPauseReason) return;
+    if (window.__softPauseReason || window.margoneuroReloadRecovery?.recoveringAfterReload) return;
     if (typeof Engine === 'undefined' || !Engine.hero || !Engine.hero.d || !Engine.map || Engine.map.isLoading || !Engine.map.d.name) return;
     const now = Date.now();
     const currMapEarly = Engine.map.d.name;
