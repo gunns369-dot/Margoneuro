@@ -8908,14 +8908,13 @@ function isMapTemporarilyCleared(mapName) {
     if (!window.mapClearTimes) window.mapClearTimes = {};
 
     const mapKey = getMapClearKey(mapName);
-    const entry = window.mapClearTimes[mapKey] || window.mapClearTimes[mapName];
+    const entry = window.mapClearTimes[mapKey];
     if (!entry) return false;
     const ts = (typeof entry === 'object' && entry !== null) ? Number(entry.ts || entry.time || 0) : Number(entry);
     if (!ts) return false;
     const clearTtlMs = Number(window.expClearedMapTtlMs || (5 * 60 * 1000));
     if (Date.now() - ts > clearTtlMs) {
         delete window.mapClearTimes[mapKey];
-        delete window.mapClearTimes[mapName];
         return false;
     }
     return true;
@@ -8927,7 +8926,6 @@ function markMapTemporarilyCleared(mapName) {
     const now = Date.now();
     const mapKey = getMapClearKey(mapName);
     window.mapClearTimes[mapKey] = { ts: now, name: mapName, reason: 'clean' };
-    window.mapClearTimes[mapName] = window.mapClearTimes[mapKey];
     HeroLogger.emit('INFO', 'EXP_MAP_CLEAN_MARK', `[EXP] Mapa oznaczona jako czysta: ${mapName}`, "#81c784", { category: 'EXP', dedupeMs: 1200 });
 }
 
@@ -8935,7 +8933,7 @@ function unmarkMapTemporarilyCleared(mapName, reason = 'manual') {
     if (!mapName || !window.mapClearTimes) return;
     const mapKey = getMapClearKey(mapName);
     delete window.mapClearTimes[mapKey];
-    delete window.mapClearTimes[mapName];
+    delete window.mapClearTimes[mapName]; // backward compatibility
     HeroLogger.emit('INFO', 'EXP_MAP_CLEAN_UNMARK', `[EXP] Mapa odblokowana, bo pojawił się mob: ${mapName} (${reason})`, "#64b5f6", { category: 'EXP', dedupeMs: 1200 });
 }
 
@@ -8946,8 +8944,15 @@ function unmarkMapCleared(mapName, reason = 'manual') {
 function getUnclearedExpMaps(currentMap, mapsPool) {
     const currNorm = normMapName(currentMap);
     return (Array.isArray(mapsPool) ? mapsPool : [])
-        .filter(m => m && normMapName(m) !== currNorm && !isMapTemporarilyCleared(m))
-        .filter(m => !(window.__bannedMaps && window.__bannedMaps[m] && Date.now() < window.__bannedMaps[m]));
+        .filter(m => !!m)
+        .filter(m => normMapName(m) !== currNorm)
+        .filter(m => !isMapTemporarilyCleared(m))
+        .filter(m => {
+            const rawBan = window.__bannedMaps?.[m];
+            const normBan = window.__bannedMaps?.[normMapName(m)];
+            const banUntil = Math.max(Number(rawBan || 0), Number(normBan || 0));
+            return !(banUntil && Date.now() < banUntil);
+        });
 }
 
 function resetClearedMapIfMobSeen(mapName, visibleTargets) {
@@ -8961,12 +8966,30 @@ function resetClearedMapIfMobSeen(mapName, visibleTargets) {
 
 function pickNextExpMapAfterClean(currentMap, mapsPool) {
     const pool = Array.isArray(mapsPool) ? mapsPool : [];
-    const uncleared = getUnclearedExpMaps(currentMap, pool);
-    if (!uncleared.length) return null;
-    const best = pickNextUnclearedExpMap(currentMap, uncleared);
-    if (best?.targetMap) return { targetMap: best.targetMap, path: best.path || null, reason: 'route_order_uncleared' };
+    const currNorm = normMapName(currentMap);
+    if (!pool.length) return null;
+    const currentIndex = pool.findIndex(m => normMapName(m) === currNorm);
+
+    if (currentIndex >= 0) {
+        for (let step = 1; step <= pool.length; step++) {
+            const candidate = pool[(currentIndex + step) % pool.length];
+            if (!candidate || normMapName(candidate) === currNorm) continue;
+            if (isMapTemporarilyCleared(candidate)) continue;
+            const rawBan = window.__bannedMaps?.[candidate];
+            const normBan = window.__bannedMaps?.[normMapName(candidate)];
+            const banUntil = Math.max(Number(rawBan || 0), Number(normBan || 0));
+            if (banUntil && Date.now() < banUntil) continue;
+            let path = typeof getShortestPath === 'function' ? getShortestPath(currentMap, candidate, routePathOptions()) : null;
+            if ((!path || path.length < 2) && typeof getShortestPath === 'function') {
+                path = getShortestPath(currentMap, candidate, routePathOptions({ ignoreEdgeBans: true }));
+            }
+            if (path && path.length > 1) return { targetMap: candidate, path, reason: 'route_order_reachable' };
+        }
+    }
+
+    const uncleared = getUnclearedExpMaps(currentMap, pool).filter(m => normMapName(m) !== currNorm);
     const nearest = getClosestExpMapPath(currentMap, uncleared);
-    if (nearest?.targetMap) return { targetMap: nearest.targetMap, path: nearest.path || null, reason: 'nearest_uncleared' };
+    if (nearest?.targetMap && normMapName(nearest.targetMap) !== currNorm) return { targetMap: nearest.targetMap, path: nearest.path || null, reason: 'nearest_uncleared' };
     return null;
 }
 
@@ -9436,6 +9459,48 @@ function stopRushBecauseExpMapReached(currMap, reason = 'exp_route_reached') {
     return true;
 }
 
+
+function onExpMapChanged(currMap, now) {
+    if (!currMap) return false;
+    const prevMap = window.expLastMapName || window.lastExpMap || null;
+    if (prevMap && normMapName(prevMap) === normMapName(currMap)) return false;
+
+    window.expLastMapName = currMap;
+    window.lastExpMap = currMap;
+    window.expMapEnteredAt = now;
+    expEmptyScans = 0;
+    expCurrentTargetId = null;
+    window.expCurrentTargetId = null;
+    expAttackLockUntil = 0;
+    window.expFocusTarget = null;
+    window.expCurrentTargetGroupKey = null;
+    window.expLastMoveTx = null;
+    window.expLastMoveTy = null;
+    window.expLastMoveAt = 0;
+    window.expLastMoveCommandAt = 0;
+    window.expStandStillStart = null;
+    window.expStandStillTargetKey = null;
+    window.expApproachStuckState = {};
+    window.expUnreachableMobs = {};
+    window.expGatewayStandTime = 0;
+    window.expGatewayArrivalTime = 0;
+    const entryCd = 1200 + Math.floor(Math.random() * 301);
+    window.mapCooldown = now + entryCd;
+
+    const mapsPool = getCurrentExpHuntMaps();
+    const isExpMap = !!findMatchingExpMapName(currMap, mapsPool);
+    const routeState = getExpRouteState();
+    if (isExpMap) {
+        window.isRushing = false;
+        if (typeof isRushing !== 'undefined') isRushing = false;
+        routeState.isTravellingToNextExpMap = false;
+        if (!routeState.targetExpMap || normMapName(routeState.targetExpMap) === normMapName(currMap) || shouldClearCurrentMapNow(currMap)) {
+            window.rushNextMap = null;
+        }
+    }
+    return true;
+}
+
 function runExpLogic() {
     if (!window.isExping) return;
     if (window.__softPauseReason || window.margoneuroReloadRecovery?.recoveringAfterReload) return;
@@ -9450,6 +9515,7 @@ function runExpLogic() {
         };
     }
     const currMapEarly = Engine.map.d.name;
+    onExpMapChanged(currMapEarly, now);
     const mapsPoolEarly = getCurrentExpHuntMaps();
     const isExpMapEarly = !!findMatchingExpMapName(currMapEarly, mapsPoolEarly);
     const activeRouteRushEarly = !!(window.isRushing || (typeof isRushing !== 'undefined' && isRushing));
@@ -9467,7 +9533,8 @@ function runExpLogic() {
 
     const heroMovingEarly = !!(Engine.hero.d.path && Engine.hero.d.path.length > 0);
     const rushingEarly = !!((window.isRushing || (typeof isRushing !== 'undefined' && isRushing) || window.isRushingToShop) && !isExpMapEarly);
-    if (heroMovingEarly || rushingEarly) {
+    const shouldStayAndClearEarly = isExpMapEarly && (!isMapTemporarilyCleared(currMapEarly) || shouldClearCurrentMapNow(currMapEarly));
+    if ((heroMovingEarly || rushingEarly) && !shouldStayAndClearEarly) {
         if (window.RouteCombatFSM && (!window.__lastRushFsmSyncAt || now - window.__lastRushFsmSyncAt > 1500)) {
             window.__lastRushFsmSyncAt = now;
             window.RouteCombatFSM.update({
@@ -9511,7 +9578,7 @@ function runExpLogic() {
     window.expMapPvpCache[currMap] = Engine.map?.d?.pvp;
 
     // Zarządzanie historią map i cooldownami
-    if (window.lastExpMap !== currMap) {
+    if (false && window.lastExpMap !== currMap) {
         if (!window.expMapHistory) window.expMapHistory = [];
         if (window.lastExpMap) {
             if (window.expMapHistory.length === 0 || window.expMapHistory[window.expMapHistory.length - 1] !== window.lastExpMap) {
@@ -10163,25 +10230,28 @@ window.expDebugRouteState = function() {
     const currMap = Engine?.map?.d?.name || null;
     const selectedMaps = (typeof getCurrentExpHuntMaps === 'function') ? getCurrentExpHuntMaps() : [];
     const now = Date.now();
+    const routeState = getExpRouteState();
     const cleared = Object.entries(window.mapClearTimes || {})
-        .filter(([k]) => k === getMapClearKey(k))
         .map(([k, v]) => {
             const ts = (typeof v === 'object' && v !== null) ? Number(v.ts || 0) : Number(v);
             const left = Math.max(0, Number(window.expClearedMapTtlMs || (5 * 60 * 1000)) - (now - ts));
             return { key: k, name: v?.name || k, remainingMs: left };
         });
-    const visible = typeof countVisibleExpTargetsOnCurrentMap === 'function' ? countVisibleExpTargetsOnCurrentMap(currMap) : null;
-    const reachable = window.expMonsterCache instanceof Map ? [...window.expMonsterCache.values()].length : null;
+    const visible = typeof countVisibleExpTargetsOnCurrentMap === 'function' ? countVisibleExpTargetsOnCurrentMap(currMap) : 0;
+    const rememberedReachable = window.expMonsterCache instanceof Map ? [...window.expMonsterCache.values()].filter(m => m && (m.memoryOnly || m.visible)).length : 0;
+    const next = pickNextExpMapAfterClean(currMap, selectedMaps);
     const state = {
         currentMap: currMap,
         selectedExpMaps: selectedMaps,
         clearedMaps: cleared,
-        currentTargetMap: window.rushTarget || window.rushNextMap || null,
-        isRushing: !!window.isRushing,
-        expAllMapsClearedAt: window.expAllMapsClearedAt || 0,
-        lastTransitTarget: window._lastTransitMapLog || null,
+        expSessionPhase: window.expSessionState?.phase || null,
+        targetExpMap: routeState.targetExpMap || null,
+        isTravellingToNextExpMap: !!routeState.isTravellingToNextExpMap,
+        isRushing: !!(window.isRushing || (typeof isRushing !== 'undefined' && isRushing)),
         visibleTargets: visible,
-        reachableTargets: reachable
+        rememberedReachableTargets: rememberedReachable,
+        nextMapAfterClean: next?.targetMap || null,
+        nextMapReason: next?.reason || null
     };
     console.log('[EXP DEBUG ROUTE STATE]', state);
     return state;
