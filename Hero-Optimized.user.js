@@ -9401,6 +9401,17 @@ function hasVisibleOrRememberedMobs(mapName, validMobsCount = null) {
     return false;
 }
 
+function isMapInCurrentExpRoute(mapName) {
+    const map = normMapName(mapName || (Engine?.map?.d?.name || ''));
+    if (!map) return false;
+    const allowed = getExpAllowedMapSet();
+    if (allowed && typeof allowed.has === 'function' && allowed.size > 0) {
+        return allowed.has(map);
+    }
+    const fallbackMaps = (botSettings?.exp?.mapOrder || []);
+    return fallbackMaps.some(m => normMapName(m) === map);
+}
+
 function shouldClearCurrentMapNow(mapName, validMobsCount = null) {
     const map = mapName || (Engine?.map?.d?.name || '');
     if (!window.isExping) return false;
