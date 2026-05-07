@@ -12152,8 +12152,12 @@ window.renderEqItems = function(filterType = 'Wszystkie') {
     }
 // --- TWOJE FUNKCJE DO DETEKCJI STANU NIEPRZYTOMNOŚCI ---
     function getUnconsciousState() {
-        const overlay = document.querySelector(".dead-overlay.map-overlay, .dead-window, .death-window");
-        const timerEl = document.querySelector(".dead-overlay.map-overlay .dazed-time, .dead-window .dazed-time");
+        const overlay = document.querySelector(
+            ".dead-overlay.map-overlay, .dead-overlay, .dazed-overlay, .dead-window, .death-window, [data-wnd='dead']"
+        );
+        const timerEl = document.querySelector(
+            ".dead-overlay.map-overlay .dazed-time, .dead-overlay .dazed-time, .dead-window .dazed-time, .death-window .dazed-time, [data-wnd='dead'] .dazed-time"
+        );
 
         const rect = overlay ? overlay.getBoundingClientRect() : null;
         const visible = !!(
@@ -12177,8 +12181,12 @@ window.renderEqItems = function(filterType = 'Wszystkie') {
             }
         }
 
+        const normalizedBodyText = normalizeUiText(document.body?.innerText || "");
+        const textSuggestsUnconscious = normalizedBodyText.includes("jestes nieprzytomny") ||
+            normalizedBodyText.includes("ocniesz sie kiedy wroca ci sily");
+
         return {
-            unconscious: visible,
+            unconscious: visible || textSuggestsUnconscious,
             timerText: text,
             timerSeconds: seconds
         };
