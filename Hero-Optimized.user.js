@@ -9920,12 +9920,16 @@ function runExpLogic() {
             const moveX = targetPathData.stand.x;
             const moveY = targetPathData.stand.y;
             const targetChanged = window.expLastMoveTx !== moveX || window.expLastMoveTy !== moveY;
-            const isMoving = Engine.hero.d.path && Engine.hero.d.path.length > 0;
+            const currentPath = Array.isArray(Engine.hero.d.path) ? Engine.hero.d.path : [];
+            const isMoving = currentPath.length > 0;
+            const lastPathStep = isMoving ? currentPath[currentPath.length - 1] : null;
+            const pathEndsAtStand = !!(lastPathStep && Number(lastPathStep.x) === Number(moveX) && Number(lastPathStep.y) === Number(moveY));
             const heroUnchanged = window.expLastMoveHeroX === hx && window.expLastMoveHeroY === hy;
             const isStuck = heroUnchanged && window.expLastMoveAt && (now - window.expLastMoveAt > 1600);
             const moveRetryTimedOut = !isMoving && window.expLastMoveCommandAt && (now - window.expLastMoveCommandAt > 1200);
+            const missingOrWrongPath = !isMoving || !pathEndsAtStand;
 
-            if (targetChanged || isStuck || moveRetryTimedOut) {
+            if (targetChanged || isStuck || moveRetryTimedOut || missingOrWrongPath) {
                 HeroLogger.emit('DEBUG', 'EXP_TARGET_SELECTED', `[EXP] Target selected: ${target.nick || target.id}/${target.id || '?'} at ${target.x},${target.y} -> stand tile ${moveX},${moveY} distance ${targetPathData?.stand?.dist ?? '?'}`, "#ffe082", { category: 'COMBAT', dedupeMs: 900 });
                 HeroLogger.emit('DEBUG', 'EXP_PATH_WALK_STAND', `[PATH] Walking to stand tile ${moveX},${moveY} for target ${target.id || '?'}`, "#81d4fa", { category: 'COMBAT', dedupeMs: 900 });
                 ActionExecutor.run('MOVE', { x: moveX, y: moveY }, () => window.safeGoTo(moveX, moveY, false));
