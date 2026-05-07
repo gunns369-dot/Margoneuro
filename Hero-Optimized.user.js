@@ -194,10 +194,7 @@
         const signature = `${state.hasEngine}:${state.hasMap}:${state.hasHero}:${state.hasGameDom}`;
         const now = Date.now();
         if (force || signature !== margoneuroLastReadinessLog || now - margoneuroLastReadinessLogAt > 5000) {
-            console.log('[Boot] Sprawdzam gotowość gry...');
-            console.log(`[Boot] Engine istnieje: ${state.hasEngine}`);
-            console.log(`[Boot] Engine.map istnieje: ${state.hasMap}`);
-            console.log(`[Boot] Engine.hero istnieje: ${state.hasHero}`);
+            console.log(`[Boot] Readiness: engine=${state.hasEngine} map=${state.hasMap} hero=${state.hasHero} dom=${state.hasGameDom}`);
             margoneuroLastReadinessLog = signature;
             margoneuroLastReadinessLogAt = now;
         }
@@ -9356,6 +9353,33 @@ function requestGatewayRefresh(reason = 'loop', forceNow = false) {
     return state.cache || [];
 }
 
+function hasVisibleOrRememberedMobs(mapName, validMobsCount = null) {
+    const currentMap = Engine?.map?.d?.name || '';
+    if (!mapName || normMapName(mapName) !== normMapName(currentMap)) return false;
+    if (Number.isFinite(validMobsCount) && validMobsCount > 0) return true;
+    const visible = countVisibleExpTargetsOnCurrentMap(mapName);
+    if (visible > 0) return true;
+    if (typeof MonsterMemory !== 'undefined' && MonsterMemory.hasAliveCandidateOnMap(mapName)) return true;
+    return false;
+}
+
+function shouldClearCurrentMapNow(mapName, validMobsCount = null) {
+    const map = mapName || (Engine?.map?.d?.name || '');
+    if (!window.isExping) return false;
+    if (window.manualStop || window.__manualStop) return false;
+    if (window.__softPauseReason) return false;
+    if (!isMapInCurrentExpRoute(map)) return false;
+
+    const hasMobs = hasVisibleOrRememberedMobs(map, validMobsCount);
+    if (isMapTemporarilyCleared(map) && !hasMobs) return false;
+    return hasMobs;
+}
+
+function getExpRouteState() {
+    if (!window.expRouteState) window.expRouteState = { targetExpMap: null, isTravellingToNextExpMap: false };
+    return window.expRouteState;
+}
+
 function getExpAllowedMapSet() {
     const maps = getCurrentExpHuntMaps();
     return new Set((maps || []).map(m => normMapName(m)));
@@ -9384,7 +9408,8 @@ function stopRushBecauseExpMapReached(currMap, reason = 'exp_route_reached') {
 
     window.expMapEnteredAt = Date.now();
     window.mapCooldown = Math.min(window.mapCooldown || Date.now(), Date.now() + 500);
-    HeroLogger.emit('INFO', 'EXP_MAP_REACHED', `Dotarto na mape expowiska [${currMap}] - zatrzymuje tranzyt i wlaczam logike EXP.`, "#81c784", { category: 'ROUTE', dedupeMs: 2500 });
+    HeroLogger.emit('INFO', 'EXP_MAP_REACHED', `[EXP] Arrived on target exp map: ${currMap}`, "#81c784", { category: 'ROUTE', dedupeMs: 2500 });
+    HeroLogger.emit('INFO', 'EXP_START_CLEAR_ON_TARGET', `[EXP] Starting clear logic on: ${currMap}`, "#81c784", { category: 'ROUTE', dedupeMs: 2500 });
     if (window.RouteCombatFSM) {
         window.RouteCombatFSM.update({
             running: !!window.isExping,
@@ -9405,8 +9430,16 @@ function runExpLogic() {
     const mapsPoolEarly = getCurrentExpHuntMaps();
     const isExpMapEarly = !!findMatchingExpMapName(currMapEarly, mapsPoolEarly);
     const activeRouteRushEarly = !!(window.isRushing || (typeof isRushing !== 'undefined' && isRushing));
-    if (isExpMapEarly && activeRouteRushEarly) {
-        stopRushBecauseExpMapReached(currMapEarly, 'exp_tick_reached_route_map');
+    const routeStateEarly = getExpRouteState();
+    if (activeRouteRushEarly) {
+        const reachedTarget = !!routeStateEarly.targetExpMap && normMapName(routeStateEarly.targetExpMap) === normMapName(currMapEarly);
+        const shouldClearEarly = shouldClearCurrentMapNow(currMapEarly);
+        if (reachedTarget || shouldClearEarly) {
+            stopRushBecauseExpMapReached(currMapEarly, reachedTarget ? 'exp_tick_reached_target_map' : 'exp_tick_reached_map_with_mobs');
+            routeStateEarly.isTravellingToNextExpMap = false;
+        } else if (isExpMapEarly && isMapTemporarilyCleared(currMapEarly)) {
+            HeroLogger.emit('INFO', 'EXP_IGNORE_CLEARED_CURRENT', `[EXP] Ignoring current exp map because it is temporarily cleared: ${currMapEarly}`, "#90a4ae", { category: 'ROUTE', dedupeMs: 3000 });
+        }
     }
 
     const heroMovingEarly = !!(Engine.hero.d.path && Engine.hero.d.path.length > 0);
@@ -9697,7 +9730,10 @@ function runExpLogic() {
         window.expModeDebugLogKey = modeKey;
     }
     const shouldFightHere = isExpMap || temporaryExpMode;
-    const shouldKeepBerserkInRoute = !!(isExpMap && !window.isRushing && !isMapTemporarilyCleared(currMap));
+    const shouldKeepBerserkInRoute = shouldClearCurrentMapNow(currMap, validMobs.length) && !window.isRushing;
+    if (!shouldKeepBerserkInRoute && window.isRushing) {
+        HeroLogger.emit('INFO', 'BERSERK_OFF_TRAVEL', `[Berserk] kept OFF: travelling_to_next_exp_map`, "#ffb74d", { category: 'ROUTE', dedupeMs: 4000 });
+    }
     setExpBerserkState(shouldKeepBerserkInRoute);
     if (window.RouteCombatFSM) {
         window.RouteCombatFSM.update({
@@ -9947,6 +9983,13 @@ function runExpLogic() {
         }
 
         if (bestTargetMap && !window.isRushing) {
+            const routeState = getExpRouteState();
+            routeState.targetExpMap = bestTargetMap;
+            routeState.isTravellingToNextExpMap = true;
+            HeroLogger.emit('INFO', 'EXP_SELECTED_NEXT_MAP', `[EXP] Selected next exp map: ${bestTargetMap}`, "#64b5f6", { category: 'EXP', dedupeMs: 1800 });
+            if (isMapTemporarilyCleared(currMap)) {
+                HeroLogger.emit('INFO', 'EXP_CLEARED_CONTINUE_TRANSIT', `[EXP] Current route map is cleared, continuing transit: ${currMap} -> ${bestTargetMap}`, "#64b5f6", { category: 'EXP', dedupeMs: 2500 });
+            }
             HeroLogger.emit('INFO', 'EXP_TRANSIT', `[EXP] Tranzyt przez: ${currMap}`, "#64b5f6", { category: 'EXP', dedupeMs: 1000 });
             HeroLogger.emit('INFO', 'EXP_TRANSIT_TARGET', `[EXP] Cel tranzytu: ${bestTargetMap}`, "#64b5f6", { category: 'EXP', dedupeMs: 1000 });
             if (window.logExp && window._lastTransitMapLog !== bestTargetMap) {
