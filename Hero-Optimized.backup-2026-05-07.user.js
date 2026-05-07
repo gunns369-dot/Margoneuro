@@ -4713,7 +4713,7 @@ window.handleTeleportNPC = function(targetMap) {
             () => {
                 if (isRushing) { clearTimeout(rushInterval); rushInterval = setTimeout(executeRushStep, 3500); }
                 else if (isPatrolling) { clearTimeout(smoothPatrolInterval); smoothPatrolInterval = setTimeout(executePatrolStep, 3500); }
-                else if (window.isExping) { expMapTransitionCooldown = Date.now() + 4000; }
+                else if (window.isExping) { expMapTransitionCooldown = Date.now() + 1600; }
             },
             () => rescheduleTeleportCheck(targetMap),
             tp
@@ -10181,7 +10181,7 @@ function runExpLogic() {
             window.expWaitingSafeMap = null;
             window.expDecisionInfo = `Tranzyt do mapy: ${bestTargetMap}`;
             window.rushToMap(bestTargetMap);
-            expLastActionTime = now + 1000;
+            expLastActionTime = now + 300;
         } else if (!bestTargetMap && areAllExpMapsTemporarilyCleared(mapsPool)) {
             // Wszystkie mapy wyczyszczone: czekamy na bezpiecznej mapie i po minucie ponawiamy obieg.
             if (!window.expAllMapsClearedAt) {
@@ -10196,7 +10196,7 @@ function runExpLogic() {
                     window._lastAllClearBacktrackLog = `${currMap}->${deadEndBack.map}`;
                 }
                 window.rushToMap(deadEndBack.map);
-                expLastActionTime = now + 1000;
+                expLastActionTime = now + 300;
                 return;
             }
 
@@ -10207,7 +10207,7 @@ function runExpLogic() {
                     window.expWaitingSafeMap = safeMap;
                     if (window.logExp) window.logExp(`🛡️ Mapa czerwona. Przenoszę się na bezpieczną mapę: [${safeMap}]`, "#81d4fa");
                     window.rushToMap(safeMap);
-                    expLastActionTime = now + 1000;
+                    expLastActionTime = now + 300;
                     return;
                 }
             }
