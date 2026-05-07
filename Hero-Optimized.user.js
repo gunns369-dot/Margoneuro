@@ -9898,15 +9898,21 @@ function runExpLogic() {
                 approachState.anchorAt = now;
                 HeroLogger.emit('DEBUG', 'APPROACH_STUCK_RETRY', `Nie mogę dojść do celu ${target.nick || target.id} (próba=${approachState.failCount}).`, "#ffcc80", { category: 'COMBAT', dedupeMs: 1500 });
 
-                if (approachState.failCount >= 2) {
+                if (approachState.failCount >= 5) {
                     const mm = MonsterMemory.onTargetNotFound(currMap, target);
                     markTargetIgnoredOnMap(currMap, target, 'approach_fail_retry');
                     window.expLastTargetNotFoundAt = Date.now();
                     expLastMissingTargetId = target.id ?? target.cacheKey ?? null;
                     expRetargetEarliestAt = window.expLastTargetNotFoundAt + Math.floor(Math.random() * 301);
-                    HeroLogger.emit('DEBUG', 'APPROACH_STUCK_TARGET_SKIP', `[ANTI-STUCK] Retrying same target failed, temporarily skipping ${target.nick || target.id} (cooldown=${mm?.cooldownUntil ? 'ON' : 'OFF'}).`, "#ff8a65", { category: 'COMBAT', dedupeMs: 2400 });
+                    HeroLogger.emit('DEBUG', 'APPROACH_STUCK_TARGET_SKIP', `[ANTI-STUCK] 5x retry failed, temporarily skipping ${target.nick || target.id} (cooldown=${mm?.cooldownUntil ? 'ON' : 'OFF'}).`, "#ff8a65", { category: 'COMBAT', dedupeMs: 2400 });
                     approachState.targetKey = null;
                     return;
+                }
+
+                if (targetPathData?.stand?.x != null && targetPathData?.stand?.y != null && typeof window.safeGoTo === 'function') {
+                    window.safeGoTo(targetPathData.stand.x, targetPathData.stand.y, false);
+                    window.expLastMoveCommandAt = now;
+                    HeroLogger.emit('DEBUG', 'APPROACH_STUCK_FORCE_REPATH', `[ANTI-STUCK] Force repath to stand tile ${targetPathData.stand.x},${targetPathData.stand.y} for ${target.nick || target.id}.`, "#81d4fa", { category: 'COMBAT', dedupeMs: 1200 });
                 }
             }
         }
@@ -14711,14 +14717,16 @@ if (
             if (typeof Engine === 'undefined' || !Engine.battle || !Engine.battle.show) return;
 
             const battleText = normalizeUiText(document.body?.innerText || document.body?.textContent || "");
-            const hasLeaveButton = !!findBattleLeaveButton();
             const lostOrEnded = (
-                hasLeaveButton ||
                 battleText.includes('walka zakonczona') ||
-                battleText.includes('opusc walke') ||
-                battleText.includes('polegl') ||
-                battleText.includes('nokaut') ||
-                battleText.includes('otrzymal') && battleText.includes('obrazen')
+                battleText.includes('wygrales walke') ||
+                battleText.includes('przegrales walke') ||
+                battleText.includes('zwyciestwo') ||
+                battleText.includes('porazka') ||
+                battleText.includes('polegles') ||
+                battleText.includes('zostales pokonany') ||
+                battleText.includes('remis') ||
+                battleText.includes('uciekles z walki')
             );
 
             if (lostOrEnded) {
