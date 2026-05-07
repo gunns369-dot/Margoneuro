@@ -7831,7 +7831,9 @@ const HeroLogger = {
         const key = `${level}:${event}:${msg}`;
         const bucket = this.counters.get(key) || { at: 0, count: 0 };
         bucket.count++;
-        if (now - bucket.at < dedupeMs && level === "WARN") {
+        const withinWindow = (now - bucket.at) < dedupeMs;
+        const shouldSkipDuplicate = withinWindow && level !== "ERROR";
+        if (shouldSkipDuplicate) {
             this.counters.set(key, bucket);
             return;
         }
