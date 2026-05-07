@@ -8812,7 +8812,42 @@ function setExpBerserkState(shouldEnable) {
     window.RouteCombatFSM.update({ inRouteMap: !!shouldEnable }, shouldEnable ? 'exp_map_enter' : 'exp_map_leave');
 }
 
-    function getClosestExpMapPath(currMap, mapsPool = null) {
+    
+const EXP_STATES = Object.freeze({
+    IDLE:'IDLE', ENTERING_EXP_ROUTE:'ENTERING_EXP_ROUTE', SCANNING_CURRENT_MAP:'SCANNING_CURRENT_MAP',
+    CLEARING_CURRENT_MAP:'CLEARING_CURRENT_MAP', MOVING_TO_MOB:'MOVING_TO_MOB', WAITING_AFTER_KILL:'WAITING_AFTER_KILL',
+    VERIFYING_REMEMBERED_MOBS:'VERIFYING_REMEMBERED_MOBS', MARKING_MAP_CLEAN:'MARKING_MAP_CLEAN', SELECTING_NEXT_MAP:'SELECTING_NEXT_MAP',
+    TRANSITING_TO_MAP:'TRANSITING_TO_MAP', WAITING_FOR_RESPAWN:'WAITING_FOR_RESPAWN', PAUSED_BY_CAPTCHA:'PAUSED_BY_CAPTCHA',
+    RECOVERING_FROM_STUCK:'RECOVERING_FROM_STUCK'
+});
+function getExpMachine(){
+    if(!window.expMachineState) window.expMachineState={state:EXP_STATES.IDLE,changedAt:Date.now(),lastBerserkSyncAt:0,lastBerserkDesired:null};
+    return window.expMachineState;
+}
+function setExpState(next,reason=''){
+    const m=getExpMachine(); if(!next||m.state===next) return false;
+    expLogOnce(`state:${m.state}->${next}`,`[EXP] State: ${m.state} -> ${next}${reason?` (${reason})`:''}`,2000);
+    m.state=next; m.changedAt=Date.now(); return true;
+}
+function expLogOnce(key,msg,cooldownMs=7000){ return logOncePerKey(`exp:${key}`,()=>HeroLogger.emit('INFO','EXP_STATE_LOG',msg,'#90caf9',{category:'EXP',dedupeMs:cooldownMs}),cooldownMs); }
+function getCurrentExpMapRuntimeState(mapName){
+    window.expMapRuntime=window.expMapRuntime||{}; const k=getMapClearKey(mapName||Engine?.map?.d?.name||'');
+    if(!window.expMapRuntime[k]) window.expMapRuntime[k]={cleanedAt:null,lastSeenMobAt:null,visibleMobs:0,rememberedMobs:0,lastVisitedAt:0,isCurrentlyReachable:true,failedTransitAttempts:0,lastCleanReason:'',lastCleanLogAt:0};
+    return window.expMapRuntime[k];
+}
+function syncBerserkForExpState(reason='exp_state_sync'){
+    const m=getExpMachine(); const st=m.state; const currMap=Engine?.map?.d?.name||'';
+    const isExpMap=!!findMatchingExpMapName(currMap,getCurrentExpHuntMaps());
+    const blocked=!!(window.__captchaPhase&&window.__captchaPhase!=='none')||!!window.autoSellState?.active||!!window.autoPotState?.active||!!window.isRushingToShop||!!window.__pvpEscapeActive;
+    const activeStates=[EXP_STATES.CLEARING_CURRENT_MAP,EXP_STATES.MOVING_TO_MOB,EXP_STATES.WAITING_AFTER_KILL,EXP_STATES.VERIFYING_REMEMBERED_MOBS];
+    const desired=!!(window.isExping&&isExpMap&&!blocked&&activeStates.includes(st));
+    if(m.lastBerserkDesired===desired && Date.now()-m.lastBerserkSyncAt<1200) return;
+    m.lastBerserkDesired=desired; m.lastBerserkSyncAt=Date.now();
+    setExpBerserkState(desired);
+    expLogOnce(`berserk:${desired}:${st}`,`[EXP] Berserk ${desired?'ON':'OFF'} (state=${st}, reason=${reason})`,5000);
+}
+
+function getClosestExpMapPath(currMap, mapsPool = null) {
 
     const maps = Array.isArray(mapsPool) && mapsPool.length ? mapsPool : (botSettings?.exp?.mapOrder || []);
 
@@ -8940,13 +8975,17 @@ function isMapTemporarilyCleared(mapName) {
     return true;
 }
 
-function markMapTemporarilyCleared(mapName) {
+function markMapTemporarilyCleared(mapName, reason = 'no_visible_or_remembered_reachable_mobs') {
     if (!mapName) return;
     if (!window.mapClearTimes) window.mapClearTimes = {};
     const now = Date.now();
     const mapKey = getMapClearKey(mapName);
-    window.mapClearTimes[mapKey] = { ts: now, name: mapName, reason: 'clean' };
-    HeroLogger.emit('INFO', 'EXP_MAP_CLEAN_MARK', `[EXP] Mapa oznaczona jako czysta: ${mapName}`, "#81c784", { category: 'EXP', dedupeMs: 1200 });
+    const prev = window.mapClearTimes[mapKey];
+    if (prev?.ts && now - prev.ts < 15000 && prev.reason === reason) return;
+    window.mapClearTimes[mapKey] = { ts: now, name: mapName, reason };
+    const rs = getCurrentExpMapRuntimeState(mapName);
+    rs.cleanedAt = now; rs.lastCleanReason = reason;
+    expLogOnce(`map_clean:${mapKey}`,`[EXP] Map clean: ${mapName}, reason=${reason}`,10000);
 }
 
 function unmarkMapTemporarilyCleared(mapName, reason = 'manual') {
@@ -9542,8 +9581,9 @@ function onExpMapChanged(currMap, now) {
 }
 
 function runExpLogic() {
-    if (!window.isExping) return;
-    if (window.__softPauseReason || window.margoneuroReloadRecovery?.recoveringAfterReload) return;
+    const machine = getExpMachine();
+    if (!window.isExping) { setExpState(EXP_STATES.IDLE,'exp_off'); syncBerserkForExpState('exp_off'); return; }
+    if (window.__softPauseReason || window.margoneuroReloadRecovery?.recoveringAfterReload) { setExpState(EXP_STATES.PAUSED_BY_CAPTCHA,'soft_pause'); syncBerserkForExpState('soft_pause'); return; }
     if (typeof Engine === 'undefined' || !Engine.hero || !Engine.hero.d || !Engine.map || Engine.map.isLoading || !Engine.map.d.name) return;
     const now = Date.now();
     if (!window.expSessionState) {
@@ -9555,6 +9595,7 @@ function runExpLogic() {
         };
     }
     const currMapEarly = Engine.map.d.name;
+    setExpState(EXP_STATES.SCANNING_CURRENT_MAP,'tick');
     onExpMapChanged(currMapEarly, now);
     const mapsPoolEarly = getCurrentExpHuntMaps();
     const isExpMapEarly = !!findMatchingExpMapName(currMapEarly, mapsPoolEarly);
@@ -9610,6 +9651,7 @@ function runExpLogic() {
     const matchedExpMap = findMatchingExpMapName(currMap, mapsPool);
     const isExpMap = !!matchedExpMap;
     let temporaryExpMode = false;
+    syncBerserkForExpState('tick');
     window.expDecisionInfo = `Mapa: ${currMap} | tryb: ${isExpMap ? "EXP" : "TRANZYT"}`;
     if (window.expLastGatewayRefreshMap !== currMap || now - (window.expLastGatewayRefreshAt || 0) > 3200) {
         window.expLastGatewayRefreshMap = currMap;
@@ -9804,6 +9846,7 @@ function runExpLogic() {
     HeroLogger.emit('DEBUG', 'EXP_VISIBLE_CANDIDATES', `[EXP] Visible mobs: ${liveVisibleValidCount}, reachable: ${validMobs.length}, unreachable: ${unreachableMobs}, skipped temporary: ${skippedTemporaryCount}`, "#90caf9", { category: 'EXP', dedupeMs: 1200 });
     HeroLogger.emit('DEBUG', 'EXP_REMEMBERED_CANDIDATES', `[EXP] remembered candidates count=${rememberedCandidatesCount}`, "#90caf9", { category: 'EXP', dedupeMs: 1200 });
     if (isExpMap && validMobs.length > 0) {
+        setExpState(EXP_STATES.CLEARING_CURRENT_MAP,'reachable_mobs');
         resetClearedMapIfMobSeen(currMap, validMobs.length);
         resetExpMapClearProbe(currMap);
         expEmptyScans = 0;
@@ -9967,6 +10010,7 @@ function runExpLogic() {
                 HeroLogger.emit('DEBUG', 'BERSERK_CHAIN_TARGET', `Berserk-chain: cel ${target.nick || target.id} jest w zasięgu, podchodzę już do następnego ${nextTarget.nick || nextTarget.id}.`, "#80deea", { category: 'COMBAT', dedupeMs: 1200 });
                 const nx = nextPathData.stand.x;
                 const ny = nextPathData.stand.y;
+                setExpState(EXP_STATES.MOVING_TO_MOB,'move_to_target');
                 ActionExecutor.run('MOVE', { x: nx, y: ny }, () => window.safeGoTo(nx, ny, false));
                 window.expLastMoveTx = nx;
                 window.expLastMoveTy = ny;
@@ -10064,6 +10108,7 @@ function runExpLogic() {
             if (targetChanged || isStuck || moveRetryTimedOut || missingOrWrongPath) {
                 HeroLogger.emit('DEBUG', 'EXP_TARGET_SELECTED', `[EXP] Target selected: ${target.nick || target.id}/${target.id || '?'} at ${target.x},${target.y} -> stand tile ${moveX},${moveY} distance ${targetPathData?.stand?.dist ?? '?'}`, "#ffe082", { category: 'COMBAT', dedupeMs: 900 });
                 HeroLogger.emit('DEBUG', 'EXP_PATH_WALK_STAND', `[PATH] Walking to stand tile ${moveX},${moveY} for target ${target.id || '?'}`, "#81d4fa", { category: 'COMBAT', dedupeMs: 900 });
+                setExpState(EXP_STATES.MOVING_TO_MOB,'move_to_target');
                 ActionExecutor.run('MOVE', { x: moveX, y: moveY }, () => window.safeGoTo(moveX, moveY, false));
                 window.expLastMoveTx = moveX;
                 window.expLastMoveTy = moveY;
@@ -10122,7 +10167,8 @@ function runExpLogic() {
                 return;
             }
 
-            markMapTemporarilyCleared(currMap);
+            setExpState(EXP_STATES.MARKING_MAP_CLEAN,'map_verified_clean');
+            markMapTemporarilyCleared(currMap, 'verified_no_visible_or_remembered_reachable_mobs');
             if (window.expSessionState.phase !== "TRAVEL_NEXT_MAP") {
                 window.expSessionState.phase = "TRAVEL_NEXT_MAP";
                 window.expSessionState.lastPhaseChangeAt = now;
@@ -10140,6 +10186,7 @@ function runExpLogic() {
 
         const unclearedMaps = getUnclearedExpMaps(currMap, mapsPool);
         if (unclearedMaps.length === 0 && areAllExpMapsTemporarilyCleared(mapsPool) && !window.expAllMapsClearedAt) window.expAllMapsClearedAt = now;
+        setExpState(EXP_STATES.SELECTING_NEXT_MAP,'no_targets_on_map');
         const bestAfterClean = pickNextExpMapAfterClean(currMap, mapsPool);
         window.expDecisionInfo = `Mapa pusta: ${currMap} -> szukam przejścia w trasie`;
         let bestTargetMap = bestAfterClean ? bestAfterClean.targetMap : null;
@@ -10191,6 +10238,8 @@ function runExpLogic() {
             window.expAllMapsClearedAt = 0;
             window.expWaitingSafeMap = null;
             window.expDecisionInfo = `Tranzyt do mapy: ${bestTargetMap}`;
+            setExpState(EXP_STATES.TRANSITING_TO_MAP,'target_map_selected');
+            syncBerserkForExpState('transit');
             window.rushToMap(bestTargetMap);
             expLastActionTime = now + 300;
         } else if (!bestTargetMap && areAllExpMapsTemporarilyCleared(mapsPool)) {
@@ -10223,7 +10272,8 @@ function runExpLogic() {
                 }
             }
 
-            const waitMs = 60 * 1000;
+            setExpState(EXP_STATES.WAITING_FOR_RESPAWN,'all_maps_clean');
+            const waitMs = Math.max(10000, Number(botSettings?.exp?.respawnWaitMs || 20000));
             const elapsed = now - window.expAllMapsClearedAt;
             if (elapsed < waitMs) {
                 if (!window.expLastWaitLogAt || now - window.expLastWaitLogAt > 12000) {
