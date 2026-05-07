@@ -14170,8 +14170,19 @@ if (
     window.isExping &&
     (
         (window.expMapTransitionCooldown && Date.now() < window.expMapTransitionCooldown) ||
-        (!window.expCurrentTargetGroupKey && !window.expCurrentTargetId)
+        (!window.expCurrentTargetGroupKey && !(window.expCurrentTargetId ?? window.expFocusTarget?.id))
     )
+) {
+    window.stuckIdleCount = 0;
+    return;
+}
+
+// Nie odpalaj anti-stuck tuż po komendzie ruchu do celu EXP.
+// W praktyce path bywa jeszcze pusty przez krótki moment i powodował fałszywe "zacięcia".
+if (
+    window.isExping &&
+    window.expLastMoveCommandAt &&
+    Date.now() - window.expLastMoveCommandAt < 1800
 ) {
     window.stuckIdleCount = 0;
     return;
