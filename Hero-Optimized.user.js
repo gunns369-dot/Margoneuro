@@ -5910,7 +5910,13 @@ if (btnExp) {
                 window.margoneuroCurrentMode = "EXP";
                 window.rushNextMap = null;
                 window.__pvpEscapeActive = false;
-                window.expRunId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2,6)}`;
+            window.expRunId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2,6)}`;
+            window.expSessionState = {
+                startedAt: Date.now(),
+                phase: "CLEAR_MAP",
+                currentMap: Engine?.map?.d?.name || null,
+                lastPhaseChangeAt: Date.now()
+            };
             window.expCycleId = 0;
             this.innerHTML = "⏹ STOP";
             this.style.borderColor = "#f44336";
@@ -5968,6 +5974,7 @@ expEmptyScans = 0;
             window.margoneuroCurrentMode = "IDLE";
             window.rushNextMap = null;
             window.expRunId = null;
+            window.expSessionState = null;
             this.innerHTML = "▶ START";
             this.style.borderColor = "#4caf50";
             this.style.color = "#4caf50";
@@ -9433,6 +9440,14 @@ function runExpLogic() {
     if (window.__softPauseReason || window.margoneuroReloadRecovery?.recoveringAfterReload) return;
     if (typeof Engine === 'undefined' || !Engine.hero || !Engine.hero.d || !Engine.map || Engine.map.isLoading || !Engine.map.d.name) return;
     const now = Date.now();
+    if (!window.expSessionState) {
+        window.expSessionState = {
+            startedAt: now,
+            phase: "CLEAR_MAP",
+            currentMap: Engine?.map?.d?.name || null,
+            lastPhaseChangeAt: now
+        };
+    }
     const currMapEarly = Engine.map.d.name;
     const mapsPoolEarly = getCurrentExpHuntMaps();
     const isExpMapEarly = !!findMatchingExpMapName(currMapEarly, mapsPoolEarly);
@@ -9476,6 +9491,11 @@ function runExpLogic() {
 
     window.expCycleId = (window.expCycleId || 0) + 1;
     const currMap = Engine.map.d.name;
+    if (window.expSessionState.currentMap !== currMap) {
+        window.expSessionState.currentMap = currMap;
+        window.expSessionState.phase = "CLEAR_MAP";
+        window.expSessionState.lastPhaseChangeAt = now;
+    }
     let mapsPool = getCurrentExpHuntMaps();
     const matchedExpMap = findMatchingExpMapName(currMap, mapsPool);
     const isExpMap = !!matchedExpMap;
@@ -9643,6 +9663,7 @@ function runExpLogic() {
     // Wybór celu na podstawie Radaru (omijanie ścian)
     let distMap = buildDistanceMapFromHero();
     let validMobs = [];
+    let unreachableMobs = 0;
     let skippedTemporaryCount = 0;
     for (let [id, mob] of window.expMonsterCache.entries()) {
         if (isTargetIgnoredOnMap(currMap, mob)) { skippedTemporaryCount++; continue; }
@@ -9654,10 +9675,19 @@ function runExpLogic() {
                 if (distMap.has(sk)) { reachable = true; bestDist = Math.min(bestDist, distMap.get(sk)); }
             }
         }
-        if (reachable) validMobs.push({ ...mob, dist: bestDist });
+        if (reachable) {
+            validMobs.push({ ...mob, dist: bestDist });
+        } else {
+            unreachableMobs++;
+            if (!mob.visible || mob.memoryOnly) {
+                const mm = MonsterMemory.onTargetNotFound(currMap, mob);
+                markTargetIgnoredOnMap(currMap, mob, 'radar_unreachable');
+                HeroLogger.emit('DEBUG', 'RADAR_UNREACHABLE_SKIP', `Radar: pomijam nieosiągalny cel ${mob.nick || mob.id} (cooldown=${mm?.cooldownUntil ? 'ON' : 'OFF'}).`, "#ffab91", { category: 'COMBAT', dedupeMs: 2000 });
+            }
+        }
     }
     const rememberedCandidatesCount = validMobs.filter(m => m.memoryOnly).length;
-    HeroLogger.emit('DEBUG', 'EXP_VISIBLE_CANDIDATES', `[EXP] Visible mobs: ${liveVisibleValidCount}, reachable: ${validMobs.length}, skipped temporary: ${skippedTemporaryCount}`, "#90caf9", { category: 'EXP', dedupeMs: 1200 });
+    HeroLogger.emit('DEBUG', 'EXP_VISIBLE_CANDIDATES', `[EXP] Visible mobs: ${liveVisibleValidCount}, reachable: ${validMobs.length}, unreachable: ${unreachableMobs}, skipped temporary: ${skippedTemporaryCount}`, "#90caf9", { category: 'EXP', dedupeMs: 1200 });
     HeroLogger.emit('DEBUG', 'EXP_REMEMBERED_CANDIDATES', `[EXP] remembered candidates count=${rememberedCandidatesCount}`, "#90caf9", { category: 'EXP', dedupeMs: 1200 });
     if (isExpMap && validMobs.length > 0) {
         resetClearedMapIfMobSeen(currMap, validMobs.length);
@@ -9949,6 +9979,10 @@ function runExpLogic() {
             }
 
             markMapTemporarilyCleared(currMap);
+            if (window.expSessionState.phase !== "TRAVEL_NEXT_MAP") {
+                window.expSessionState.phase = "TRAVEL_NEXT_MAP";
+                window.expSessionState.lastPhaseChangeAt = now;
+            }
             expCurrentTargetId = null;
             window.expFocusTarget = null;
             window.expCurrentTargetGroupKey = null;
@@ -9993,6 +10027,8 @@ function runExpLogic() {
             const routeState = getExpRouteState();
             routeState.targetExpMap = bestTargetMap;
             routeState.isTravellingToNextExpMap = true;
+            window.expSessionState.phase = "TRAVEL_NEXT_MAP";
+            window.expSessionState.lastPhaseChangeAt = now;
             HeroLogger.emit('INFO', 'EXP_SELECTED_NEXT_MAP', `[EXP] Selected next exp map: ${bestTargetMap}`, "#64b5f6", { category: 'EXP', dedupeMs: 1800 });
             if (isMapTemporarilyCleared(currMap)) {
                 HeroLogger.emit('INFO', 'EXP_CLEARED_CONTINUE_TRANSIT', `[EXP] Current route map is cleared, continuing transit: ${currMap} -> ${bestTargetMap}`, "#64b5f6", { category: 'EXP', dedupeMs: 2500 });
@@ -10104,6 +10140,10 @@ function runExpLogic() {
                 return;
             }
         }
+    }
+    if (isExpMap && validMobs.length > 0 && window.expSessionState.phase !== "CLEAR_MAP") {
+        window.expSessionState.phase = "CLEAR_MAP";
+        window.expSessionState.lastPhaseChangeAt = now;
     }
 }
 setInterval(runExpLogic, 400);
