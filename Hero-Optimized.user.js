@@ -9435,6 +9435,15 @@ function getExpRouteState() {
     return window.expRouteState;
 }
 
+function logOncePerKey(key, fn, ttlMs = 5000) {
+    if (!window.__heroLogOnceCache) window.__heroLogOnceCache = {};
+    const now = Date.now();
+    if ((window.__heroLogOnceCache[key] || 0) > now) return false;
+    window.__heroLogOnceCache[key] = now + ttlMs;
+    try { fn(); } catch(e) {}
+    return true;
+}
+
 function getExpAllowedMapSet() {
     const maps = getCurrentExpHuntMaps();
     return new Set((maps || []).map(m => normMapName(m)));
@@ -9544,7 +9553,9 @@ function runExpLogic() {
             stopRushBecauseExpMapReached(currMapEarly, reachedTarget ? 'exp_tick_reached_target_map' : 'exp_tick_reached_map_with_mobs');
             routeStateEarly.isTravellingToNextExpMap = false;
         } else if (isExpMapEarly && isMapTemporarilyCleared(currMapEarly)) {
-            HeroLogger.emit('INFO', 'EXP_IGNORE_CLEARED_CURRENT', `[EXP] Ignoring current exp map because it is temporarily cleared: ${currMapEarly}`, "#90a4ae", { category: 'ROUTE', dedupeMs: 3000 });
+            logOncePerKey(`exp_ignore_cleared:${currMapEarly}`, () => {
+                HeroLogger.emit('DEBUG', 'EXP_IGNORE_CLEARED_CURRENT', `[EXP] Ignoring current exp map because it is temporarily cleared: ${currMapEarly}`, "#90a4ae", { category: 'ROUTE', dedupeMs: 6000 });
+            }, 6000);
         }
     }
 
@@ -9855,7 +9866,9 @@ function runExpLogic() {
     const shouldFightHere = isExpMap || temporaryExpMode;
     const shouldKeepBerserkInRoute = shouldClearCurrentMapNow(currMap, validMobs.length) && !window.isRushing;
     if (!shouldKeepBerserkInRoute && window.isRushing) {
-        HeroLogger.emit('INFO', 'BERSERK_OFF_TRAVEL', `[Berserk] kept OFF: travelling_to_next_exp_map`, "#ffb74d", { category: 'ROUTE', dedupeMs: 4000 });
+        logOncePerKey(`berserk_off_travel:${currMap}`, () => {
+            HeroLogger.emit('DEBUG', 'BERSERK_OFF_TRAVEL', `[Berserk] kept OFF: travelling_to_next_exp_map`, "#ffb74d", { category: 'ROUTE', dedupeMs: 10000 });
+        }, 10000);
     }
     setExpBerserkState(shouldKeepBerserkInRoute);
     if (window.RouteCombatFSM) {
@@ -12861,7 +12874,9 @@ if (isDead) {
         window.autoSellState = { active: false, step: 0, oldGold: 0, bagToSell: 1, nextActionTime: 0, lastFreeSlots: 0, failedNPCs: [], shopWaitStartTime: 0, targetNpc: null, wasExpingBeforeSell: false, wasBerserkOn: false };
         window.runSuperSellerBagAndAccept = function(bagNo, delay = 250) {
             const root = typeof Engine !== 'undefined' && Engine.shop && Engine.shop.wnd && Engine.shop.wnd.$ ? Engine.shop.wnd.$[0] : document;
-            const btn = root.querySelector(`.btn-num.grab-bag-${bagNo}`);
+            const btn = root.querySelector(`.btn-num.grab-bag-${bagNo}`)
+                || root.querySelector(`.btn-num.grab-bag-${bagNo - 1}`)
+                || root.querySelector(`[class*='grab-bag-${bagNo}']`);
             if (!btn) return false;
             if (window.jQuery) jQuery(btn).trigger("click");
             btn.click();
@@ -12869,18 +12884,23 @@ if (isDead) {
             btn.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));
             btn.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
             setTimeout(() => {
+                const basketHasItems = !!(Engine?.shop?.basket?.items && Object.keys(Engine.shop.basket.items).length > 0);
                 if (typeof Engine !== 'undefined' && Engine.shop && Engine.shop.basket && typeof Engine.shop.basket.finalize === 'function') {
                     Engine.shop.basket.finalize();
                 }
-                const acceptBtn = [...root.querySelectorAll("button, div, a, span")].find(el => /akceptuj|sprzedaj/i.test((el.textContent || "").trim()) && el.offsetParent);
+                const acceptBtn = [...root.querySelectorAll("button, div, a, span")].find(el => /akceptuj|sprzedaj|zatwierdź|zatwierdz/i.test((el.textContent || "").trim()) && el.offsetParent);
                 if (acceptBtn) {
                     if (window.jQuery) jQuery(acceptBtn).trigger("click");
+                    acceptBtn.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
+                    acceptBtn.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));
                     acceptBtn.click();
                     acceptBtn.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
                 }
-                if (window.logHero) window.logHero(`✅ Zaakceptowano sprzedaż torby ${bagNo}.`, "#8bc34a");
-                if (window.logExp) window.logExp(`✅ Zaakceptowano sprzedaż torby ${bagNo}.`, "#8bc34a");
-            }, delay);
+                if (basketHasItems) {
+                    if (window.logHero) window.logHero(`✅ Zaakceptowano sprzedaż torby ${bagNo}.`, "#8bc34a");
+                    if (window.logExp) window.logExp(`✅ Zaakceptowano sprzedaż torby ${bagNo}.`, "#8bc34a");
+                }
+            }, Math.max(350, delay));
             return true;
         };
 
@@ -13183,8 +13203,8 @@ window.openShopAsync = async (namePart) => {
                 } else if (window.autoSellState.step === 3) {
                     let s = typeof window.getBagStats === 'function' ? window.getBagStats() : { bagsCount: 4 };
                     if (window.autoSellState.bagToSell <= s.bagsCount) {
-                        window.runSuperSellerBagAndAccept(window.autoSellState.bagToSell, 300);
-                        window.autoSellState.bagToSell++;
+                        const sellTriggered = window.runSuperSellerBagAndAccept(window.autoSellState.bagToSell, 450);
+                        if (sellTriggered) window.autoSellState.bagToSell++;
                         window.autoSellState.nextActionTime = Date.now() + 1500;
                     } else {
                         window.autoSellState.step = 4;
