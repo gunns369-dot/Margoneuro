@@ -5298,7 +5298,7 @@ function initGUI() {
         const mainGui = document.createElement('div'); mainGui.id = 'heroNavGUI'; mainGui.className = 'hero-window';
         mainGui.innerHTML = `
             <div class="gui-header">
-                <div id="guiHeaderTitle" style="margin-right:5px; color:#00e5ff; text-shadow: 0 0 5px #00e5ff; font-weight:900;">Margoneuro <span style="color:#a99a75; font-size:10px; font-weight:700;">v64.6</span></div>
+                <div id="guiHeaderTitle" style="margin-right:5px; color:#00e5ff; text-shadow: 0 0 5px #00e5ff; font-weight:900;">Margoneuro</div>
                <div class="header-buttons">
                     <button id="btnGoToTop" style="color:#00acc1; border-color:#00acc1;"><span class="btn-icon">📍</span><span>IDŹ DO</span></button>
                     <button id="btnOpenMaps" style="color:#2196f3; border-color:#2196f3;"><span class="btn-icon">🗺️</span><span>Mapy</span></button>
@@ -8226,6 +8226,7 @@ const MonsterMemory = {
     },
     onTargetNotFound(mapId, targetRef) {
         const mapKey = normMapName(mapId);
+        const isRedMap = !!(Engine?.map?.d?.pvp === 2 && normMapName(Engine?.map?.d?.name || '') === mapKey);
         const key = [...this.items.keys()].find(k => {
             if (!k.startsWith(`${mapKey}|`)) return false;
             const mob = this.items.get(k);
@@ -8241,12 +8242,18 @@ const MonsterMemory = {
         if (!key) return null;
         const m = this.items.get(key);
         m.failCount = (m.failCount || 0) + 1;
-        m.aliveScore = Math.max(0, (m.aliveScore || 1) - 0.35);
-        // POPRAWKA (EXP): Traktujemy "zniknięcie celu" jako potencjalny kill i ustawiamy cooldown respawnu.
-        // Respawn można ręcznie zmienić przez botSettings.exp.staticMobRespawnMs (domyślnie 20s).
+        const scorePenalty = isRedMap ? 0.16 : 0.35;
+        m.aliveScore = Math.max(0, (m.aliveScore || 1) - scorePenalty);
+        // Na czerwonej mapie mob potrafi "mignąć" przez desync/radar, więc nie zabijamy pamięci od razu.
+        // Cooldown respawnu zakładamy dopiero po kilku kolejnych porażkach.
         const respawnMs = Math.max(3000, parseInt(botSettings?.exp?.staticMobRespawnMs ?? 20000, 10) || 20000);
-        m.cooldownUntil = Date.now() + respawnMs + (m.failCount * 500);
-        if (m.failCount >= 6) this.items.delete(key);
+        if (isRedMap && m.failCount < 3) {
+            m.cooldownUntil = 0;
+        } else {
+            m.cooldownUntil = Date.now() + respawnMs + (m.failCount * 500);
+        }
+        const maxFailsBeforeDelete = isRedMap ? 8 : 6;
+        if (m.failCount >= maxFailsBeforeDelete) this.items.delete(key);
         return m;
     },
     getLikelyAliveForMap(mapId, opt = {}) {
@@ -14211,7 +14218,7 @@ if (
                                 const retryCount = Number(window.expAntiStuckRetryByTarget[String(stuckTargetId)] || 0);
                                 if (retryCount < 1) {
                                     window.expAntiStuckRetryByTarget[String(stuckTargetId)] = retryCount + 1;
-                                    if (window.logExp) window.logExp("[ANTI-STUCK] Retrying same target", "#ffb74d");
+                                    if (window.logExp) window.logExp("[ANTI-STUCK] Retry target once (potem retarget z radaru)", "#ffb74d");
                                 } else {
                                     const mm = (typeof MonsterMemory !== 'undefined' && MonsterMemory?.onTargetNotFound) ? MonsterMemory.onTargetNotFound(currentMapName, stuckTargetId) : null;
                                     const stuckMob =
@@ -14219,11 +14226,31 @@ if (
                                         (window.expFocusTarget && String(window.expFocusTarget.id) === String(stuckTargetId) ? window.expFocusTarget : null) ||
                                         { id: stuckTargetId, nick: String(stuckTargetId), lvl: 0, ranga: '' };
                                     markTargetIgnoredOnMap(currentMapName, stuckMob, 'anti_stuck');
-                                    if (window.logExp) window.logExp(`[ANTI-STUCK] Temporarily skipping target for 8s (${stuckTargetId})`, "#ffb74d");
+                                    if (window.logExp) window.logExp(`[ANTI-STUCK] Skip celu ${stuckTargetId}, wybieram nowy z radaru/pamięci`, "#ffb74d");
                                     window.expCurrentTargetGroupKey = null;
                                     expCurrentTargetId = null;
                                     window.expFocusTarget = null;
                                     window.expLastTargetNotFoundAt = Date.now();
+                                    if (window.expMonsterCache && stuckMob) {
+                                        const stuckKey = String(stuckTargetId);
+                                        const fromCache = window.expMonsterCache.get(stuckKey);
+                                        const rememberKey = fromCache?.mmKey || (typeof MonsterMemory !== 'undefined' ? MonsterMemory.keyFor(currentMapName, {
+                                            nick: stuckMob.nick || stuckMob.name || stuckTargetId,
+                                            x: stuckMob.x,
+                                            y: stuckMob.y
+                                        }) : null);
+                                        if (rememberKey && fromCache) {
+                                            window.expMonsterCache.set(`mem:${rememberKey}`, {
+                                                ...fromCache,
+                                                cacheKey: `mem:${rememberKey}`,
+                                                visible: false,
+                                                memoryOnly: true,
+                                                id: fromCache.id ?? stuckTargetId,
+                                                mmKey: rememberKey,
+                                                lastSeenAt: Date.now()
+                                            });
+                                        }
+                                    }
                                 }
                             } else if (window.logExp && (window.expCurrentTargetGroupKey || window.expCurrentTargetId || window.expFocusTarget)) {
                                 window.logExp("🎯 [Anti-Stuck] Resetuję aktualny cel i wybieram nowy.", "#ffb74d");
