@@ -9227,8 +9227,9 @@ function pickBestExpTarget(validMobs, distMap) {
 
     groups.sort((a,b)=>a.score-b.score);
     let best = groups[0];
-    if (window.expCurrentTargetId != null) {
-        const currentGroup = groups.find(g => (g.bestTargetMob?.id || g.mobs?.[0]?.id) == window.expCurrentTargetId);
+    if ((window.expCurrentTargetId ?? expCurrentTargetId) != null) {
+        const activeTargetId = window.expCurrentTargetId ?? expCurrentTargetId;
+        const currentGroup = groups.find(g => (g.bestTargetMob?.id || g.mobs?.[0]?.id) == activeTargetId);
         if (currentGroup && best && (currentGroup.score <= best.score + 1.8)) {
             best = currentGroup; // histereza przełączania celu
         }
@@ -9741,6 +9742,7 @@ function runExpLogic() {
     const targetGroupSize = Math.max(1, Number(bestChoice?.group?.mobs?.length) || 1);
     window.expCurrentTargetGroupKey = selectedGroupKey;
     expCurrentTargetId = target ? (target.id || null) : null;
+    window.expCurrentTargetId = expCurrentTargetId;
 
     const berserkEnabledNow = !!(botSettings?.berserk?.enabled || Engine?.settings?.d?.fight_auto_solo);
     // Domyślnie walczymy WYŁĄCZNIE na mapach z trasy expowiska.
@@ -14217,7 +14219,7 @@ if (
     window.isExping &&
     (
         (window.expMapTransitionCooldown && Date.now() < window.expMapTransitionCooldown) ||
-        (!window.expCurrentTargetGroupKey && !(window.expCurrentTargetId ?? window.expFocusTarget?.id))
+        (!window.expCurrentTargetGroupKey && !((window.expCurrentTargetId ?? expCurrentTargetId) ?? window.expFocusTarget?.id))
     )
 ) {
     window.stuckIdleCount = 0;
@@ -14251,7 +14253,7 @@ if (
                         else if (window.logHero) window.logHero(antiStuckMsg, "#00e5ff");
 
                         if (window.isExping) {
-                            const stuckTargetId = window.expFocusTarget?.id ?? window.expCurrentTargetId ?? null;
+                            const stuckTargetId = window.expFocusTarget?.id ?? (window.expCurrentTargetId ?? expCurrentTargetId) ?? null;
                             const currentMapName = Engine?.map?.d?.name;
                             if (stuckTargetId != null && currentMapName) {
                                 window.expAntiStuckRetryByTarget = window.expAntiStuckRetryByTarget || {};
@@ -15117,9 +15119,10 @@ function refreshRadarGroupsCache(force = false) {
         currentTarget = serverGroups.find(g => g.key === window.expCurrentTargetGroupKey) || null;
     }
 
-    if (!currentTarget && window.isExping && typeof expCurrentTargetId !== 'undefined' && expCurrentTargetId) {
+    const activeTargetId = window.expCurrentTargetId ?? expCurrentTargetId;
+    if (!currentTarget && window.isExping && activeTargetId) {
         for (const g of serverGroups) {
-            if (g.mobs && g.mobs.some(m => String(m.id) === String(expCurrentTargetId))) {
+            if (g.mobs && g.mobs.some(m => String(m.id) === String(activeTargetId))) {
                 currentTarget = g;
                 break;
             }
