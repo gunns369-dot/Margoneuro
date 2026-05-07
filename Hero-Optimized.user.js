@@ -9858,12 +9858,11 @@ function runExpLogic() {
     window.expCurrentTargetId = expCurrentTargetId;
 
     const berserkEnabledNow = !!(botSettings?.berserk?.enabled || Engine?.settings?.d?.fight_auto_solo);
-    // Domyślnie walczymy WYŁĄCZNIE na mapach z trasy expowiska.
-    // Opcja allowTransitFight jest ukrytym przełącznikiem awaryjnym (OFF by default),
-    // aby nie bić losowych mobów na mapach tranzytowych po teleportach.
-    const allowTransitFight = !!(botSettings?.exp?.allowTransitFight && botSettings?.berserk?.userEnabled && berserkEnabledNow);
-    if (!isExpMap && allowTransitFight) {
-        temporaryExpMode = hasNearbyReachableMobsForExp(10);
+    // W tranzycie nadal preferujemy dojście do celu, ale jeżeli po drodze są osiągalne moby
+    // to włączamy krótkie okno walki (bez konieczności ręcznego "allowTransitFight").
+    const allowTransitFight = !!(botSettings?.berserk?.userEnabled && berserkEnabledNow);
+    if (!isExpMap) {
+        temporaryExpMode = allowTransitFight && hasNearbyReachableMobsForExp(10);
         if (temporaryExpMode) {
             const tmpKey = `${currMap}|tmp-on`;
             if (window.expTransitTempFightLogKey !== tmpKey) {
@@ -9871,8 +9870,6 @@ function runExpLogic() {
                 window.expTransitTempFightLogKey = tmpKey;
             }
         }
-    } else if (!isExpMap && !allowTransitFight) {
-        temporaryExpMode = false;
     }
     const modeKey = `${currMap}|exp:${isExpMap}|tmp:${temporaryExpMode}`;
     if (window.expModeDebugLogKey !== modeKey) {
@@ -9882,7 +9879,7 @@ function runExpLogic() {
         window.expModeDebugLogKey = modeKey;
     }
     const shouldFightHere = isExpMap || temporaryExpMode;
-    const shouldKeepBerserkInRoute = shouldClearCurrentMapNow(currMap, validMobs.length) && !window.isRushing;
+    const shouldKeepBerserkInRoute = (shouldClearCurrentMapNow(currMap, validMobs.length) && !window.isRushing) || (!!temporaryExpMode && !!target);
     if (!shouldKeepBerserkInRoute && window.isRushing) {
         logOncePerKey(`berserk_off_travel:${currMap}`, () => {
             HeroLogger.emit('DEBUG', 'BERSERK_OFF_TRAVEL', `[Berserk] kept OFF: travelling_to_next_exp_map`, "#ffb74d", { category: 'ROUTE', dedupeMs: 10000 });
