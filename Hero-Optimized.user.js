@@ -8891,7 +8891,13 @@ function markTargetIgnoredOnMap(mapName, mob, reason = 'too_hard') {
     const targetKey = getExpTargetIgnoreKey(mob);
     if (!mapKey || !targetKey) return false;
     if (!(window.expIgnoredTargetsByMap[mapKey] instanceof Map)) window.expIgnoredTargetsByMap[mapKey] = new Map();
-    const ttlMs = reason === 'anti_stuck' ? 8000 : 10000;
+    const ttlMsByReason = {
+        anti_stuck: 4000,
+        radar_unreachable: 2500,
+        approach_fail_retry: 3500,
+        melee_fail_x3: 3000
+    };
+    const ttlMs = ttlMsByReason[reason] || 5000;
     window.expIgnoredTargetsByMap[mapKey].set(targetKey, Date.now() + ttlMs);
     HeroLogger.emit('INFO', 'TARGET_HARD_IGNORED_ON_MAP', `[ANTI-STUCK] Temporarily skipping target ${mob.nick || mob.id || '?'} for ${Math.round(ttlMs / 1000)}s (powód: ${reason})`, "#ff8a65", { category: 'COMBAT', dedupeMs: 2500 });
     return true;
@@ -9887,7 +9893,7 @@ function runExpLogic() {
             if (window.expFocusTarget && String(window.expFocusTarget.id) === String(target.id)) window.expFocusTarget = null;
             window.expLastTargetNotFoundAt = Date.now();
             expLastMissingTargetId = target.id ?? target.cacheKey ?? null;
-            expRetargetEarliestAt = window.expLastTargetNotFoundAt + Math.floor(Math.random() * 301);
+            expRetargetEarliestAt = window.expLastTargetNotFoundAt + 120 + Math.floor(Math.random() * 81);
             HeroLogger.emit('DEBUG', 'MEMORY_TARGET_GONE', `Zapamietany cel ${target.nick || target.id} nie istnieje przy ostatniej pozycji (cooldown=${mm?.cooldownUntil ? 'ON' : 'OFF'}).`, "#ff8a65", { category: 'COMBAT', dedupeMs: 2200 });
             return;
         }
@@ -9899,7 +9905,7 @@ function runExpLogic() {
             if (window.expFocusTarget && String(window.expFocusTarget.id) === String(target.id)) window.expFocusTarget = null;
             window.expLastTargetNotFoundAt = Date.now();
             expLastMissingTargetId = target.id ?? target.cacheKey ?? null;
-            expRetargetEarliestAt = window.expLastTargetNotFoundAt + Math.floor(Math.random() * 301);
+            expRetargetEarliestAt = window.expLastTargetNotFoundAt + 120 + Math.floor(Math.random() * 81);
             const skipReason = liveTargetMissing
                 ? 'nie istnieje'
                 : (liveTargetInCollision ? 'poza mapą/kolizja' : 'nieosiągalny/ściana');
@@ -9936,7 +9942,7 @@ function runExpLogic() {
                     if (window.expFocusTarget && String(window.expFocusTarget.id) === String(target.id)) window.expFocusTarget = null;
                     window.expLastTargetNotFoundAt = Date.now();
                     expLastMissingTargetId = target.id ?? target.cacheKey ?? null;
-                    expRetargetEarliestAt = window.expLastTargetNotFoundAt + Math.floor(Math.random() * 301);
+                    expRetargetEarliestAt = window.expLastTargetNotFoundAt + 120 + Math.floor(Math.random() * 81);
                     HeroLogger.emit('DEBUG', 'ATTACK_STUCK_TARGET_SKIP', `Pomijam cel ${target.nick || target.id} po ${window.expMeleeFailByTarget[targetKey]} nieudanych próbach (cooldown=${mm?.cooldownUntil ? 'ON' : 'OFF'}).`, "#ff8a65", { category: 'COMBAT', dedupeMs: 2400 });
                     window.expStandStillStart = null;
                     window.expStandStillTargetKey = null;
@@ -9981,7 +9987,7 @@ function runExpLogic() {
                     markTargetIgnoredOnMap(currMap, target, 'approach_fail_retry');
                     window.expLastTargetNotFoundAt = Date.now();
                     expLastMissingTargetId = target.id ?? target.cacheKey ?? null;
-                    expRetargetEarliestAt = window.expLastTargetNotFoundAt + Math.floor(Math.random() * 301);
+                    expRetargetEarliestAt = window.expLastTargetNotFoundAt + 120 + Math.floor(Math.random() * 81);
                     HeroLogger.emit('DEBUG', 'APPROACH_STUCK_TARGET_SKIP', `[ANTI-STUCK] 5x retry failed, temporarily skipping ${target.nick || target.id} (cooldown=${mm?.cooldownUntil ? 'ON' : 'OFF'}).`, "#ff8a65", { category: 'COMBAT', dedupeMs: 2400 });
                     approachState.targetKey = null;
                     return;
@@ -14338,7 +14344,20 @@ if (
                 if (window.lastStuckCheckPos.x === currentX && window.lastStuckCheckPos.y === currentY && window.lastStuckCheckPos.map === currentMap) {
                     window.stuckIdleCount++;
                     // Odskakuje dopiero po 6 sekundach fizycznego braku ruchu, jeśli żaden wyjątek z listy wyżej go nie uchronił
-                    if (window.stuckIdleCount >= 6) {
+                    const closeToFocusTarget = (() => {
+                        const focusId = window.expFocusTarget?.id ?? (window.expCurrentTargetId ?? expCurrentTargetId) ?? null;
+                        if (focusId == null) return false;
+                        const liveNpcs = typeof Engine?.npcs?.check === 'function' ? Engine.npcs.check() : Engine?.npcs?.d;
+                        const liveTargetRaw = liveNpcs && (liveNpcs[focusId]?.d || liveNpcs[focusId]);
+                        if (!liveTargetRaw || liveTargetRaw.dead || liveTargetRaw.del || liveTargetRaw.delete) return false;
+                        const dist = Math.max(Math.abs((Engine?.hero?.d?.x ?? 0) - liveTargetRaw.x), Math.abs((Engine?.hero?.d?.y ?? 0) - liveTargetRaw.y));
+                        return dist <= 2;
+                    })();
+                    if (closeToFocusTarget) {
+                        window.stuckIdleCount = 0;
+                        return;
+                    }
+                    if (window.stuckIdleCount >= 8) {
                         const antiStuckMsg = "[ANTI-STUCK] No movement for ~6000 ms, clearing path and jittering";
                         if (window.isExping && window.logExp) window.logExp(antiStuckMsg, "#00e5ff");
                         else if (window.logHero) window.logHero(antiStuckMsg, "#00e5ff");
