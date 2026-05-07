@@ -8822,7 +8822,7 @@ function isMapTemporarilyCleared(mapName) {
     if (!entry) return false;
     const ts = (typeof entry === 'object' && entry !== null) ? Number(entry.ts || entry.time || 0) : Number(entry);
     if (!ts) return false;
-    const clearTtlMs = 70 * 1000;
+    const clearTtlMs = Number(window.expClearedMapTtlMs || (5 * 60 * 1000));
     if (Date.now() - ts > clearTtlMs) {
         delete window.mapClearTimes[mapKey];
         delete window.mapClearTimes[mapName];
@@ -9319,6 +9319,7 @@ function stopRushBecauseExpMapReached(currMap, reason = 'exp_route_reached') {
 
 function runExpLogic() {
     if (!window.isExping) return;
+    if (window.__softPauseReason) return;
     if (typeof Engine === 'undefined' || !Engine.hero || !Engine.hero.d || !Engine.map || Engine.map.isLoading || !Engine.map.d.name) return;
     const now = Date.now();
     const currMapEarly = Engine.map.d.name;
@@ -9966,14 +9967,12 @@ function runExpLogic() {
                 }
                 window.rushToMap(back);
             } else {
-                if (window.logExp) window.logExp("🛑 Brak osiągalnej mapy do backtracku. Zatrzymuję EXP.", "#e53935");
-                if (typeof stopPatrol === 'function') stopPatrol(true);
-                else {
-                    window.isExping = false;
-                    window.expRunning = false;
-                    window.botRunning = false;
-                    window.margoneuroCurrentMode = "IDLE";
+                if (!window.expLastNoRouteLogAt || now - window.expLastNoRouteLogAt > 3500) {
+                    if (window.logExp) window.logExp("⏳ Brak dostępnej mapy z trasy EXP, czekam i ponawiam...", "#90a4ae");
+                    window.expLastNoRouteLogAt = now;
                 }
+                expLastActionTime = now + 900;
+                return;
             }
         }
     }
@@ -9987,7 +9986,7 @@ window.expDebugRouteState = function() {
         .filter(([k]) => k === getMapClearKey(k))
         .map(([k, v]) => {
             const ts = (typeof v === 'object' && v !== null) ? Number(v.ts || 0) : Number(v);
-            const left = Math.max(0, 70000 - (now - ts));
+            const left = Math.max(0, Number(window.expClearedMapTtlMs || (5 * 60 * 1000)) - (now - ts));
             return { key: k, name: v?.name || k, remainingMs: left };
         });
     const visible = typeof countVisibleExpTargetsOnCurrentMap === 'function' ? countVisibleExpTargetsOnCurrentMap(currMap) : null;
@@ -12993,6 +12992,8 @@ window.openShopAsync = async (namePart) => {
         window.__wasHeroModeBeforeCaptcha = false;
         window.__fullscreenByBotForTrap = false;
         window.__trapSolveStarted = false;
+        window.__softPauseReason = null;
+        window.__softPauseSnapshot = null;
         window.__margoclickerOnline = false;
         window.__lastMargoclickerProbeAt = 0;
         window.__trapSeenAt = 0;
@@ -13205,6 +13206,8 @@ window.openShopAsync = async (namePart) => {
             window.__captchaSolveLastAttemptAt = 0;
             window.margoneuroPausedByQuiz = false;
             window.margoneuroWasRunningBeforeQuiz = false;
+            window.__softPauseReason = null;
+            window.__softPauseSnapshot = null;
         }
 
         function setExpButtonStateForTrap(running) {
@@ -13236,6 +13239,8 @@ window.openShopAsync = async (namePart) => {
         function pauseBotsForTrap(snapshot) {
             const snap = snapshot || ensureTrapResumeSnapshot("full");
             window.__stoppingForCaptcha = true;
+            window.__softPauseReason = 'captcha_soft_pause';
+            window.__softPauseSnapshot = snap;
             noteQuizVisibleForSync(snap);
             if (!window.margoneuroPausedByQuiz) {
                 window.margoneuroPausedByQuiz = true;
@@ -13390,6 +13395,7 @@ window.openShopAsync = async (namePart) => {
         function resumeBotsAfterTrap(snapshot) {
             const snap = snapshot || window.__trapResumeSnapshot || null;
             if (!snap || !hasTrapResumeWork(snap)) return false;
+            if (window.margoneuroStoppedManually) return false;
 
             const now = Date.now();
             window.__trapLastResumeAt = now;
@@ -13409,6 +13415,8 @@ window.openShopAsync = async (namePart) => {
             if (snap.berserk && typeof syncBerserkState === 'function') {
                 syncBerserkState('captcha_resume');
             }
+            window.__softPauseReason = null;
+            window.__softPauseSnapshot = null;
 
             return resumed;
         }
@@ -13584,7 +13592,7 @@ window.openShopAsync = async (namePart) => {
                         }
                         const resumed = resumeBotsAfterTrap(resumeSnapshot);
                         if (resumed) {
-                            logQuizSync("Quiz zniknął, wznawiam bota");
+                            logQuizSync("[Trap] Solved / disappeared, resuming bot");
                             resetTrapResumeState();
                             if (window.logExp) window.logExp("▶ Bot wznowiony po zapadce.", "#4caf50");
                             if (window.logHero) window.logHero("▶ Patrol wznowiony po zapadce.", "#4caf50");
