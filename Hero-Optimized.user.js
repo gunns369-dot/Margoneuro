@@ -682,7 +682,21 @@
         }
     } catch (e) {}
 
-    let startOpt = options.find(el => safeText(el).includes("teleport"));
+    const isTeleportStartOption = (txt) => {
+        if (!txt) return false;
+        if (!txt.includes("teleport")) return false;
+        if (txt.includes("czy speln") || txt.includes("spelnia") || txt.includes("warunki")) return false;
+        if (txt.includes("kilka pytan") || txt.includes("na temat") || txt.includes("zakonu")) return false;
+        return txt.includes("chcial") || txt.includes("teleportowac") || txt.includes("przenies");
+    };
+
+    let startOpt = options.find(el => isTeleportStartOption(safeText(el)));
+    if (!startOpt) {
+        startOpt = options.find(el => {
+            const txt = safeText(el);
+            return txt.includes("teleportowac") || txt.includes("chcialem sie teleportowac") || txt.includes("chcialabym sie teleportowac");
+        });
+    }
     if (startOpt) {
         humanClick(startOpt, retryCallback);
         return;
@@ -12215,6 +12229,15 @@ window.renderEqItems = function(filterType = 'Wszystkie') {
     }
 
     function closeBattleEndScreen(reason = 'death') {
+        const now = Date.now();
+        const hasVisibleBattleUi = !!(
+            document.querySelector('.battle, .battle-window, .battle-close, .battle-close-button, .close-battle-btn')
+            || (typeof Engine !== 'undefined' && Engine?.battle?.show)
+        );
+        if (!hasVisibleBattleUi) return false;
+        if (reason === 'death_guard_retry' && now - (window.__lastBattleCloseAttemptAt || 0) < 1200) return false;
+        window.__lastBattleCloseAttemptAt = now;
+
         let clicked = false;
         try {
             if (typeof Engine !== 'undefined' && Engine.battle && typeof Engine.battle.close === 'function') {
