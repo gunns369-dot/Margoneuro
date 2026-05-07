@@ -4072,8 +4072,8 @@ window.executeRushStep = function() {
                 targetY = routeFallbackDoor.y;
                 doorInfo = "(Kontekst trasy)";
             } else if (liveDoor && liveDoor.reachable) {
-                targetX = liveDoor.x;
-                targetY = liveDoor.y;
+                targetX = liveDoor.stand?.x ?? liveDoor.x;
+                targetY = liveDoor.stand?.y ?? liveDoor.y;
                 doorInfo = "(Zasięg radaru)";
             } else if (baseDoor) {
                 let distMap = typeof buildDistanceMapFromHero === 'function' ? buildDistanceMapFromHero() : new Map();
@@ -4082,8 +4082,8 @@ window.executeRushStep = function() {
                     : null;
 
                 if (bestBaseCoord) {
-                    targetX = bestBaseCoord.x;
-                    targetY = bestBaseCoord.y;
+                    targetX = bestBaseCoord.stand?.x ?? bestBaseCoord.x;
+                    targetY = bestBaseCoord.stand?.y ?? bestBaseCoord.y;
                     doorInfo = `(Z pamięci bazy, d=${bestBaseCoord.pathDistance})`;
                 }
             }
@@ -4185,8 +4185,8 @@ window.executeRushStep = function() {
         let gateCoordSource = "none";
 
         if (liveDoor && liveDoor.reachable) {
-            exactX = liveDoor.x;
-            exactY = liveDoor.y;
+            exactX = liveDoor.stand?.x ?? liveDoor.x;
+            exactY = liveDoor.stand?.y ?? liveDoor.y;
             gateCoordSource = "live";
         } else if (baseDoor) {
             let distMap = typeof buildDistanceMapFromHero === 'function' ? buildDistanceMapFromHero() : new Map();
@@ -4194,8 +4194,8 @@ window.executeRushStep = function() {
                 ? pickBestReachableGatewayCoordFromBaseDoor(baseDoor, distMap, currentSysMap, nextMap)
                 : null;
             if (bestBaseCoord) {
-                exactX = bestBaseCoord.x;
-                exactY = bestBaseCoord.y;
+                exactX = bestBaseCoord.stand?.x ?? bestBaseCoord.x;
+                exactY = bestBaseCoord.stand?.y ?? bestBaseCoord.y;
                 gateCoordSource = "memory";
             }
         }
@@ -4891,8 +4891,8 @@ window.handleTeleportNPC = function(targetMap) {
         let exactX = null, exactY = null;
         const liveDoor = typeof getBestReachableGatewayToMap === 'function' ? getBestReachableGatewayToMap(targetMap) : null;
         if (liveDoor && liveDoor.reachable) {
-            exactX = liveDoor.x;
-            exactY = liveDoor.y;
+            exactX = liveDoor.stand?.x ?? liveDoor.x;
+            exactY = liveDoor.stand?.y ?? liveDoor.y;
         } else {
             const baseDoor = globalGateways[currentMap] && globalGateways[currentMap][targetMap];
             if (baseDoor) {
@@ -4901,8 +4901,8 @@ window.handleTeleportNPC = function(targetMap) {
                     ? pickBestReachableGatewayCoordFromBaseDoor(baseDoor, distMap, currentMap, targetMap)
                     : null;
                 if (bestBaseCoord) {
-                    exactX = bestBaseCoord.x;
-                    exactY = bestBaseCoord.y;
+                    exactX = bestBaseCoord.stand?.x ?? bestBaseCoord.x;
+                    exactY = bestBaseCoord.stand?.y ?? bestBaseCoord.y;
                 }
             }
         }
