@@ -8393,13 +8393,40 @@ window.expDryRunSimulation = function(type = 'gate-stuck-x5') {
         let consoleDiv = document.getElementById('expConsole');
         if (!consoleDiv) return;
         const normalizedMsg = normalizeConsoleMessage(msg);
+        const lowerMsg = normalizedMsg.toLowerCase();
+        const now = Date.now();
+
+        // Odcinamy spam techniczny i szybkie dublety, zostawiając tylko ważne sygnały.
+        const technicalStateSpam = lowerMsg.includes('state:') || lowerMsg.includes('podchodze:');
+        const technicalTickSpam = lowerMsg.includes('(tick)') || lowerMsg.includes('reason:tick');
+        const throttleMs = technicalTickSpam ? 12000 : (technicalStateSpam ? 3000 : 0);
+
+        if (!window.__expLogState) window.__expLogState = { lastMsg: '', lastAt: 0, suppressed: 0 };
+        const st = window.__expLogState;
+
+        if (throttleMs > 0 && st.lastMsg === normalizedMsg && (now - st.lastAt) < throttleMs) {
+            st.suppressed += 1;
+            return;
+        }
+
+        if (st.suppressed > 0) {
+            let sumTime = new Date().toLocaleTimeString('pl-PL', { hour12: false });
+            let summary = document.createElement('div');
+            summary.innerHTML = `<span style="color:#555;">[${sumTime}]</span> <span style="color:#777;">(pominięto ${st.suppressed} powtarzalnych logów)</span>`;
+            consoleDiv.appendChild(summary);
+            st.suppressed = 0;
+        }
+
+        st.lastMsg = normalizedMsg;
+        st.lastAt = now;
+
         let time = new Date().toLocaleTimeString('pl-PL', {hour12: false});
         let entry = document.createElement('div');
         entry.innerHTML = `<span style="color:#555;">[${time}]</span> <span style="color:${color};">${normalizedMsg}</span>`;
         consoleDiv.appendChild(entry);
         consoleDiv.scrollTop = consoleDiv.scrollHeight;
-        if (normalizedMsg.toLowerCase().includes('nie znaleziono przeciwnika')) {
-            window.expLastTargetNotFoundAt = Date.now();
+        if (lowerMsg.includes('nie znaleziono przeciwnika')) {
+            window.expLastTargetNotFoundAt = now;
         }
     };
 
