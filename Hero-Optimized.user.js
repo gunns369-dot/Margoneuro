@@ -9763,6 +9763,10 @@ function runExpLogic() {
     let skippedTemporaryCount = 0;
     for (let [id, mob] of window.expMonsterCache.entries()) {
         if (isTargetIgnoredOnMap(currMap, mob)) { skippedTemporaryCount++; continue; }
+        const mobLvl = parseInt(mob?.lvl, 10);
+        if (!Number.isFinite(mobLvl) || mobLvl < botSettings.exp.minLvl || mobLvl > botSettings.exp.maxLvl) {
+            continue;
+        }
         let bestDist = Infinity;
         let reachable = false;
         for (let dx = -1; dx <= 1; dx++) {
