@@ -5471,7 +5471,7 @@ function initGUI() {
                     <div id="accRouteContent" style="display:none; padding: 8px; background: rgba(0,0,0,0.3); border: 1px solid #009688; border-top: none; margin-bottom: 5px;">
                         <label style="color:#00e5ff; font-size:10px; cursor:pointer; font-weight:bold; margin-bottom:6px; display:block;"><input type="checkbox" id="autoChangeExpRoute" ${botSettings.exp.autoChangeRoute ? 'checked' : ''}> Automatyczna zmiana expowiska</label>
                         <input type="hidden" id="expRange" value="999">
-                       <label style="color:#a99a75; font-size:11px; margin-top:2px; display:flex; justify-content:space-between; align-items:center;">Baza map: <div style="display:flex; gap:8px;"><span id="btnOptimizeExpRoute" style="color:#00e5ff; cursor:pointer; font-weight:bold;" title="Automatycznie ułóż i połącz mapy w pętlę">Optymalizuj</span><span id="btnClearExpRoute" style="color:#e53935; cursor:pointer; font-weight:bold;" title="Wyczyść całą trasę">Wyczyść</span></div></label>
+                       <label style="color:#a99a75; font-size:11px; margin-top:2px; display:flex; justify-content:space-between; align-items:center;">Baza map: <div style="display:flex; gap:8px;"><span id="btnClearExpRoute" style="color:#e53935; cursor:pointer; font-weight:bold;" title="Wyczyść całą trasę">Wyczyść</span></div></label>
                         <div id="expMapList" style="border:1px solid #3a3020; background:#000; overflow-y:auto; min-height:80px; max-height:160px; padding:2px;"></div>
                         <div style="display:flex; gap:4px; margin-top:6px;">
                             <button id="btnOpenExpBase" class="btn-sepia" style="flex:1; padding:6px; background:#00838f;">Baza expowisk</button>
@@ -6124,9 +6124,6 @@ bindChange('useTeleportsEq', (e) => { botSettings.exp.useTeleportsEq = e.target.
             }, 100);
         });
 
-        bindClick('btnOptimizeExpRoute', () => {
-            if (typeof window.optimizeExpRoute === 'function') window.optimizeExpRoute();
-        });
         bindClick('btnClearExpRoute', () => {
             if (typeof window.clearExpMaps === 'function') window.clearExpMaps();
         });
@@ -6145,9 +6142,6 @@ bindChange('useTeleportsEq', (e) => { botSettings.exp.useTeleportsEq = e.target.
            if(p) {
                 botSettings.exp.activeProfileName = p.name;
                 botSettings.exp.mapOrder = [...p.maps];
-
-                // AUTOMATYCZNA OPTYMALIZACJA PO ZAŁADOWANIU NOWEJ BAZY
-                if (typeof window.optimizeExpRoute === 'function') window.optimizeExpRoute(true);
 
                 localStorage.setItem('exp_map_order_v64', JSON.stringify(botSettings.exp.mapOrder));
                 let lvlMatch = p.name.match(/\((\d+)\s*lvl\)/i);
@@ -6937,9 +6931,8 @@ let btnAddRec = document.getElementById('btnAddSelectedRec');
                 });
 
                if(addedCount > 0) {
-                    // Wyrzucenie duplikatów i automatyczne zoptymalizowanie nowej grupy map
+                    // Wyrzucenie duplikatów bez automatycznej optymalizacji (zgodnie z nowym systemem wyboru map)
                     botSettings.exp.mapOrder = [...new Set(botSettings.exp.mapOrder)];
-                    if (typeof window.optimizeExpRoute === 'function') window.optimizeExpRoute(true);
 
                     localStorage.setItem('exp_map_order_v64', JSON.stringify(botSettings.exp.mapOrder));
 
@@ -10348,8 +10341,10 @@ function runExpLogic() {
             }
         }
 
-        if (bestTargetMap && !window.isRushing) {
-            const routeState = getExpRouteState();
+        const routeState = getExpRouteState();
+        const shouldForceTransit = !!(bestTargetMap && (isMapTemporarilyCleared(currMap) || routeState.targetExpMap !== bestTargetMap));
+
+        if (bestTargetMap && (!window.isRushing || shouldForceTransit)) {
             routeState.targetExpMap = bestTargetMap;
             routeState.isTravellingToNextExpMap = true;
             window.expSessionState.phase = "TRAVEL_NEXT_MAP";
