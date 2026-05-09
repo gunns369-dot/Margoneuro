@@ -5525,6 +5525,7 @@ function initGUI() {
                 <div class="nav-row"><label>Skrót klawiszowy (Chowaj/Pokaż bota):</label><input type="text" id="inpToggleKey" value="${botSettings.toggleKey || 'Kliknij i wciśnij klawisz...'}" readonly style="cursor:pointer; text-align:center;"></div>
 
               <div style="display:flex; gap:4px;">
+                    <button id="btnOpenLicenseSettings" class="btn btn-sepia" style="flex:1; padding:6px 2px; font-size:9px; background:#8a6d1f; border-color:#ffc107; color:#ffe082;">🔑 Licencja</button>
                     <button id="btnSaveSettings" class="btn btn-go-sepia" style="flex:1; padding:6px 2px; font-size:9px;">Zapisz opcje</button>
                     <button id="btnExportFile" class="btn btn-sepia" style="flex:1; padding:6px 2px; font-size:9px; background:#00838f; border-color:#00acc1;" title="Zapisuje bazę do pliku na dysk">📥 Pobierz plik</button>
                     <button id="btnImportFile" class="btn btn-sepia" style="flex:1; padding:6px 2px; font-size:9px; background:#e65100; border-color:#ef6c00;" title="Wczytuje bazę z pliku">📂 Wgraj plik</button>
@@ -6460,6 +6461,22 @@ selHero.addEventListener('change', (e) => {
         // OKNA I PRZYCISKI POMOCNICZE
 
         document.getElementById('btnOpenSettings').addEventListener('click', () => { let p = document.getElementById('heroSettingsGUI'); p.style.display = p.style.display === 'flex' ? 'none' : 'flex'; });
+        document.getElementById('btnOpenLicenseSettings')?.addEventListener('click', () => {
+            const settingsGuiEl = document.getElementById('heroSettingsGUI');
+            if (settingsGuiEl) settingsGuiEl.style.display = 'none';
+            const mainGuiEl = document.getElementById('heroNavGUI');
+            if (mainGuiEl && mainGuiEl.style.display === 'none') mainGuiEl.style.display = 'flex';
+            const expTab = document.getElementById('expModeToggle');
+            if (expTab && typeof expTab.click === 'function') expTab.click();
+            setTimeout(() => {
+                const header = document.getElementById('accLicense');
+                if (header) {
+                    const content = document.getElementById('accLicenseContent');
+                    if (content && content.style.display !== 'block') toggleSettingsAcc('accLicense');
+                    header.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            }, 50);
+        });
         function renderLicenseSection() {
             const formatDate = (value) => {
                 if (!value) return '-';
@@ -6699,7 +6716,7 @@ selHero.addEventListener('change', (e) => {
             }
 
             container.innerHTML = filtered.map(mapName => `
-                <div class="list-item" style="cursor:pointer; border-left: 3px solid #00acc1;" onclick="document.getElementById('heroGoToGUI').style.display='none'; rushToMap('${mapName.replace(/'/g, "\\'")}')">
+                <div class="list-item goto-map-item" data-map-name="${String(mapName).replace(/"/g, '&quot;')}" style="cursor:pointer; border-left: 3px solid #00acc1;">
                     <span style="color:#d4af37; font-weight:bold;">${mapName}</span>
                     <span style="color:#00acc1; font-size:10px; font-weight:bold;">🏃 BIEGNIJ</span>
                 </div>
@@ -6730,6 +6747,18 @@ selHero.addEventListener('change', (e) => {
         if (inpGoToSearch) {
             inpGoToSearch.addEventListener('input', (e) => {
                 window.renderGoToMapsList(e.target.value);
+            });
+        }
+        const goToMapsContainer = document.getElementById('goToMapsListContainer');
+        if (goToMapsContainer) {
+            goToMapsContainer.addEventListener('click', (e) => {
+                const row = e.target && e.target.closest ? e.target.closest('.goto-map-item') : null;
+                if (!row) return;
+                const mapName = row.dataset.mapName || "";
+                if (!mapName) return;
+                const gui = document.getElementById('heroGoToGUI');
+                if (gui) gui.style.display = 'none';
+                if (typeof window.rushToMap === 'function') window.rushToMap(mapName);
             });
         }
 
