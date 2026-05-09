@@ -5471,13 +5471,13 @@ function initGUI() {
                     <div id="accRouteContent" style="display:none; padding: 8px; background: rgba(0,0,0,0.3); border: 1px solid #009688; border-top: none; margin-bottom: 5px;">
                         <label style="color:#00e5ff; font-size:10px; cursor:pointer; font-weight:bold; margin-bottom:6px; display:block;"><input type="checkbox" id="autoChangeExpRoute" ${botSettings.exp.autoChangeRoute ? 'checked' : ''}> Automatyczna zmiana expowiska</label>
                         <input type="hidden" id="expRange" value="999">
-                       <label style="color:#a99a75; font-size:11px; margin-top:2px; display:flex; justify-content:space-between; align-items:center;">Kolejność map: <div style="display:flex; gap:8px;"><span onclick="window.optimizeExpRoute()" style="color:#00e5ff; cursor:pointer; font-weight:bold;" title="Automatycznie ułóż i połącz mapy w pętlę">Optymalizuj</span><span onclick="window.clearExpMaps()" style="color:#e53935; cursor:pointer; font-weight:bold;" title="Wyczyść całą trasę">Wyczyść</span></div></label>
+                       <label style="color:#a99a75; font-size:11px; margin-top:2px; display:flex; justify-content:space-between; align-items:center;">Kolejność map: <div style="display:flex; gap:8px;"><span id="btnOptimizeExpRoute" style="color:#00e5ff; cursor:pointer; font-weight:bold;" title="Automatycznie ułóż i połącz mapy w pętlę">Optymalizuj</span><span id="btnClearExpRoute" style="color:#e53935; cursor:pointer; font-weight:bold;" title="Wyczyść całą trasę">Wyczyść</span></div></label>
                         <div id="expMapList" style="border:1px solid #3a3020; background:#000; overflow-y:auto; min-height:80px; max-height:160px; padding:2px;"></div>
                         <div style="display:flex; gap:4px; margin-top:6px;">
                             <button id="btnOpenExpBase" class="btn-sepia" style="flex:1; padding:6px; background:#00838f;">Baza expowisk</button>
                             <button id="btnOpenRecommendedExp" class="btn-sepia" style="flex:1; padding:6px; background:#4caf50;">Polecane</button>
                         </div>
-                        <button id="btnOpenInternalMap" class="btn-sepia" style="width:100%; margin-top:5px; padding:6px; background:#263238; border-color:#00acc1; color:#e0f7fa;" onclick="window.openInternalMapGraph()">Mapa trasy i przejść</button>
+                        <button id="btnOpenInternalMap" class="btn-sepia" style="width:100%; margin-top:5px; padding:6px; background:#263238; border-color:#00acc1; color:#e0f7fa;" >Mapa trasy i przejść</button>
                     </div>
 
                     <button id="btnStartExp" class="btn btn-go-sepia" style="margin-top:auto; padding: 6px; font-size: 12px; border: 1px solid #4caf50; color: #4caf50; font-weight:bold;">START</button>
@@ -6121,6 +6121,16 @@ bindChange('useTeleportsEq', (e) => { botSettings.exp.useTeleportsEq = e.target.
             setTimeout(() => {
                 if (typeof window.renderExpMaps === 'function') window.renderExpMaps();
             }, 100);
+        });
+
+        bindClick('btnOptimizeExpRoute', () => {
+            if (typeof window.optimizeExpRoute === 'function') window.optimizeExpRoute();
+        });
+        bindClick('btnClearExpRoute', () => {
+            if (typeof window.clearExpMaps === 'function') window.clearExpMaps();
+        });
+        bindClick('btnOpenInternalMap', () => {
+            if (typeof window.openInternalMapGraph === 'function') window.openInternalMapGraph();
         });
 
         bindClick('btnAutoPotSettings', () => {
@@ -10835,9 +10845,12 @@ window.expDebugRouteState = function() {
     };
 
 function clearExpMaps() {
+    if (!botSettings.exp || !Array.isArray(botSettings.exp.mapOrder)) botSettings.exp = { ...(botSettings.exp || {}), mapOrder: [] };
     botSettings.exp.mapOrder = [];
     localStorage.setItem('exp_map_order_v64', '[]');
+    if (typeof saveSettings === 'function') saveSettings();
     if (typeof window.renderExpMaps === 'function') window.renderExpMaps();
+    if (typeof window.logExp === 'function') window.logExp('🗑️ Wyczyściono trasę expowiska.', '#e53935');
 }
 
 window.clearExpMaps = clearExpMaps;
