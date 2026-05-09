@@ -4335,8 +4335,8 @@ window.executeRushStep = function() {
             if (attempts === 1) {
                 // krótki wait + retry kliknięcia
             } else if (attempts === 2) {
-                moved = GateRecovery.tryStep(cx, cy, [[0,1], [0,-1]]);
-                HeroLogger.emit('INFO', 'RECOVERY_STEP', `GateRecovery: krok w tył`, "#ffcc80");
+                moved = GateRecovery.tryAnyStep(cx, cy, exactX, exactY);
+                HeroLogger.emit('INFO', 'RECOVERY_STEP', `GateRecovery: krok odblokowujący (dowolny wolny kierunek)`, "#ffcc80");
             } else if (attempts === 3) {
                 moved = GateRecovery.tryStep(cx, cy, [[1,0], [-1,0], [1,1], [-1,-1]]);
                 HeroLogger.emit('INFO', 'RECOVERY_STEP', `GateRecovery: krok w bok`, "#ffcc80");
@@ -8355,18 +8355,35 @@ const MonsterMemory = {
 
 const GateRecovery = {
     state: { key: '', attempts: 0, blockedUntil: 0 },
+    moveTo(nx, ny) {
+        ActionExecutor.run('MOVE', { x: nx, y: ny }, () => {
+            if (Engine?.hero?.autoGoTo) Engine.hero.autoGoTo({ x: nx, y: ny });
+            else if (window.originalAutoWalk) window.originalAutoWalk.call(Engine.hero, nx, ny);
+            else if (Engine?.hero?.autoWalk) Engine.hero.autoWalk(nx, ny);
+        }, { throttleMs: 320 });
+        return true;
+    },
     tryStep(cx, cy, dirs) {
         for (const [dx, dy] of dirs) {
             const nx = cx + dx, ny = cy + dy;
             if (typeof Engine.map.checkCollision === 'function' && Engine.map.checkCollision(nx, ny)) continue;
-            ActionExecutor.run('MOVE', { x: nx, y: ny }, () => {
-                if (Engine?.hero?.autoGoTo) Engine.hero.autoGoTo({ x: nx, y: ny });
-                else if (window.originalAutoWalk) window.originalAutoWalk.call(Engine.hero, nx, ny);
-                else if (Engine?.hero?.autoWalk) Engine.hero.autoWalk(nx, ny);
-            }, { throttleMs: 320 });
-            return true;
+            return this.moveTo(nx, ny);
         }
         return false;
+    },
+    tryAnyStep(cx, cy, gateX, gateY) {
+        const dirs = [[1,0],[-1,0],[0,1],[0,-1],[1,1],[-1,-1],[1,-1],[-1,1]];
+        const candidates = [];
+        for (const [dx, dy] of dirs) {
+            const nx = cx + dx;
+            const ny = cy + dy;
+            if (typeof Engine.map.checkCollision === 'function' && Engine.map.checkCollision(nx, ny)) continue;
+            const dist = Math.abs(nx - gateX) + Math.abs(ny - gateY);
+            candidates.push({ nx, ny, dist, tie: Math.random() });
+        }
+        if (!candidates.length) return false;
+        candidates.sort((a, b) => (b.dist - a.dist) || (a.tie - b.tie));
+        return this.moveTo(candidates[0].nx, candidates[0].ny);
     }
 };
 
