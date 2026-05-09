@@ -5471,7 +5471,7 @@ function initGUI() {
                     <div id="accRouteContent" style="display:none; padding: 8px; background: rgba(0,0,0,0.3); border: 1px solid #009688; border-top: none; margin-bottom: 5px;">
                         <label style="color:#00e5ff; font-size:10px; cursor:pointer; font-weight:bold; margin-bottom:6px; display:block;"><input type="checkbox" id="autoChangeExpRoute" ${botSettings.exp.autoChangeRoute ? 'checked' : ''}> Automatyczna zmiana expowiska</label>
                         <input type="hidden" id="expRange" value="999">
-                       <label style="color:#a99a75; font-size:11px; margin-top:2px; display:flex; justify-content:space-between; align-items:center;">Kolejność map: <div style="display:flex; gap:8px;"><span id="btnOptimizeExpRoute" style="color:#00e5ff; cursor:pointer; font-weight:bold;" title="Automatycznie ułóż i połącz mapy w pętlę">Optymalizuj</span><span id="btnClearExpRoute" style="color:#e53935; cursor:pointer; font-weight:bold;" title="Wyczyść całą trasę">Wyczyść</span></div></label>
+                       <label style="color:#a99a75; font-size:11px; margin-top:2px; display:flex; justify-content:space-between; align-items:center;">Baza map: <div style="display:flex; gap:8px;"><span id="btnOptimizeExpRoute" style="color:#00e5ff; cursor:pointer; font-weight:bold;" title="Automatycznie ułóż i połącz mapy w pętlę">Optymalizuj</span><span id="btnClearExpRoute" style="color:#e53935; cursor:pointer; font-weight:bold;" title="Wyczyść całą trasę">Wyczyść</span></div></label>
                         <div id="expMapList" style="border:1px solid #3a3020; background:#000; overflow-y:auto; min-height:80px; max-height:160px; padding:2px;"></div>
                         <div style="display:flex; gap:4px; margin-top:6px;">
                             <button id="btnOpenExpBase" class="btn-sepia" style="flex:1; padding:6px; background:#00838f;">Baza expowisk</button>
@@ -9127,9 +9127,12 @@ function pickNextExpMapAfterClean(currentMap, mapsPool) {
         if (!path || path.length < 2) return null;
 
         const clearedPenalty = isMapTemporarilyCleared(candidate) ? 10 : 0;
+        const runtimeState = getCurrentExpMapRuntimeState(candidate);
+        const lastVisitedAt = Number(runtimeState?.lastVisitedAt || 0);
+        const revisitBonus = clearedPenalty > 0 ? (Math.min(60 * 60 * 1000, Math.max(0, now - lastVisitedAt)) / 60000) : 0;
         const orderPenalty = Math.max(0, orderedCandidates.indexOf(candidate));
-        const score = (path.length - 1) + (orderPenalty * 0.5) + clearedPenalty;
-        return { targetMap: candidate, path, score, isCleared: clearedPenalty > 0 };
+        const score = (path.length - 1) + (orderPenalty * 0.5) + clearedPenalty - revisitBonus;
+        return { targetMap: candidate, path, score, isCleared: clearedPenalty > 0, lastVisitedAt };
     };
 
     let best = null;
@@ -9145,6 +9148,29 @@ function pickNextExpMapAfterClean(currentMap, mapsPool) {
             const ranked = scoreCandidate(candidate);
             if (!ranked) continue;
             if (!best || ranked.score < best.score) best = ranked;
+        }
+    }
+
+    // Gdy cała baza map jest chwilowo "czysta", nie stój w miejscu:
+    // wybierz osiągalną mapę, na której byliśmy najdawniej (tiebreak: krótsza droga).
+    if (!best && pool.length) {
+        const reachableCleared = [];
+        for (const candidate of pool) {
+            if (!candidate || normMapName(candidate) === currNorm || isBanned(candidate)) continue;
+            let path = typeof getShortestPath === 'function' ? getShortestPath(currentMap, candidate, routePathOptions()) : null;
+            if ((!path || path.length < 2) && typeof getShortestPath === 'function') {
+                path = getShortestPath(currentMap, candidate, routePathOptions({ ignoreEdgeBans: true }));
+            }
+            if (!path || path.length < 2) continue;
+            const rs = getCurrentExpMapRuntimeState(candidate);
+            reachableCleared.push({ targetMap: candidate, path, lastVisitedAt: Number(rs?.lastVisitedAt || 0) });
+        }
+        reachableCleared.sort((a, b) => {
+            if (a.lastVisitedAt !== b.lastVisitedAt) return a.lastVisitedAt - b.lastVisitedAt;
+            return a.path.length - b.path.length;
+        });
+        if (reachableCleared.length) {
+            best = { ...reachableCleared[0], isCleared: true, score: 0 };
         }
     }
 
@@ -9750,6 +9776,10 @@ function runExpLogic() {
     let mapsPool = getCurrentExpHuntMaps();
     const matchedExpMap = findMatchingExpMapName(currMap, mapsPool);
     const isExpMap = !!matchedExpMap;
+    if (isExpMap) {
+        const rs = getCurrentExpMapRuntimeState(matchedExpMap || currMap);
+        rs.lastVisitedAt = now;
+    }
     let temporaryExpMode = false;
     syncBerserkForExpState('tick');
     window.expDecisionInfo = `Mapa: ${currMap} | tryb: ${isExpMap ? "EXP" : "TRANZYT"}`;
