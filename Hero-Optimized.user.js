@@ -8398,8 +8398,9 @@ window.expDryRunSimulation = function(type = 'gate-stuck-x5') {
 
         // Odcinamy spam techniczny i szybkie dublety, zostawiając tylko ważne sygnały.
         const technicalStateSpam = lowerMsg.includes('state:') || lowerMsg.includes('podchodze:');
-        const technicalTickSpam = lowerMsg.includes('(tick)') || lowerMsg.includes('reason:tick');
-        const throttleMs = technicalTickSpam ? 12000 : (technicalStateSpam ? 3000 : 0);
+        const technicalTickSpam = lowerMsg.includes('(tick)') || lowerMsg.includes('reason:tick') || lowerMsg.includes('scanning_current_map');
+        const machineChatter = lowerMsg.includes('marking_map_clean') || lowerMsg.includes('selecting_next_map') || lowerMsg.includes('transiting_to_map');
+        const throttleMs = technicalTickSpam ? 15000 : (machineChatter ? 8000 : (technicalStateSpam ? 4000 : 0));
 
         if (!window.__expLogState) window.__expLogState = { lastMsg: '', lastAt: 0, suppressed: 0 };
         const st = window.__expLogState;
@@ -9053,32 +9054,64 @@ function resetClearedMapIfMobSeen(mapName, visibleTargets) {
 }
 
 function pickNextExpMapAfterClean(currentMap, mapsPool) {
-    const pool = Array.isArray(mapsPool) ? mapsPool : [];
+    const pool = Array.isArray(mapsPool) ? mapsPool.filter(Boolean) : [];
     const currNorm = normMapName(currentMap);
     if (!pool.length) return null;
-    const currentIndex = pool.findIndex(m => normMapName(m) === currNorm);
 
+    const now = Date.now();
+    const isBanned = (mapName) => {
+        const rawBan = window.__bannedMaps?.[mapName];
+        const normBan = window.__bannedMaps?.[normMapName(mapName)];
+        const banUntil = Math.max(Number(rawBan || 0), Number(normBan || 0));
+        return !!(banUntil && now < banUntil);
+    };
+
+    const currentIndex = pool.findIndex(m => normMapName(m) === currNorm);
+    const orderedCandidates = [];
+
+    // Schemat: najpierw kolejność trasy (round-robin), potem fallback globalny.
     if (currentIndex >= 0) {
         for (let step = 1; step <= pool.length; step++) {
-            const candidate = pool[(currentIndex + step) % pool.length];
-            if (!candidate || normMapName(candidate) === currNorm) continue;
-            if (isMapTemporarilyCleared(candidate)) continue;
-            const rawBan = window.__bannedMaps?.[candidate];
-            const normBan = window.__bannedMaps?.[normMapName(candidate)];
-            const banUntil = Math.max(Number(rawBan || 0), Number(normBan || 0));
-            if (banUntil && Date.now() < banUntil) continue;
-            let path = typeof getShortestPath === 'function' ? getShortestPath(currentMap, candidate, routePathOptions()) : null;
-            if ((!path || path.length < 2) && typeof getShortestPath === 'function') {
-                path = getShortestPath(currentMap, candidate, routePathOptions({ ignoreEdgeBans: true }));
-            }
-            if (path && path.length > 1) return { targetMap: candidate, path, reason: 'route_order_reachable' };
+            orderedCandidates.push(pool[(currentIndex + step) % pool.length]);
+        }
+    } else {
+        orderedCandidates.push(...pool);
+    }
+
+    const scoreCandidate = (candidate) => {
+        if (!candidate || normMapName(candidate) === currNorm) return null;
+        if (isBanned(candidate)) return null;
+
+        let path = typeof getShortestPath === 'function' ? getShortestPath(currentMap, candidate, routePathOptions()) : null;
+        if ((!path || path.length < 2) && typeof getShortestPath === 'function') {
+            path = getShortestPath(currentMap, candidate, routePathOptions({ ignoreEdgeBans: true }));
+        }
+        if (!path || path.length < 2) return null;
+
+        const clearedPenalty = isMapTemporarilyCleared(candidate) ? 10 : 0;
+        const orderPenalty = Math.max(0, orderedCandidates.indexOf(candidate));
+        const score = (path.length - 1) + (orderPenalty * 0.5) + clearedPenalty;
+        return { targetMap: candidate, path, score, isCleared: clearedPenalty > 0 };
+    };
+
+    let best = null;
+    for (const candidate of orderedCandidates) {
+        const ranked = scoreCandidate(candidate);
+        if (!ranked) continue;
+        if (!best || ranked.score < best.score) best = ranked;
+    }
+
+    // Fallback krytyczny: jeśli wszystko wygląda na "czyste", ale jest osiągalna mapa, wybierz ją zamiast stopować trasę.
+    if (!best) {
+        for (const candidate of pool) {
+            const ranked = scoreCandidate(candidate);
+            if (!ranked) continue;
+            if (!best || ranked.score < best.score) best = ranked;
         }
     }
 
-    const uncleared = getUnclearedExpMaps(currentMap, pool).filter(m => normMapName(m) !== currNorm);
-    const nearest = getClosestExpMapPath(currentMap, uncleared);
-    if (nearest?.targetMap && normMapName(nearest.targetMap) !== currNorm) return { targetMap: nearest.targetMap, path: nearest.path || null, reason: 'nearest_uncleared' };
-    return null;
+    if (!best) return null;
+    return { targetMap: best.targetMap, path: best.path, reason: best.isCleared ? 'reachable_cleared_fallback' : 'reachable_ranked' };
 }
 
 function resetExpMapClearProbe(mapName = null) {
