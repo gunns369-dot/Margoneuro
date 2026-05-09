@@ -10353,6 +10353,18 @@ function runExpLogic() {
         }
 
         const routeState = getExpRouteState();
+        // Stabilizacja celu tranzytu: jeśli już mamy aktywny cel i jesteśmy w drodze,
+        // nie przełączaj celu co tick tylko dlatego, że stoimy chwilowo na czystej mapie pośredniej.
+        const lockedTransitTarget = routeState?.targetExpMap;
+        if (window.isRushing && lockedTransitTarget && normMapName(lockedTransitTarget) !== normMapName(currMap)) {
+            const lockedBanUntil = Math.max(
+                Number(window.__bannedMaps?.[lockedTransitTarget] || 0),
+                Number(window.__bannedMaps?.[normMapName(lockedTransitTarget)] || 0)
+            );
+            if (!(lockedBanUntil && Date.now() < lockedBanUntil)) {
+                bestTargetMap = lockedTransitTarget;
+            }
+        }
         const shouldForceTransit = !!(bestTargetMap && (isMapTemporarilyCleared(currMap) || routeState.targetExpMap !== bestTargetMap));
 
         if (bestTargetMap && (!window.isRushing || shouldForceTransit)) {
