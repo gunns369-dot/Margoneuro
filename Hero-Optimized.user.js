@@ -7779,6 +7779,62 @@ const EXP_TARGET_FOCUS_LOCK_MS = 5600;
 window.lastHeroExpLevel = 0;
 
 window.mapClearTimes = window.mapClearTimes || {};
+window.mapMonsterMemory = window.mapMonsterMemory || {};
+const RESPAWN_FORMULA_ENABLED = true;
+const RESPAWN_RECHECK_FACTOR = 0.90;
+const RESPAWN_FALLBACK_CLEAN_TTL_MS = 5 * 60 * 1000;
+const RESPAWN_MIN_CLEAN_TTL_MS = 30 * 1000;
+const RESPAWN_MAX_CLEAN_TTL_MS = 1122 * 1000;
+const PUBLIC_RESPAWN_ANCHORS = [
+    { lvl: 1, seconds: 51 }, { lvl: 10, seconds: 126 }, { lvl: 25, seconds: 294 }, { lvl: 50, seconds: 514 },
+    { lvl: 100, seconds: 853 }, { lvl: 147, seconds: 1047 }, { lvl: 150, seconds: 1055 }, { lvl: 200, seconds: 1122 }
+];
+function formatMsShort(ms) { const s = Math.max(0, Math.round(ms / 1000)); return `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`; }
+function estimateMonsterRespawnSeconds(level) {
+    const lvl = Math.max(1, Number(level || 1));
+    if (lvl >= 200) return 1122;
+    for (let i = 0; i < PUBLIC_RESPAWN_ANCHORS.length - 1; i++) {
+        const a = PUBLIC_RESPAWN_ANCHORS[i], b = PUBLIC_RESPAWN_ANCHORS[i + 1];
+        if (lvl >= a.lvl && lvl <= b.lvl) return Math.round(a.seconds + ((b.seconds - a.seconds) * ((lvl - a.lvl) / (b.lvl - a.lvl))));
+    }
+    return 51;
+}
+function isRegularExpMonster(npc) {
+    if (!npc || npc.dead || npc.del || npc.delete) return false;
+    const t = Number(npc.type);
+    if (!Number.isFinite(t) || t < 2 || t === 4) return false;
+    const r = getMobRank(npc);
+    return r === 'normal' || r === 'elite1';
+}
+function updateMapMonsterMemory(mapName, npc) {
+    if (!mapName || !isRegularExpMonster(npc)) return;
+    const mapKey = getMapClearKey(mapName);
+    if (!window.mapMonsterMemory[mapKey]) window.mapMonsterMemory[mapKey] = { monsters: {}, maxMonsterLevel: 0, lastUpdatedAt: 0 };
+    const mem = window.mapMonsterMemory[mapKey];
+    const id = String(npc.id ?? `${npc.nick || 'mob'}:${npc.x}:${npc.y}`);
+    const now = Date.now();
+    const lvl = Number(npc.lvl) || 0;
+    const prev = mem.monsters[id] || {};
+    mem.monsters[id] = { ...prev, id: npc.id, nick: npc.nick, lvl, type: npc.type, wt: npc.wt, x: npc.x, y: npc.y, grp: npc.grp, firstSeenAt: prev.firstSeenAt || now, lastSeenAt: now };
+    if (lvl > (Number(mem.maxMonsterLevel) || 0)) {
+        mem.maxMonsterLevel = lvl;
+        HeroLogger.emit('DEBUG', 'EXP_RESPAWN_MAX_LVL', `[EXP][RESPAWN] Updated map max level: ${mapName}, maxLvl=${lvl}`, "#90caf9", { category: 'EXP', dedupeMs: 1200 });
+    }
+    mem.lastUpdatedAt = now;
+}
+function getMapEstimatedRespawnSeconds(mapName) {
+    const memory = window.mapMonsterMemory[getMapClearKey(mapName)];
+    const maxLevel = Number(memory?.maxMonsterLevel || 0);
+    if (!RESPAWN_FORMULA_ENABLED || !Number.isFinite(maxLevel) || maxLevel <= 0) return Math.round(RESPAWN_FALLBACK_CLEAN_TTL_MS / 1000);
+    return estimateMonsterRespawnSeconds(maxLevel);
+}
+function getMapCleanCooldownMs(mapName) {
+    const estimatedSeconds = getMapEstimatedRespawnSeconds(mapName);
+    let cooldownMs = Math.round(estimatedSeconds * RESPAWN_RECHECK_FACTOR * 1000);
+    cooldownMs = Math.max(RESPAWN_MIN_CLEAN_TTL_MS, cooldownMs);
+    cooldownMs = Math.min(RESPAWN_MAX_CLEAN_TTL_MS, cooldownMs);
+    return cooldownMs;
+}
 
 window.margoneuroReloadRecovery = window.margoneuroReloadRecovery || {
     recoveringAfterReload: false,
@@ -9054,13 +9110,14 @@ function isMapTemporarilyCleared(mapName) {
     const mapKey = getMapClearKey(mapName);
     const entry = window.mapClearTimes[mapKey];
     if (!entry) return false;
-    const ts = (typeof entry === 'object' && entry !== null) ? Number(entry.ts || entry.time || 0) : Number(entry);
-    if (!ts) return false;
-    const clearTtlMs = Number(window.expClearedMapTtlMs || (5 * 60 * 1000));
-    if (Date.now() - ts > clearTtlMs) {
+    const nextCheckAt = Number(entry?.nextCheckAt || 0);
+    if (nextCheckAt && Date.now() >= nextCheckAt) {
         delete window.mapClearTimes[mapKey];
+        HeroLogger.emit('DEBUG', 'EXP_RESPAWN_CLEAN_EXPIRED', `[EXP][RESPAWN] Clean cooldown expired: ${mapName}`, "#90a4ae", { category: 'EXP', dedupeMs: 2000 });
         return false;
     }
+    const ts = (typeof entry === 'object' && entry !== null) ? Number(entry.ts || entry.time || 0) : Number(entry);
+    if (!nextCheckAt && ts && Date.now() - ts > Number(window.expClearedMapTtlMs || RESPAWN_FALLBACK_CLEAN_TTL_MS)) { delete window.mapClearTimes[mapKey]; return false; }
     return true;
 }
 
@@ -9071,10 +9128,12 @@ function markMapTemporarilyCleared(mapName, reason = 'no_visible_or_remembered_r
     const mapKey = getMapClearKey(mapName);
     const prev = window.mapClearTimes[mapKey];
     if (prev?.ts && now - prev.ts < 15000 && prev.reason === reason) return;
-    window.mapClearTimes[mapKey] = { ts: now, name: mapName, reason };
+    const estimatedSeconds = getMapEstimatedRespawnSeconds(mapName);
+    const cooldownMs = getMapCleanCooldownMs(mapName);
+    window.mapClearTimes[mapKey] = { ts: now, name: mapName, reason: 'fully_cleared', cleanedAt: now, nextCheckAt: now + cooldownMs, cooldownMs, estimatedRespawnSeconds: estimatedSeconds, maxMonsterLevel: window.mapMonsterMemory[mapKey]?.maxMonsterLevel || null };
     const rs = getCurrentExpMapRuntimeState(mapName);
     rs.cleanedAt = now; rs.lastCleanReason = reason;
-    expLogOnce(`map_clean:${mapKey}`,`[EXP] Map clean: ${mapName}, reason=${reason}`,10000);
+    expLogOnce(`respawn_mark_clean:${mapKey}`,`[EXP][RESPAWN] Marked map clean: ${mapName}, maxLvl=${window.mapMonsterMemory[mapKey]?.maxMonsterLevel || 'n/a'}, estimatedRespawn=${formatMsShort(estimatedSeconds * 1000)}, recheckIn=${formatMsShort(cooldownMs)}`,10000);
 }
 
 function unmarkMapTemporarilyCleared(mapName, reason = 'manual') {
@@ -9082,7 +9141,7 @@ function unmarkMapTemporarilyCleared(mapName, reason = 'manual') {
     const mapKey = getMapClearKey(mapName);
     delete window.mapClearTimes[mapKey];
     delete window.mapClearTimes[mapName]; // backward compatibility
-    HeroLogger.emit('INFO', 'EXP_MAP_CLEAN_UNMARK', `[EXP] Mapa odblokowana, bo pojawił się mob: ${mapName} (${reason})`, "#64b5f6", { category: 'EXP', dedupeMs: 1200 });
+    HeroLogger.emit('INFO', 'EXP_MAP_CLEAN_UNMARK', `[EXP][RESPAWN] Removing clean mark: ${mapName}, reason=${reason}`, "#64b5f6", { category: 'EXP', dedupeMs: 1200 });
 }
 
 function unmarkMapCleared(mapName, reason = 'manual') {
@@ -9094,7 +9153,15 @@ function getUnclearedExpMaps(currentMap, mapsPool) {
     return (Array.isArray(mapsPool) ? mapsPool : [])
         .filter(m => !!m)
         .filter(m => normMapName(m) !== currNorm)
-        .filter(m => !isMapTemporarilyCleared(m))
+        .filter(m => {
+            const clean = isMapTemporarilyCleared(m);
+            if (clean) {
+                const mk = getMapClearKey(m);
+                const left = Math.max(0, Number(window.mapClearTimes?.[mk]?.nextCheckAt || 0) - Date.now());
+                expLogOnce(`route_skip_clean:${mk}`, `[EXP][ROUTE] Skipping clean map: ${m}, remaining=${formatMsShort(left)}`, 3500);
+            }
+            return !clean;
+        })
         .filter(m => {
             const rawBan = window.__bannedMaps?.[m];
             const normBan = window.__bannedMaps?.[normMapName(m)];
@@ -9196,6 +9263,7 @@ function pickNextExpMapAfterClean(currentMap, mapsPool) {
     }
 
     if (!best) return null;
+    expLogOnce(`route_next_map:${best.targetMap}`, `[EXP][ROUTE] Next available map selected: ${best.targetMap}`, 2000);
     return { targetMap: best.targetMap, path: best.path, reason: best.isCleared ? 'reachable_cleared_fallback' : 'reachable_ranked' };
 }
 
@@ -9893,6 +9961,15 @@ function runExpLogic() {
 
         const mobCacheKey = String(n.id ?? key);
         currentlyVisibleIds.add(mobCacheKey);
+        if (isExpMap && isRegularExpMonster(n)) {
+            updateMapMonsterMemory(currMap, n);
+            expLogOnce(`respawn_seen:${currMap}:${n.nick}:${n.lvl}`, `[EXP][RESPAWN] Seen monster: map=${currMap}, nick=${n.nick || n.id}, lvl=${n.lvl || '?'}`, 5000);
+            if (isMapTemporarilyCleared(currMap)) {
+                HeroLogger.emit('INFO', 'EXP_RESPAWN_MOB_ON_CLEAN', `[EXP][RESPAWN] Monster found on clean map, removing clean mark: ${currMap}`, "#81c784", { category: 'EXP', dedupeMs: 1500 });
+                unmarkMapTemporarilyCleared(currMap, 'monster_detected');
+                expEmptyScans = 0;
+            }
+        }
         const memoryEntry = MonsterMemory.upsertVisible(currMap, n, ranga);
         if (memoryEntry?.key) visibleMemoryKeys.add(memoryEntry.key);
         liveVisibleValidCount++;
