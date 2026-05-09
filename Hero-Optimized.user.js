@@ -9228,9 +9228,12 @@ function shouldMarkExpMapClearedAfterProbe(mapName, opts = {}) {
     const now = Date.now();
     const key = getMapClearKey(mapName);
     const isRedMap = !!opts.isRedMap;
-    const waitMs = isRedMap ? 3200 : 1800;
-    const minRescans = isRedMap ? 3 : 2;
-    const rescanEveryMs = 650;
+    const noFocusTarget = !((window.expCurrentTargetId ?? expCurrentTargetId) ?? window.expFocusTarget?.id);
+    // Na czerwonych mapach nie przeciągamy sztucznie decyzji, jeśli nie ma nic w widoku ani pamięci.
+    // Dzięki temu bot szybciej rusza dalej zamiast stać bez celu.
+    const waitMs = isRedMap ? 1400 : 1800;
+    const minRescans = isRedMap ? (noFocusTarget ? 1 : 2) : 2;
+    const rescanEveryMs = isRedMap ? 450 : 650;
 
     if (!window.expMapClearProbe || window.expMapClearProbe.mapKey !== key) {
         window.expMapClearProbe = {
