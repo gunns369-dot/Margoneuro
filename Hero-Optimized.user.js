@@ -8866,7 +8866,6 @@ function getExpMachine(){
 }
 function setExpState(next,reason=''){
     const m=getExpMachine(); if(!next||m.state===next) return false;
-    expLogOnce(`state:${m.state}->${next}`,`[EXP] State: ${m.state} -> ${next}${reason?` (${reason})`:''}`,2000);
     m.state=next; m.changedAt=Date.now(); return true;
 }
 function expLogOnce(key,msg,cooldownMs=7000){ return logOncePerKey(`exp:${key}`,()=>HeroLogger.emit('INFO','EXP_STATE_LOG',msg,'#90caf9',{category:'EXP',dedupeMs:cooldownMs}),cooldownMs); }
@@ -8884,7 +8883,6 @@ function syncBerserkForExpState(reason='exp_state_sync'){
     if(m.lastBerserkDesired===desired && Date.now()-m.lastBerserkSyncAt<1200) return;
     m.lastBerserkDesired=desired; m.lastBerserkSyncAt=Date.now();
     setExpBerserkState(desired);
-    expLogOnce(`berserk:${desired}:${st}`,`[EXP] Berserk ${desired?'ON':'OFF'} (state=${st}, reason=${reason})`,5000);
 }
 
 function getClosestExpMapPath(currMap, mapsPool = null) {
