@@ -5919,6 +5919,15 @@ if (btnExp) {
         const chk = document.getElementById('berserkEnabled');
 
             if (window.isExping) {
+                const trapVisibleOnStart = !!document.querySelector('.captcha, .margo-window[data-wnd="zapadka"], .captcha-window, .zapadka-window, .c-window[id="zapadka"], .pre-captcha, #captcha-alert, .zapadka-icon');
+                if (!trapVisibleOnStart) {
+                    window.__softPauseReason = null;
+                    window.__softPauseSnapshot = null;
+                    window.__trapBotPausedByCaptcha = false;
+                    if (window.__captchaPhase === 'manual_waiting' || window.__captchaPhase === 'solving' || window.__captchaPhase === 'pre' || window.__captchaPhase === 'resuming') {
+                        window.__captchaPhase = 'none';
+                    }
+                }
                 window.margoneuroStoppedManually = false;
                 window.botRunning = true;
                 window.expRunning = true;
