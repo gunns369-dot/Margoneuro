@@ -10055,7 +10055,8 @@ function runExpLogic() {
         window.expModeDebugLogKey = modeKey;
     }
     const shouldFightHere = isExpMap || temporaryExpMode;
-    const shouldKeepBerserkInRoute = (shouldClearCurrentMapNow(currMap, validMobs.length) && !window.isRushing) || (!!temporaryExpMode && !!target);
+    const hasAnyLiveTargetsOnExpMap = !!(isExpMap && (liveVisibleValidCount > 0 || validMobs.length > 0));
+    const shouldKeepBerserkInRoute = hasAnyLiveTargetsOnExpMap || ((shouldClearCurrentMapNow(currMap, validMobs.length) && !window.isRushing) || (!!temporaryExpMode && !!target));
     if (!shouldKeepBerserkInRoute && window.isRushing) {
         logOncePerKey(`berserk_off_travel:${currMap}`, () => {
             HeroLogger.emit('DEBUG', 'BERSERK_OFF_TRAVEL', `[Berserk] kept OFF: travelling_to_next_exp_map`, "#ffb74d", { category: 'ROUTE', dedupeMs: 10000 });
