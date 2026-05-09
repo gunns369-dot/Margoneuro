@@ -9015,7 +9015,8 @@ function markTargetIgnoredOnMap(mapName, mob, reason = 'too_hard') {
     };
     const ttlMs = ttlMsByReason[reason] || 5000;
     window.expIgnoredTargetsByMap[mapKey].set(targetKey, Date.now() + ttlMs);
-    HeroLogger.emit('INFO', 'TARGET_HARD_IGNORED_ON_MAP', `[ANTI-STUCK] Temporarily skipping target ${mob.nick || mob.id || '?'} for ${Math.round(ttlMs / 1000)}s (powód: ${reason})`, "#ff8a65", { category: 'COMBAT', dedupeMs: 2500 });
+    // Ten komunikat bywa bardzo głośny na mapach z nieosiągalnymi celami (np. ściany/dekoracje).
+    // Sam mechanizm pomijania celu zostaje, ale bez spamu w konsoli EXP.
     return true;
 }
 
