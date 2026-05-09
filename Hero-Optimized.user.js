@@ -601,6 +601,8 @@
         return !!document.querySelector('.dialogue-window-answer, .dialog-item, .dialog-choice, .option, .answer, .dialog-answer, #dialog li, .dialog-options li, .dialog-texts li, [data-option]');
     }
 
+
+
     function startNpcDialogRobust(npc, reason = 'npc') {
         const npcId = Number(npc?.id || npc);
         if (!Number.isFinite(npcId) || npcId <= 0) return false;
@@ -674,7 +676,7 @@
         }, humanDelay);
     };
 
-    const safeText = el => ((el && (el.innerText || el.textContent)) || "").toLowerCase();
+    const safeText = el => normalizeDialogText((el && (el.innerText || el.textContent)) || '');
 
     try {
         if (typeof learnTeleportDestinationsFromDialog === 'function') {
@@ -13119,8 +13121,13 @@ if (isDead) {
             const root = typeof Engine !== 'undefined' && Engine.shop && Engine.shop.wnd && Engine.shop.wnd.$ ? Engine.shop.wnd.$[0] : document;
             const btn = root.querySelector(`.btn-num.grab-bag-${bagNo}`)
                 || root.querySelector(`.btn-num.grab-bag-${bagNo - 1}`)
-                || root.querySelector(`[class*='grab-bag-${bagNo}']`);
-            if (!btn) return false;
+                || root.querySelector(`[class*='grab-bag-${bagNo}']`)
+                || [...root.querySelectorAll('.btn-num, button, .button, div, span, a')].find(el => normalizeDialogText(el.textContent || '').replace(/[^0-9]/g, '') === String(bagNo));
+            if (!btn) {
+                if (window.logHero) window.logHero(`⚠️ Nie znaleziono przycisku torby ${bagNo} w oknie sklepu.`, '#ff9800');
+                if (window.logExp) window.logExp(`⚠️ Nie znaleziono przycisku torby ${bagNo} w oknie sklepu.`, '#ff9800');
+                return false;
+            }
             if (window.jQuery) jQuery(btn).trigger("click");
             btn.click();
             btn.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
@@ -13131,13 +13138,15 @@ if (isDead) {
                 if (typeof Engine !== 'undefined' && Engine.shop && Engine.shop.basket && typeof Engine.shop.basket.finalize === 'function') {
                     Engine.shop.basket.finalize();
                 }
-                const acceptBtn = [...root.querySelectorAll("button, div, a, span")].find(el => /akceptuj|sprzedaj|zatwierdź|zatwierdz/i.test((el.textContent || "").trim()) && el.offsetParent);
-                if (acceptBtn) {
-                    if (window.jQuery) jQuery(acceptBtn).trigger("click");
-                    acceptBtn.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
-                    acceptBtn.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));
+                for (let attempt = 0; attempt < 3; attempt++) {
+                    const acceptBtn = [...root.querySelectorAll("button, div, a, span")].find(el => /akceptuj|sprzedaj|zatwierdz|zatwierdź/i.test(normalizeDialogText((el.textContent || "").trim())) && el.offsetParent);
+                    if (!acceptBtn) continue;
+                    if (window.jQuery) jQuery(acceptBtn).trigger('click');
+                    acceptBtn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+                    acceptBtn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
                     acceptBtn.click();
-                    acceptBtn.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+                    acceptBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+                    break;
                 }
                 if (basketHasItems) {
                     if (window.logHero) window.logHero(`✅ Zaakceptowano sprzedaż torby ${bagNo}.`, "#8bc34a");
@@ -13145,6 +13154,17 @@ if (isDead) {
                 }
             }, Math.max(350, delay));
             return true;
+        };
+
+        window.resumeExpAfterAutoSell = function() {
+            if (window.isExping) return true;
+            let btn = document.getElementById('btnStartExp')
+                || [...document.querySelectorAll('button, .button, a, div')].find(el => normalizeDialogText(el.textContent || '').includes('start'));
+            if (btn && typeof btn.click === 'function') btn.click();
+            if (typeof window.startExp === 'function') {
+                try { window.startExp(); } catch(e) {}
+            }
+            return !!window.isExping;
         };
 
         setInterval(() => {
@@ -13501,8 +13521,8 @@ window.openShopAsync = async (namePart) => {
                         }
 
                         if (shouldResumeExp && !window.isExping) {
-                            let btn = document.getElementById('btnStartExp');
-                            if (btn) btn.click();
+                            window.resumeExpAfterAutoSell();
+                            setTimeout(() => { if (!window.isExping) window.resumeExpAfterAutoSell(); }, 800);
                         }
                     }
                 }
