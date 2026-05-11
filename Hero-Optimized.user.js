@@ -4065,9 +4065,8 @@ window.executeRushStep = function() {
         let tp = typeof ZAKONNICY !== 'undefined' ? ZAKONNICY[currentSysMap] : null;
         let baseDoor = globalGateways[currentSysMap] && globalGateways[currentSysMap][nextMap];
         let isFakeDoor = baseDoor && tp && Math.abs(baseDoor.x - tp.x) <= 2 && Math.abs(baseDoor.y - tp.y) <= 2;
-        let sourceUnlocked = !!(botSettings.unlockedTeleports && botSettings.unlockedTeleports[currentSysMap]);
         let destinationUnlocked = !!(botSettings.unlockedTeleports && botSettings.unlockedTeleports[nextMap]);
-        let isTeleportRoute = tp && sourceUnlocked && (destinationUnlocked || isFakeDoor);
+        let isTeleportRoute = tp && (destinationUnlocked || isFakeDoor);
 
         if (isTeleportRoute) {
             if (window._lastRushNextMap !== nextMap) {
