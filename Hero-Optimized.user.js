@@ -634,7 +634,7 @@
     if (this.isClicking) return;
 
     let options = Array.from(
-        document.querySelectorAll('.answer, .dialog-answer, #dialog li, .dialog-options li, .dialog-texts li, [data-option]')
+        document.querySelectorAll('.dialogue-window-answer, .dialog-item, .dialog-choice, .option, .answer, .dialog-answer, #dialog li, .dialog-options li, .dialog-texts li, [data-option]')
     );
 
     if (options.length === 0) {
