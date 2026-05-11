@@ -9963,7 +9963,8 @@ function runExpLogic() {
         currentlyVisibleIds.add(mobCacheKey);
         if (isExpMap && isRegularExpMonster(n)) {
             updateMapMonsterMemory(currMap, n);
-            expLogOnce(`respawn_seen:${currMap}:${n.nick}:${n.lvl}`, `[EXP][RESPAWN] Seen monster: map=${currMap}, nick=${n.nick || n.id}, lvl=${n.lvl || '?'}`, 5000);
+            // Ograniczenie spamu: jeden log "seen monster" na mapę co 45s.
+            expLogOnce(`respawn_seen:${currMap}`, `[EXP][RESPAWN] Seen monster: map=${currMap}`, 45000);
             if (isMapTemporarilyCleared(currMap)) {
                 HeroLogger.emit('INFO', 'EXP_RESPAWN_MOB_ON_CLEAN', `[EXP][RESPAWN] Monster found on clean map, removing clean mark: ${currMap}`, "#81c784", { category: 'EXP', dedupeMs: 1500 });
                 unmarkMapTemporarilyCleared(currMap, 'monster_detected');
@@ -13225,9 +13226,12 @@ if (isDead) {
         window.autoSellState = { active: false, step: 0, oldGold: 0, bagToSell: 1, nextActionTime: 0, lastFreeSlots: 0, failedNPCs: [], shopWaitStartTime: 0, targetNpc: null, wasExpingBeforeSell: false, wasBerserkOn: false };
         window.runSuperSellerBagAndAccept = function(bagNo, delay = 250) {
             const root = typeof Engine !== 'undefined' && Engine.shop && Engine.shop.wnd && Engine.shop.wnd.$ ? Engine.shop.wnd.$[0] : document;
-            const btn = root.querySelector(`.btn-num.grab-bag-${bagNo}`)
-                || root.querySelector(`.btn-num.grab-bag-${bagNo - 1}`)
+            // Klient gry bywa niespójny (czasem numeracja 0-based, czasem 1-based),
+            // więc próbujemy oba warianty i kilka fallbacków.
+            const btn = root.querySelector(`.btn-num.grab-bag-${bagNo - 1}`)
+                || root.querySelector(`.btn-num.grab-bag-${bagNo}`)
                 || root.querySelector(`[class*='grab-bag-${bagNo}']`)
+                || root.querySelector(`[class*='grab-bag-${bagNo - 1}']`)
                 || [...root.querySelectorAll('.btn-num, button, .button, div, span, a')].find(el => normalizeDialogText(el.textContent || '').replace(/[^0-9]/g, '') === String(bagNo));
             if (!btn) {
                 if (window.logHero) window.logHero(`⚠️ Nie znaleziono przycisku torby ${bagNo} w oknie sklepu.`, '#ff9800');
@@ -13244,7 +13248,8 @@ if (isDead) {
                 if (typeof Engine !== 'undefined' && Engine.shop && Engine.shop.basket && typeof Engine.shop.basket.finalize === 'function') {
                     Engine.shop.basket.finalize();
                 }
-                for (let attempt = 0; attempt < 3; attempt++) {
+                let accepted = false;
+                for (let attempt = 0; attempt < 4; attempt++) {
                     const acceptBtn = [...root.querySelectorAll("button, div, a, span")].find(el => /akceptuj|sprzedaj|zatwierdz|zatwierdź/i.test(normalizeDialogText((el.textContent || "").trim())) && el.offsetParent);
                     if (!acceptBtn) continue;
                     if (window.jQuery) jQuery(acceptBtn).trigger('click');
@@ -13252,11 +13257,15 @@ if (isDead) {
                     acceptBtn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
                     acceptBtn.click();
                     acceptBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+                    accepted = true;
                     break;
                 }
-                if (basketHasItems) {
+                if (basketHasItems && accepted) {
                     if (window.logHero) window.logHero(`✅ Zaakceptowano sprzedaż torby ${bagNo}.`, "#8bc34a");
                     if (window.logExp) window.logExp(`✅ Zaakceptowano sprzedaż torby ${bagNo}.`, "#8bc34a");
+                } else if (basketHasItems && !accepted) {
+                    if (window.logHero) window.logHero(`⚠️ Torba ${bagNo}: brak przycisku akceptacji sprzedaży, ponawiam.`, "#ff9800");
+                    if (window.logExp) window.logExp(`⚠️ Torba ${bagNo}: brak przycisku akceptacji sprzedaży, ponawiam.`, "#ff9800");
                 }
             }, Math.max(350, delay));
             return true;
