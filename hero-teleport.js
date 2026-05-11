@@ -3,6 +3,28 @@ console.log("%c[HERO] Załadowano WZMOCNIONY moduł teleportacji (Pakiety Serwer
 
 window.HeroTeleportModule = {
     processDialog: function(targetMap, stopCallback, continueCallback, retryCallback) {
+        const normalize = (value) => String(value || '')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '');
+
+        const getAnswerNodes = () => Array.from(document.querySelectorAll(
+            'li.dialogue-window-answer.answer.line_option, .dialog-texts li, .dialog-options li, .answer, [data-option]'
+        )).filter((el) => normalize(el.textContent).length > 0);
+
+        const clickLikeUser = (el) => {
+            if (!el) return false;
+            ['mouseover', 'mouseenter', 'mousedown', 'mouseup', 'click'].forEach((type) => {
+                el.dispatchEvent(new MouseEvent(type, {
+                    bubbles: true,
+                    cancelable: true,
+                    view: window
+                }));
+            });
+            return true;
+        };
         
         let dialogBox = document.querySelector('.dialog-texts') || document.querySelector('.dialog-content');
         let isDialogOpen = dialogBox && dialogBox.offsetParent !== null;
@@ -44,42 +66,52 @@ window.HeroTeleportModule = {
         }
 
         // ETAP 2: Wybieranie opcji
-        let options = Array.from(document.querySelectorAll('.dialog-texts li, .dialog-options li, .answer, [data-option]'));
+        let options = getAnswerNodes();
         
         if (options.length > 0) {
             
             // A. Szukamy słowa "teleport", bo frazy mogą się różnić (Chciałabym / Chciałbym się teleportować)
-            let startOpt = options.find(el => el.innerText.toLowerCase().includes("teleport"));
+            let startOpt = options.find((el) => {
+                const txt = normalize(el.textContent);
+                return txt.includes('teleport') || txt.includes('przenies');
+            });
             if (startOpt) {
-                console.log(`%c[HERO] Klikam: ${startOpt.innerText.trim()}`, "color: #00acc1;");
-                startOpt.click(); 
+                console.log(`%c[HERO] Klikam: ${startOpt.textContent.trim()}`, "color: #00acc1;");
+                clickLikeUser(startOpt);
                 retryCallback();
                 return;
             }
 
             // B. Wybór miasta
-            let destOpt = options.find(el => el.innerText.toLowerCase().includes(targetMap.toLowerCase()));
+            const targetNeedle = normalize(targetMap);
+            let destOpt = options.find((el) => normalize(el.textContent).includes(targetNeedle));
             if (destOpt) {
                 
                 // Zabezpieczenie przed brakiem zezwolenia
-                if (destOpt.innerText.toLowerCase().includes("brak zezwolenia")) {
+                if (normalize(destOpt.textContent).includes("brak zezwolenia")) {
                     console.log(`%c[HERO] Zablokowane! Brak zezwolenia do: ${targetMap}!`, "color: red; font-weight: bold;");
-                    let closeOpt = options.find(el => el.innerText.toLowerCase().includes("nigdzie") || el.innerText.toLowerCase().includes("zakończ"));
-                    if (closeOpt) closeOpt.click();
+                    let closeOpt = options.find((el) => {
+                        const txt = normalize(el.textContent);
+                        return txt.includes('nigdzie') || txt.includes('zakoncz');
+                    });
+                    if (closeOpt) clickLikeUser(closeOpt);
                     stopCallback(); 
                     return;
                 }
 
                 console.log(`%c[HERO] 🚀 Cel: ${targetMap} -> Przenoszę!`, "color: #4caf50; font-weight: bold;");
-                destOpt.click();
+                clickLikeUser(destOpt);
                 continueCallback(); 
                 return;
             } else {
                 // Gdyby miasto było na drugiej stronie u zakonnika
-                let moreOpt = options.find(el => el.innerText.toLowerCase().includes("inne") || el.innerText.toLowerCase().includes("dalej") || el.innerText.toLowerCase().includes("pokaż więcej"));
+                let moreOpt = options.find((el) => {
+                    const txt = normalize(el.textContent);
+                    return txt.includes('inne') || txt.includes('dalej') || txt.includes('pokaz wiecej');
+                });
                 if(moreOpt) {
                     console.log(`%c[HERO] Szukam miasta na kolejnej stronie...`, "color: #00acc1;");
-                    moreOpt.click();
+                    clickLikeUser(moreOpt);
                     retryCallback();
                     return;
                 }
