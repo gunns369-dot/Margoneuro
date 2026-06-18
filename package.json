@@ -2,6 +2,7 @@
   "name": "hero-margonem",
   "private": true,
   "scripts": {
+    "build:margoworld": "node scripts/build-margoworld-static-knowledge.js",
     "test": "node --test tests/*.test.js"
   }
 }
