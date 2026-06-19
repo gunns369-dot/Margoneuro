@@ -5429,6 +5429,8 @@ function isMapKnownInGatewayBase(mapName) {
 
 
 
+var zakonStorageReady = false;
+
 function loadData() {
         let s1 = localStorage.getItem('hero_settings_db_v64') || localStorage.getItem('hero_settings_db_v61');
         if (s1) {
@@ -5460,6 +5462,9 @@ window.heroMapOrder = heroMapOrder;
         if (!window.__restoringHeroExpRoute && typeof saveCurrentHeroExpRoute === 'function') {
             try { saveCurrentHeroExpRoute('save_settings'); } catch (e) {}
         }
+        if (zakonStorageReady && !window.__restoringZakonHeroState && typeof saveCurrentHeroZakonState === 'function') {
+            try { saveCurrentHeroZakonState('save_settings'); } catch (e) {}
+        }
         localStorage.setItem('hero_settings_db_v64', JSON.stringify(botSettings));
     }
 
@@ -5476,6 +5481,12 @@ window.heroMapOrder = heroMapOrder;
         finishedKeys: {},
         lastTasks: []
     };
+
+    const ZAKON_BY_HERO_STORAGE_KEY = 'margoneuro_zakon_by_hero_v1';
+    const ZAKON_LAST_HERO_STORAGE_KEY = 'margoneuro_zakon_last_hero_key_v1';
+    let zakonLastHeroKey = '';
+    let zakonHeroWatcherTimer = null;
+    let zakonRestoringHeroState = false;
 
     const ZAKON_FALLBACK_NPCS = {
         "Thuzal": { x: 72, y: 20 },
@@ -5495,17 +5506,242 @@ window.heroMapOrder = heroMapOrder;
     let zakonLastAutoSellStartAt = 0;
     let zakonLastLog = new Map();
 
-    function ensureZakonSettings() {
-        botSettings.zakon = { ...ZAKON_DEFAULT_SETTINGS, ...(botSettings.zakon || {}) };
-        if (!Array.isArray(botSettings.zakon.lastTasks)) botSettings.zakon.lastTasks = [];
-        if (!botSettings.zakon.finishedKeys || typeof botSettings.zakon.finishedKeys !== 'object') botSettings.zakon.finishedKeys = {};
+    function getZakonHeroIdentity() {
+        try {
+            if (typeof getCurrentHeroIdentity === 'function') return getCurrentHeroIdentity();
+        } catch (_) {}
+        return { key: '', nick: '', lvl: 0, world: '' };
+    }
+
+    function normalizeZakonSettings(raw = {}, identity = null) {
+        const source = (raw && typeof raw === 'object') ? raw : {};
+        const zakon = { ...ZAKON_DEFAULT_SETTINGS, ...source };
+        zakon.city = zakon.city || 'auto';
+        zakon.maxActive = Math.max(1, Math.min(8, Number(zakon.maxActive) || 3));
+        zakon.autoAccept = zakon.autoAccept !== false;
+        zakon.autoFinish = zakon.autoFinish !== false;
+        zakon.autoStartExp = zakon.autoStartExp !== false;
+        zakon.selectedProfileIndex = Number.isFinite(Number(zakon.selectedProfileIndex)) ? Number(zakon.selectedProfileIndex) : -1;
+        zakon.selectedProfileName = String(zakon.selectedProfileName || '');
+        zakon.activeTaskKey = String(zakon.activeTaskKey || '');
+
+        const finished = (zakon.finishedKeys && typeof zakon.finishedKeys === 'object' && !Array.isArray(zakon.finishedKeys))
+            ? { ...zakon.finishedKeys }
+            : {};
         const now = Date.now();
-        for (const [key, until] of Object.entries(botSettings.zakon.finishedKeys)) {
-            if (!until || Number(until) < now) delete botSettings.zakon.finishedKeys[key];
+        for (const [key, until] of Object.entries(finished)) {
+            if (!until || Number(until) < now) delete finished[key];
         }
-        botSettings.zakon.maxActive = Math.max(1, Math.min(8, Number(botSettings.zakon.maxActive) || 3));
+        zakon.finishedKeys = finished;
+
+        const tasks = Array.isArray(zakon.lastTasks) ? zakon.lastTasks : [];
+        const seen = new Set();
+        zakon.lastTasks = tasks
+            .filter(task => task && typeof task === 'object')
+            .map(task => ({ ...task }))
+            .filter(task => {
+                const key = [
+                    task.key,
+                    task.title,
+                    task.city,
+                    task.mobName || task.mob || task.targetName,
+                    task.level || task.lvl
+                ].filter(Boolean).join('|').toLowerCase();
+                if (!key) return true;
+                if (seen.has(key)) return false;
+                seen.add(key);
+                return true;
+            });
+
+        if (identity && identity.key) {
+            zakon.ownerHeroKey = identity.key;
+            zakon.ownerHeroNick = identity.nick || '';
+            zakon.ownerHeroLvl = identity.lvl || 0;
+            zakon.ownerWorld = identity.world || '';
+        }
+        return zakon;
+    }
+
+    function readZakonHeroStore() {
+        try {
+            const parsed = JSON.parse(localStorage.getItem(ZAKON_BY_HERO_STORAGE_KEY) || '{}');
+            return (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
+        } catch (_) {
+            return {};
+        }
+    }
+
+    function writeZakonHeroStore(store) {
+        try {
+            localStorage.setItem(ZAKON_BY_HERO_STORAGE_KEY, JSON.stringify(store || {}));
+            return true;
+        } catch (e) {
+            console.warn('[ZAKON] Nie moge zapisac pamieci postaci', e);
+            return false;
+        }
+    }
+
+    function makeZakonStoredState(raw, identity, reason = 'save') {
+        const normalized = normalizeZakonSettings(raw, identity);
+        normalized.savedAt = Date.now();
+        normalized.saveReason = reason;
+        return normalized;
+    }
+
+    function hasMeaningfulZakonState(raw) {
+        if (!raw || typeof raw !== 'object') return false;
+        if (Array.isArray(raw.lastTasks) && raw.lastTasks.length) return true;
+        if (raw.activeTaskKey) return true;
+        if (raw.selectedProfileName) return true;
+        if (raw.finishedKeys && typeof raw.finishedKeys === 'object' && Object.keys(raw.finishedKeys).length) return true;
+        return false;
+    }
+
+    function saveZakonStateForOwner(raw, ownerKey, reason = 'save_owner') {
+        if (!ownerKey) return false;
+        const identity = {
+            key: ownerKey,
+            nick: raw?.ownerHeroNick || '',
+            lvl: Number(raw?.ownerHeroLvl || 0) || 0,
+            world: raw?.ownerWorld || ''
+        };
+        const store = readZakonHeroStore();
+        store[ownerKey] = makeZakonStoredState(raw, identity, reason);
+        return writeZakonHeroStore(store);
+    }
+
+    function clearZakonRuntimeAfterHeroSwitch(prevKey, nextKey) {
+        if (!window.isZakonRunning && !window.__zakonOwnsExp) return;
+        if (zakonTimer) clearTimeout(zakonTimer);
+        zakonTimer = null;
+        zakonTickRunning = false;
+        zakonRunId = null;
+        window.isZakonRunning = false;
+        const previousRestoreFlag = window.__restoringZakonHeroState;
+        window.__restoringZakonHeroState = true;
+        try {
+            if (typeof stopZakonOwnedExp === 'function') stopZakonOwnedExp('hero_switch');
+        } catch (_) {
+            window.__zakonOwnsExp = false;
+        } finally {
+            window.__restoringZakonHeroState = previousRestoreFlag;
+        }
+        try { zakonLog('Zmieniono postac - zatrzymuje Zakon tej postaci.', '#ff9800', 3000); } catch (_) {}
+        console.info('[ZAKON] hero switch', { prevKey, nextKey });
+    }
+
+    function restoreCurrentHeroZakonState(reason = 'restore_zakon') {
+        const identity = getZakonHeroIdentity();
+        if (!identity.key) return false;
+        const store = readZakonHeroStore();
+        const saved = store[identity.key];
+
+        zakonRestoringHeroState = true;
+        window.__restoringZakonHeroState = true;
+        try {
+            if (saved) {
+                botSettings.zakon = normalizeZakonSettings(saved, identity);
+            } else if (!botSettings.zakon?.ownerHeroKey && hasMeaningfulZakonState(botSettings.zakon)) {
+                botSettings.zakon = normalizeZakonSettings(botSettings.zakon, identity);
+                store[identity.key] = makeZakonStoredState(botSettings.zakon, identity, 'initial_migration');
+                writeZakonHeroStore(store);
+            } else {
+                botSettings.zakon = normalizeZakonSettings({}, identity);
+            }
+            zakonLastHeroKey = identity.key;
+            try { localStorage.setItem(ZAKON_LAST_HERO_STORAGE_KEY, identity.key); } catch (_) {}
+            window.__zakonActiveTaskKey = botSettings.zakon.activeTaskKey || '';
+            return true;
+        } finally {
+            zakonRestoringHeroState = false;
+            window.__restoringZakonHeroState = false;
+        }
+    }
+    window.restoreCurrentHeroZakonState = restoreCurrentHeroZakonState;
+
+    function saveCurrentHeroZakonState(reason = 'save_zakon', options = {}) {
+        const identity = getZakonHeroIdentity();
+        if (!identity.key) return false;
+        const current = botSettings.zakon || {};
+        const ownerKey = String(current.ownerHeroKey || '');
+        if (ownerKey && ownerKey !== identity.key && !options.allowOwnerMismatch) {
+            saveZakonStateForOwner(current, ownerKey, `${reason}_previous_owner`);
+            restoreCurrentHeroZakonState(`${reason}_owner_mismatch`);
+            return false;
+        }
+        const store = readZakonHeroStore();
+        botSettings.zakon = normalizeZakonSettings(current, identity);
+        store[identity.key] = makeZakonStoredState(botSettings.zakon, identity, reason);
+        const saved = writeZakonHeroStore(store);
+        if (saved) {
+            zakonLastHeroKey = identity.key;
+            try { localStorage.setItem(ZAKON_LAST_HERO_STORAGE_KEY, identity.key); } catch (_) {}
+        }
+        return saved;
+    }
+    window.saveCurrentHeroZakonState = saveCurrentHeroZakonState;
+
+    function syncZakonStateForCurrentHero(reason = 'sync_zakon') {
+        if (!zakonStorageReady || zakonRestoringHeroState) return false;
+        const identity = getZakonHeroIdentity();
+        if (!identity.key) return false;
+        const current = botSettings.zakon || {};
+        const ownerKey = String(current.ownerHeroKey || '');
+
+        if (ownerKey === identity.key) {
+            zakonLastHeroKey = identity.key;
+            return false;
+        }
+
+        if (ownerKey && ownerKey !== identity.key) {
+            saveZakonStateForOwner(current, ownerKey, `${reason}_save_previous`);
+            clearZakonRuntimeAfterHeroSwitch(ownerKey, identity.key);
+            restoreCurrentHeroZakonState(reason);
+            return true;
+        }
+
+        const store = readZakonHeroStore();
+        if (store[identity.key]) {
+            restoreCurrentHeroZakonState(reason);
+            return true;
+        }
+
+        botSettings.zakon = normalizeZakonSettings(current, identity);
+        saveCurrentHeroZakonState(`${reason}_initial`, { allowOwnerMismatch: true });
+        return false;
+    }
+    window.syncZakonStateForCurrentHero = syncZakonStateForCurrentHero;
+
+    function installZakonHeroStateWatcher() {
+        if (zakonHeroWatcherTimer) return;
+        zakonHeroWatcherTimer = setInterval(() => {
+            const before = botSettings.zakon?.ownerHeroKey || zakonLastHeroKey || '';
+            if (syncZakonStateForCurrentHero('hero_poll')) {
+                const after = botSettings.zakon?.ownerHeroKey || '';
+                console.info('[ZAKON] Przelaczono pamiec postaci', { before, after });
+                if (typeof renderZakonPanel === 'function') renderZakonPanel();
+            }
+        }, 1500);
+    }
+    window.installZakonHeroStateWatcher = installZakonHeroStateWatcher;
+
+    function ensureZakonSettings() {
+        if (zakonStorageReady && !zakonRestoringHeroState) syncZakonStateForCurrentHero('ensure');
+        const identity = getZakonHeroIdentity();
+        botSettings.zakon = normalizeZakonSettings(botSettings.zakon, identity.key ? identity : null);
         return botSettings.zakon;
     }
+
+    zakonStorageReady = true;
+    setTimeout(() => {
+        try {
+            syncZakonStateForCurrentHero('zakon_ready');
+            installZakonHeroStateWatcher();
+            if (typeof renderZakonPanel === 'function') renderZakonPanel();
+        } catch (e) {
+            console.warn('[ZAKON] Nie udalo sie zsynchronizowac pamieci postaci', e);
+        }
+    }, 0);
 
     function getZakonNpcMap() {
         try {
@@ -19590,6 +19826,7 @@ function issueExpRushToExpMap(currentMap = getCurrentMapName(), reason = 'exp_ro
     const routeState = typeof getExpRouteState === 'function' ? getExpRouteState() : (window.expRouteState = window.expRouteState || {});
     routeState.targetExpMap = targetMap;
     routeState.isTravellingToNextExpMap = true;
+    if (typeof noteExpCleanTransitTarget === 'function') noteExpCleanTransitTarget(targetMap, st.reason || 'begin_transit');
     window.expWaitingForRespawn = false;
     window.expAllMapsClearedAt = 0;
     window.__lastExpMovementTarget = { targetMap, currentMap, reason, source: targetInfo.source || reason, at: now, path: routePath || [] };
@@ -20412,7 +20649,11 @@ function chooseNextExpMap(currentMap = getCurrentMapName(), mapsPool = null) {
     }
     const chooseNow = Date.now();
     const poolKeyMaps = Array.isArray(mapsPool) && mapsPool.length ? mapsPool : (botSettings?.exp?.mapOrder || []);
-    const chooseKey = `${normMapName(currentMap)}:${poolKeyMaps.map(m => normMapName(m)).join('|')}:${window.__routePathCacheVersion || 0}:${window.__expClearStateVersion || 0}`;
+    const cleanTransitGuard = typeof getExpCleanTransitGuard === 'function' ? getExpCleanTransitGuard() : null;
+    const cleanTransitGuardKey = cleanTransitGuard
+        ? `${cleanTransitGuard.prevKey || ''}>${cleanTransitGuard.lastKey || ''}:${cleanTransitGuard.targetKey || ''}:${cleanTransitGuard.version || 0}`
+        : '';
+    const chooseKey = `${normMapName(currentMap)}:${poolKeyMaps.map(m => normMapName(m)).join('|')}:${window.__routePathCacheVersion || 0}:${window.__expClearStateVersion || 0}:${cleanTransitGuardKey}`;
     const chooseCache = window.__expChooseNextMapCache;
     if (chooseCache && chooseCache.key === chooseKey && chooseNow - Number(chooseCache.at || 0) < EXP_ROUTE_PLAN_COOLDOWN_MS) {
         if (window.expRuntimeDiagnostics) window.expRuntimeDiagnostics.routeDecisionCacheAgeMs = chooseNow - Number(chooseCache.at || 0);
@@ -20561,15 +20802,18 @@ function resolveCleanMapTransitDecision(currentMap, mapsPool = null, decision = 
     const cooldown = typeof getMapCooldownInfo === 'function' ? getMapCooldownInfo(currentMap) : null;
     const currentClean = !!(cooldown?.isCleared || (typeof isMapTemporarilyCleared === 'function' && isMapTemporarilyCleared(currentMap)));
     if (!currentClean) return decision;
-    if (decision?.targetMap && normMapName(decision.targetMap) !== currentKey && !decision.shouldWait && !decision.noRoute) {
-        return decision;
+    const stabilizedDecision = typeof stabilizeCleanMapTransitDecision === 'function'
+        ? stabilizeCleanMapTransitDecision(currentMap, mapsPool, decision, reason)
+        : decision;
+    if (stabilizedDecision?.targetMap && normMapName(stabilizedDecision.targetMap) !== currentKey && !stabilizedDecision.shouldWait && !stabilizedDecision.noRoute) {
+        return stabilizedDecision;
     }
 
     const pool = mergeAndDeduplicateExpMaps(Array.isArray(mapsPool) && mapsPool.length ? mapsPool : getCurrentExpHuntMaps()).maps;
     const uncleared = typeof getUnclearedExpMaps === 'function'
         ? getUnclearedExpMaps(currentMap, pool)
         : pool.filter(m => m && normMapName(m) !== currentKey && !(typeof isMapTemporarilyCleared === 'function' && isMapTemporarilyCleared(m)));
-    if (!uncleared.length) return decision;
+    if (!uncleared.length) return stabilizedDecision || decision;
 
     const nearest = typeof getClosestExpMapPath === 'function' ? getClosestExpMapPath(currentMap, uncleared) : null;
     if (nearest?.targetMap && normMapName(nearest.targetMap) !== currentKey) {
@@ -20608,7 +20852,7 @@ function resolveCleanMapTransitDecision(currentMap, mapsPool = null, decision = 
             candidate: { ...fallback, path, distance: Math.max(0, path.length - 1), cleanTransitFallback: true }
         };
     }
-    return decision;
+    return stabilizedDecision || decision;
 }
 window.resolveCleanMapTransitDecision = resolveCleanMapTransitDecision;
 
@@ -23981,6 +24225,178 @@ function getExpRouteState() {
     return window.expRouteState;
 }
 
+function getExpCleanTransitGuard() {
+    if (!window.__expCleanTransitGuard) {
+        window.__expCleanTransitGuard = {
+            lastMap: '',
+            lastKey: '',
+            prevMap: '',
+            prevKey: '',
+            changedAt: 0,
+            version: 0,
+            targetMap: '',
+            targetKey: '',
+            targetSetAt: 0,
+            lastDecisionAt: 0,
+            reason: ''
+        };
+    }
+    return window.__expCleanTransitGuard;
+}
+window.getExpCleanTransitGuard = getExpCleanTransitGuard;
+
+function rememberExpRouteMapVisit(mapName, reason = 'tick') {
+    const key = normMapName(mapName || '');
+    const guard = getExpCleanTransitGuard();
+    if (!key) return guard;
+    if (guard.lastKey !== key) {
+        guard.prevMap = guard.lastMap || '';
+        guard.prevKey = guard.lastKey || '';
+        guard.lastMap = mapName;
+        guard.lastKey = key;
+        guard.changedAt = Date.now();
+        guard.version = Number(guard.version || 0) + 1;
+        guard.reason = reason || '';
+    }
+    return guard;
+}
+window.rememberExpRouteMapVisit = rememberExpRouteMapVisit;
+
+function isExpMapCurrentlyClean(mapName) {
+    if (!mapName) return false;
+    const cooldown = typeof getMapCooldownInfo === 'function' ? getMapCooldownInfo(mapName) : null;
+    if (cooldown?.isCleared) return true;
+    return !!(typeof isMapTemporarilyCleared === 'function' && isMapTemporarilyCleared(mapName));
+}
+window.isExpMapCurrentlyClean = isExpMapCurrentlyClean;
+
+function noteExpCleanTransitTarget(targetMap, reason = 'transit') {
+    const key = normMapName(targetMap || '');
+    if (!key) return;
+    const guard = getExpCleanTransitGuard();
+    guard.targetMap = targetMap;
+    guard.targetKey = key;
+    guard.targetSetAt = Date.now();
+    guard.lastDecisionAt = guard.targetSetAt;
+    guard.reason = reason || guard.reason || '';
+}
+window.noteExpCleanTransitTarget = noteExpCleanTransitTarget;
+
+function isUsefulExpTransitTarget(mapName, mapsPool = null) {
+    const key = normMapName(mapName || '');
+    if (!key) return false;
+    const pool = mergeAndDeduplicateExpMaps(Array.isArray(mapsPool) && mapsPool.length ? mapsPool : getCurrentExpHuntMaps()).maps;
+    if (pool.length && !pool.some(m => normMapName(m) === key)) return false;
+    if (isExpMapCurrentlyClean(mapName)) return false;
+    const now = Date.now();
+    const banUntil = typeof getExpMapBanUntil === 'function' ? getExpMapBanUntil(mapName, now) : 0;
+    return !(banUntil && banUntil > now);
+}
+
+function getCommittedExpTransitTarget(currentMap, mapsPool = null) {
+    const currentKey = normMapName(currentMap || '');
+    const now = Date.now();
+    const transit = window.expTransitState || null;
+    const routeState = window.expRouteState || null;
+    const guard = getExpCleanTransitGuard();
+    const candidates = [
+        transit?.active ? transit.targetMap : null,
+        routeState?.isTravellingToNextExpMap ? routeState.targetExpMap : null,
+        now - Number(guard.targetSetAt || 0) < 45000 ? guard.targetMap : null
+    ];
+    for (const target of candidates) {
+        if (!target || normMapName(target) === currentKey) continue;
+        if (isUsefulExpTransitTarget(target, mapsPool)) return target;
+    }
+    return null;
+}
+
+function getImmediateCleanReturnBan(currentMap, maxAgeMs = 35000) {
+    const currentKey = normMapName(currentMap || '');
+    const guard = getExpCleanTransitGuard();
+    if (!currentKey || guard.lastKey !== currentKey || !guard.prevKey) return null;
+    if (Date.now() - Number(guard.changedAt || 0) > maxAgeMs) return null;
+    if (!isExpMapCurrentlyClean(currentMap)) return null;
+    if (!isExpMapCurrentlyClean(guard.prevMap || guard.prevKey)) return null;
+    return { mapName: guard.prevMap || guard.prevKey, key: guard.prevKey, since: guard.changedAt };
+}
+
+function buildCleanTransitDecision(currentMap, targetMap, reason = 'clean_transit') {
+    if (!currentMap || !targetMap || normMapName(currentMap) === normMapName(targetMap)) return null;
+    let path = typeof getCachedRouteToTarget === 'function'
+        ? getCachedRouteToTarget(currentMap, targetMap, EXP_ROUTE_CACHE_TTL_MS)
+        : null;
+    if ((!path || path.length < 2) && typeof findRouteToMap === 'function') {
+        path = findRouteToMap(targetMap, currentMap);
+    }
+    if ((!path || path.length < 2) && typeof getShortestPath === 'function') {
+        path = getShortestPath(currentMap, targetMap, routePathOptions());
+    }
+    if (!path || path.length < 2) return null;
+    noteExpCleanTransitTarget(targetMap, reason);
+    return {
+        targetMap,
+        path,
+        reason,
+        score: 1000 + path.length,
+        shouldWait: false,
+        candidate: { targetMap, mapName: targetMap, path, distance: Math.max(0, path.length - 1), cleanTransitFallback: true }
+    };
+}
+
+function findCleanTransitAlternative(currentMap, mapsPool = null, bannedKey = '', reason = 'clean_transit') {
+    const currentKey = normMapName(currentMap || '');
+    const pool = mergeAndDeduplicateExpMaps(Array.isArray(mapsPool) && mapsPool.length ? mapsPool : getCurrentExpHuntMaps()).maps;
+    const uncleared = (typeof getUnclearedExpMaps === 'function' ? getUnclearedExpMaps(currentMap, pool) : pool).filter(mapName => {
+        const key = normMapName(mapName || '');
+        return key && key !== currentKey && key !== bannedKey && !isExpMapCurrentlyClean(mapName);
+    });
+    if (!uncleared.length) return null;
+    const pending = typeof getNextPendingExpRouteMap === 'function' ? getNextPendingExpRouteMap(currentMap, uncleared) : null;
+    const preferredKey = normMapName(pending?.mapName || '');
+    const ordered = preferredKey
+        ? [pending.mapName, ...uncleared.filter(mapName => normMapName(mapName) !== preferredKey)]
+        : uncleared;
+    for (const target of ordered) {
+        const decision = buildCleanTransitDecision(currentMap, target, `${reason}_anti_pingpong`);
+        if (decision) return decision;
+    }
+    return null;
+}
+
+function stabilizeCleanMapTransitDecision(currentMap, mapsPool = null, decision = null, reason = 'clean_transit') {
+    const currentKey = normMapName(currentMap || '');
+    if (!currentKey || !isExpMapCurrentlyClean(currentMap)) return decision;
+    const ban = getImmediateCleanReturnBan(currentMap);
+    const committed = getCommittedExpTransitTarget(currentMap, mapsPool);
+    if (committed && (!ban || normMapName(committed) !== ban.key)) {
+        const committedDecision = buildCleanTransitDecision(currentMap, committed, `${reason}_committed`);
+        if (committedDecision) return committedDecision;
+    }
+    if (decision?.targetMap && normMapName(decision.targetMap) !== currentKey && !decision.shouldWait && !decision.noRoute) {
+        if (!ban || normMapName(decision.targetMap) !== ban.key) {
+            noteExpCleanTransitTarget(decision.targetMap, reason);
+            return decision;
+        }
+        const alt = findCleanTransitAlternative(currentMap, mapsPool, ban.key, reason);
+        if (alt) {
+            expPlannerDebugLog(
+                `clean_transit_anti_pingpong:${currentKey}:${ban.key}:${normMapName(alt.targetMap)}`,
+                `[EXP-ROUTE] anti-pingpong: ${currentMap} nie wraca od razu do ${ban.mapName}, cel=${alt.targetMap}`,
+                "#64b5f6",
+                3500
+            );
+            return alt;
+        }
+    }
+    if (!decision?.targetMap && ban) {
+        const alt = findCleanTransitAlternative(currentMap, mapsPool, ban.key, reason);
+        if (alt) return alt;
+    }
+    return decision;
+}
+window.stabilizeCleanMapTransitDecision = stabilizeCleanMapTransitDecision;
+
 function getExpTransitState() {
     const now = Date.now();
     window.expTransitState = window.expTransitState || {
@@ -24840,6 +25256,7 @@ function runExpLogic() {
         };
     }
     const currMapEarly = Engine.map.d.name;
+    if (typeof rememberExpRouteMapVisit === 'function') rememberExpRouteMapVisit(currMapEarly, 'run_exp');
     onExpMapChanged(currMapEarly, now);
     const mapsPoolEarly = getCurrentExpHuntMaps();
     const isExpMapEarly = !!findMatchingExpMapName(currMapEarly, mapsPoolEarly);
@@ -26064,10 +26481,17 @@ function runExpLogic() {
             return;
         }
 
-        const pendingTransitTarget = routeStateForEmpty?.targetExpMap || (typeof getExpTransitState === 'function' ? getExpTransitState()?.targetMap : null);
+        const committedEmptyTransitTarget = typeof getCommittedExpTransitTarget === 'function'
+            ? getCommittedExpTransitTarget(currMap, mapsPool)
+            : null;
+        const pendingTransitTarget = routeStateForEmpty?.targetExpMap ||
+            (typeof getExpTransitState === 'function' ? getExpTransitState()?.targetMap : null) ||
+            committedEmptyTransitTarget;
         const pendingTransitActive = !!pendingTransitTarget &&
             normMapName(pendingTransitTarget) !== normMapName(currMap) &&
-            (routeStateForEmpty.isTravellingToNextExpMap || (typeof isExpTransitActive === 'function' && isExpTransitActive()));
+            (routeStateForEmpty.isTravellingToNextExpMap ||
+                (typeof isExpTransitActive === 'function' && isExpTransitActive()) ||
+                !!committedEmptyTransitTarget);
         if (pendingTransitActive) {
             const continueKey = `${normMapName(currMap)}->${normMapName(pendingTransitTarget)}`;
             const movementStatus = typeof getExpTransitMovementStatus === 'function'
