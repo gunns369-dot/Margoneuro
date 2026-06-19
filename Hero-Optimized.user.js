@@ -5472,6 +5472,8 @@ window.heroMapOrder = heroMapOrder;
         autoStartExp: true,
         selectedProfileIndex: -1,
         selectedProfileName: '',
+        activeTaskKey: '',
+        finishedKeys: {},
         lastTasks: []
     };
 
@@ -5479,7 +5481,7 @@ window.heroMapOrder = heroMapOrder;
         "Thuzal": { x: 72, y: 20 },
         "Tuzmer": { x: 51, y: 33 },
         "Karka-han": { x: 43, y: 28 },
-        "Werbin": { x: 27, y: 19 },
+        "Werbin": { x: 21, y: 17 },
         "Torneg": { x: 54, y: 28 },
         "Ithan": { x: 56, y: 26 },
         "Eder": { x: 26, y: 40 }
@@ -5489,11 +5491,18 @@ window.heroMapOrder = heroMapOrder;
     let zakonRunId = null;
     let zakonTickRunning = false;
     let zakonQuestTextCache = { at: 0, text: '' };
+    let zakonBodyQuestTextCache = { at: 0, text: '' };
+    let zakonLastAutoSellStartAt = 0;
     let zakonLastLog = new Map();
 
     function ensureZakonSettings() {
         botSettings.zakon = { ...ZAKON_DEFAULT_SETTINGS, ...(botSettings.zakon || {}) };
         if (!Array.isArray(botSettings.zakon.lastTasks)) botSettings.zakon.lastTasks = [];
+        if (!botSettings.zakon.finishedKeys || typeof botSettings.zakon.finishedKeys !== 'object') botSettings.zakon.finishedKeys = {};
+        const now = Date.now();
+        for (const [key, until] of Object.entries(botSettings.zakon.finishedKeys)) {
+            if (!until || Number(until) < now) delete botSettings.zakon.finishedKeys[key];
+        }
         botSettings.zakon.maxActive = Math.max(1, Math.min(8, Number(botSettings.zakon.maxActive) || 3));
         return botSettings.zakon;
     }
@@ -5564,8 +5573,11 @@ window.heroMapOrder = heroMapOrder;
 
         const selectors = [
             '#questLog', '#quests', '#quest-window', '#journal', '#diary',
+            '#quest-tracker', '#observed-quests', '#tracked-quests',
             '.quest-window', '.quests-window', '.journal-window', '.diary-window',
+            '.quest-tracker', '.tracked-quest', '.observed-quest',
             '[class*="quest"]', '[id*="quest"]', '[class*="journal"]', '[id*="journal"]',
+            '[class*="observ"]', '[id*="observ"]', '[class*="track"]', '[id*="track"]',
             '.margo-window', '.dialogue-window'
         ];
         const parts = [];
@@ -5588,9 +5600,17 @@ window.heroMapOrder = heroMapOrder;
             console.warn('[ZAKON] quest DOM scan failed', e);
         }
 
-        if (!parts.length && force && document.body) {
-            const bodyText = String(document.body.innerText || '').slice(0, 40000);
-            if (/(Zakon|Zabij:|Porozmawiaj z|Dziennik)/i.test(bodyText)) parts.push(bodyText);
+        if ((force || window.isZakonRunning || !parts.length) && document.body) {
+            const useCache = zakonBodyQuestTextCache.text && now - zakonBodyQuestTextCache.at < 2800;
+            let bodyText = useCache ? zakonBodyQuestTextCache.text : '';
+            if (!useCache) {
+                bodyText = String(document.body.innerText || '');
+                if (bodyText.length > 70000) bodyText = `${bodyText.slice(0, 25000)}\n${bodyText.slice(-45000)}`;
+                zakonBodyQuestTextCache = { at: now, text: bodyText };
+            }
+            if (/(Zakon|Zabij:|Porozmawiaj z|Dziennik|Obserwowane zadania)/i.test(bodyText)) {
+                parts.push(bodyText.slice(0, 70000));
+            }
         }
 
         zakonQuestTextCache = { at: now, text: parts.join('\n') };
@@ -5675,16 +5695,64 @@ window.heroMapOrder = heroMapOrder;
         return Array.from(byKey.values());
     }
 
+    function getZakonTaskKey(task = {}) {
+        return getZakonTaskDedupeKey(task);
+    }
+
+    function isZakonTaskFinishedKey(key) {
+        const s = ensureZakonSettings();
+        return !!(key && Number(s.finishedKeys?.[key] || 0) > Date.now());
+    }
+
+    function filterFinishedZakonTasks(tasks = []) {
+        const s = ensureZakonSettings();
+        return dedupeZakonTasks(tasks).filter(task => {
+            const key = getZakonTaskKey(task);
+            const until = Number(s.finishedKeys?.[key] || 0);
+            return !until || until < Date.now();
+        });
+    }
+
+    function setZakonActiveTask(task = null, reason = 'update') {
+        const s = ensureZakonSettings();
+        const nextKey = task ? getZakonTaskKey(task) : '';
+        const prevKey = s.activeTaskKey || '';
+        if (prevKey === nextKey) return false;
+        s.activeTaskKey = nextKey;
+        window.__zakonActiveTaskKey = nextKey;
+        if (task) {
+            zakonLog(`Aktywne zadanie: ${task.title || task.mobName}`, '#90caf9', 2500);
+        } else if (prevKey) {
+            zakonLog(`Zakon: czyszcze aktywny cel (${reason}).`, '#90caf9', 2500);
+        }
+        runWhenBrowserIdle(() => saveSettings(), { timeout: 1200 });
+        return true;
+    }
+
+    function markZakonTaskFinished(task, reason = 'finished') {
+        if (!task) return false;
+        const s = ensureZakonSettings();
+        const key = getZakonTaskKey(task);
+        if (!key) return false;
+        s.finishedKeys[key] = Date.now() + 20 * 60 * 1000;
+        s.lastTasks = filterFinishedZakonTasks((s.lastTasks || []).filter(t => getZakonTaskKey(t) !== key));
+        if (s.activeTaskKey === key) setZakonActiveTask(null, reason);
+        runWhenBrowserIdle(() => saveSettings(), { timeout: 900 });
+        renderZakonPanel();
+        return true;
+    }
+
     function scanZakonTasks(force = false) {
         ensureZakonSettings();
         const text = zakonCollectQuestText(force);
-        const tasks = dedupeZakonTasks(parseZakonTasksFromText(text));
+        const parsedTasks = parseZakonTasksFromText(text);
+        const tasks = filterFinishedZakonTasks(dedupeZakonTasks([...(botSettings.zakon.lastTasks || []), ...parsedTasks]));
         if (tasks.length) {
             botSettings.zakon.lastTasks = tasks;
             botSettings.zakon.lastScanAt = Date.now();
             runWhenBrowserIdle(() => saveSettings(), { timeout: 1200 });
         }
-        return { tasks: tasks.length ? tasks : dedupeZakonTasks(botSettings.zakon.lastTasks || []), text };
+        return { tasks: tasks.length ? tasks : filterFinishedZakonTasks(botSettings.zakon.lastTasks || []), text };
     }
     window.scanZakonTasks = scanZakonTasks;
 
@@ -5771,10 +5839,67 @@ window.heroMapOrder = heroMapOrder;
     }
     window.loadZakonProfileForTask = loadZakonProfileForTask;
 
+    function findZakonnikRownowagiNpc(preferredPoint = null, maxDistance = 0) {
+        const hx = Number(Engine?.hero?.d?.x);
+        const hy = Number(Engine?.hero?.d?.y);
+        const px = Number(preferredPoint?.x);
+        const py = Number(preferredPoint?.y);
+        const hasPreferred = Number.isFinite(px) && Number.isFinite(py);
+        let best = null;
+        const entries = typeof getCurrentNpcEntries === 'function' ? getCurrentNpcEntries() : [];
+        for (const npc of entries) {
+            const nick = zakonNormalize(npc.nick || npc.name || '');
+            if (!nick.includes('zakonnik') || !nick.includes('rownowagi')) continue;
+            if (nick.includes('planu') || nick.includes('astra')) continue;
+            const heroDist = Number.isFinite(hx) && Number.isFinite(hy)
+                ? Math.max(Math.abs(hx - npc.x), Math.abs(hy - npc.y))
+                : 999;
+            const prefDist = hasPreferred
+                ? Math.max(Math.abs(px - npc.x), Math.abs(py - npc.y))
+                : heroDist;
+            if (maxDistance > 0 && Math.min(heroDist, prefDist) > maxDistance) continue;
+            const score = Math.min(heroDist, prefDist) + prefDist * 0.2;
+            if (!best || score < best.score) best = { ...npc, heroDist, prefDist, score };
+        }
+        return best;
+    }
+
+    function maybeStartZakonAutoSell() {
+        if (!window.isZakonRunning) return false;
+        if (window.autoSellState?.active) return true;
+        const stats = typeof window.getBagStats === 'function' ? window.getBagStats() : null;
+        const warning = typeof window.detectInventoryFullWarning === 'function' ? window.detectInventoryFullWarning() : null;
+        const full = !!(stats && Number(stats.totalCapacity || 0) > 0 && Number(stats.freeSlots || 0) <= 0);
+        const warningFull = !!(warning?.recent && stats && Number(stats.totalCapacity || 0) > 0 && Number(stats.freeSlots || 0) <= 1);
+        if (!full && !warningFull) return false;
+        const now = Date.now();
+        if (now - zakonLastAutoSellStartAt < 15000) return false;
+        if (typeof window.startAutoSellSession !== 'function') return false;
+        zakonLastAutoSellStartAt = now;
+        botSettings.autosell = botSettings.autosell || {};
+        botSettings.autosell.onlyTunia = true;
+        window.__zakonPausedForAutoSell = true;
+        const started = window.startAutoSellSession('zakon_full_bag', {
+            force: true,
+            stats,
+            trigger: { reason: full ? 'full_inventory' : 'inventory_warning', warning }
+        });
+        if (started?.ok) {
+            zakonLog('Plecak pelny - przerywam Zakon, ide sprzedac u Tunii.', '#ffb74d', 5000);
+            runWhenBrowserIdle(() => saveSettings(), { timeout: 1200 });
+            return true;
+        }
+        zakonLog(`Nie moge uruchomic auto-sprzedazy: ${started?.reason || 'unknown'}`, '#f44336', 5000);
+        return false;
+    }
+
     function ensureZakonExpRunning() {
         ensureZakonSettings();
         if (!botSettings.zakon.autoStartExp) return false;
-        if (window.isExping) return true;
+        if (window.isExping) {
+            window.__zakonOwnsExp = true;
+            return true;
+        }
         try {
             if (window.isPatrolling && typeof stopPatrol === 'function') stopPatrol(false);
         } catch (_) {}
@@ -5794,6 +5919,20 @@ window.heroMapOrder = heroMapOrder;
         zakonLog(`Zatrzymuje EXP: ${reason}`, '#ffb74d', 2500);
         return true;
     }
+
+    function pauseZakonCombatAutomation(reason = 'zakon_pause') {
+        let changed = stopZakonOwnedExp(reason);
+        if (botSettings?.berserk?.enabled) {
+            botSettings.berserk.enabled = false;
+            const chkBerserk = document.getElementById('berserkEnabled');
+            if (chkBerserk) chkBerserk.checked = false;
+            if (typeof window.updateServerBerserk === 'function') window.updateServerBerserk(reason);
+            changed = true;
+        }
+        if (changed) runWhenBrowserIdle(() => saveSettings(), { timeout: 1200 });
+        return changed;
+    }
+    window.pauseZakonCombatAutomation = pauseZakonCombatAutomation;
 
     function resolveZakonCity(task = null) {
         ensureZakonSettings();
@@ -5821,9 +5960,7 @@ window.heroMapOrder = heroMapOrder;
             }
             return false;
         }
-        const npc = typeof findNearestNpcByNick === 'function'
-            ? findNearestNpcByNick(['Zakonnik Rownowagi', 'Zakonnik Równowagi'], target, 12)
-            : null;
+        const npc = findZakonnikRownowagiNpc(target, 18);
         if (npc && typeof startNpcDialogRobust === 'function') {
             startNpcDialogRobust(npc, 'zakon');
             return true;
@@ -5872,10 +6009,17 @@ window.heroMapOrder = heroMapOrder;
                 zakonLog('Oddaje wykonane zadanie u Zakonnika.', '#4caf50', 2500);
             }
             setTimeout(() => {
+                const forgetFinishedTask = () => {
+                    if (task) setTimeout(() => markZakonTaskFinished(task, 'finish_dialog'), 800);
+                };
                 if (zakonClickText(['zakonczenie 1', 'zakonczenie'])) {
-                    setTimeout(() => zakonClickText(['akceptuj', 'odbierz', 'ok', 'dalej']), 300);
+                    setTimeout(() => {
+                        zakonClickText(['akceptuj', 'odbierz', 'ok', 'dalej']);
+                        forgetFinishedTask();
+                    }, 300);
                 } else {
                     zakonClickText(['akceptuj', 'odbierz', 'ok', 'dalej']);
+                    forgetFinishedTask();
                 }
             }, 700);
         }, 650);
@@ -5948,7 +6092,9 @@ window.heroMapOrder = heroMapOrder;
 
         const box = document.getElementById('zakonTasksList');
         if (!box) return;
-        const tasks = dedupeZakonTasks(s.lastTasks || []);
+        const tasks = filterFinishedZakonTasks(s.lastTasks || []);
+        if (tasks.length !== (s.lastTasks || []).length) s.lastTasks = tasks;
+        const activeKey = s.activeTaskKey || '';
         if (!tasks.length) {
             box.innerHTML = '<div style="padding:8px; color:#777; text-align:center;">Brak wykrytych aktywnych zadan. Otworz dziennik i kliknij Skanuj.</div>';
             return;
@@ -5957,8 +6103,9 @@ window.heroMapOrder = heroMapOrder;
             const best = findBestZakonExpProfile(task);
             const status = task.completed ? 'gotowe do oddania' : `${task.done || 0}/${task.total || 0}`;
             const color = task.completed ? '#4caf50' : '#ffb300';
+            const isActive = activeKey && getZakonTaskKey(task) === activeKey;
             return `
-                <div style="border:1px solid #3a3020; background:#141414; padding:5px; margin-bottom:4px;">
+                <div style="border:1px solid ${isActive ? '#4fc3f7' : '#3a3020'}; background:${isActive ? '#10222b' : '#141414'}; padding:5px; margin-bottom:4px;">
                     <div style="display:flex; justify-content:space-between; gap:6px;">
                         <b style="color:#e0d8c0;">${zakonEscapeHtml(task.title || task.mobName)}</b>
                         <span style="color:${color}; white-space:nowrap;">${zakonEscapeHtml(status)}</span>
@@ -5969,6 +6116,80 @@ window.heroMapOrder = heroMapOrder;
         }).join('');
     }
     window.renderZakonPanel = renderZakonPanel;
+
+    function getZakonKilledMobName(targetRef = null) {
+        if (!targetRef) return '';
+        return String(
+            targetRef.nick
+            || targetRef.name
+            || targetRef.mobName
+            || targetRef.d?.nick
+            || targetRef.d?.name
+            || targetRef.raw?.nick
+            || targetRef.raw?.name
+            || ''
+        ).trim();
+    }
+
+    function zakonTaskMatchesMob(task, targetRef = null) {
+        const mobName = getZakonKilledMobName(targetRef);
+        if (!mobName || !task) return false;
+        const hay = zakonNormalize(mobName);
+        const wanted = zakonNormalize(`${task.mobName || ''} ${task.title || ''}`);
+        if (wanted && hay.includes(wanted)) return true;
+        const tokens = zakonMobTokens(task.mobName || task.title || '').filter(t => t.length >= 3);
+        if (!tokens.length) return false;
+        const strong = tokens.filter(t => t.length >= 4);
+        if (strong.some(t => hay.includes(t))) return true;
+        if ((wanted.includes('ork') || wanted.includes('orcz')) && (hay.includes('ork') || hay.includes('orcz') || hay.includes('czerwonosk'))) return true;
+        if (wanted.includes('goblin') && hay.includes('goblin')) return true;
+        if ((wanted.includes('dusz') || wanted.includes('duch')) && (hay.includes('dusz') || hay.includes('duch'))) return true;
+        if (wanted.includes('berserker') && hay.includes('berserker')) return true;
+        return false;
+    }
+
+    function recordZakonMobKill(targetRef = null, reason = 'exp_kill') {
+        if (!window.isZakonRunning && !window.__zakonOwnsExp) return false;
+        const s = ensureZakonSettings();
+        const tasks = dedupeZakonTasks(s.lastTasks || []);
+        const incomplete = tasks.filter(t => !t.completed && Number(t.total) > 0 && Number(t.done || 0) < Number(t.total || 0));
+        if (!incomplete.length) return false;
+
+        const activeKey = s.activeTaskKey || window.__zakonActiveTaskKey || '';
+        let task = activeKey ? incomplete.find(t => getZakonTaskKey(t) === activeKey) : null;
+        const matching = targetRef ? incomplete.filter(t => zakonTaskMatchesMob(t, targetRef)) : [];
+        if ((!task || (matching.length && !matching.some(t => getZakonTaskKey(t) === getZakonTaskKey(task)))) && matching.length) {
+            task = matching[0];
+        }
+        if (!task) task = chooseZakonTask(incomplete);
+        if (!task) return false;
+
+        const key = getZakonTaskKey(task);
+        const currentDone = Number(task.done || 0);
+        const total = Number(task.total || 0);
+        const nextDone = total > 0 ? Math.min(total, currentDone + 1) : currentDone + 1;
+        const updated = {
+            ...task,
+            done: nextDone,
+            total,
+            completed: total > 0 && nextDone >= total,
+            scannedAt: Date.now(),
+            countedFromRuntime: true
+        };
+        s.lastTasks = dedupeZakonTasks([...tasks.filter(t => getZakonTaskKey(t) !== key), updated]);
+        if (!s.activeTaskKey) setZakonActiveTask(updated, 'kill_counter');
+        runWhenBrowserIdle(() => saveSettings(), { timeout: 900 });
+        renderZakonPanel();
+
+        if (updated.completed) {
+            zakonLog(`Zakon: ${updated.title || updated.mobName} gotowe, zmieniam cel.`, '#4caf50', 3500);
+            setZakonActiveTask(null, 'task_completed_by_kill');
+            pauseZakonCombatAutomation('zakon_task_complete');
+            scheduleZakonTick(350, zakonRunId);
+        }
+        return true;
+    }
+    window.recordZakonMobKill = recordZakonMobKill;
 
     function scheduleZakonTick(delay = 1500, runId = zakonRunId) {
         if (zakonTimer) clearTimeout(zakonTimer);
@@ -5989,18 +6210,31 @@ window.heroMapOrder = heroMapOrder;
             const busy = typeof isGameBusyOrLoading === 'function' ? isGameBusyOrLoading({ source: 'zakon_tick' }) : { busy: false };
             if (busy?.busy) {
                 nextDelay = 2500;
+            } else if (window.autoSellState?.active || maybeStartZakonAutoSell()) {
+                nextDelay = 2500;
             } else {
                 const scan = scanZakonTasks(false);
                 const tasks = scan.tasks || [];
-                const incomplete = tasks.filter(t => !t.completed && Number(t.total) > 0);
+                const activeKey = botSettings.zakon.activeTaskKey || '';
+                const activeCompleted = activeKey
+                    ? tasks.find(t => getZakonTaskKey(t) === activeKey && (t.completed || (Number(t.total) > 0 && Number(t.done) >= Number(t.total))))
+                    : null;
+                if (activeCompleted) {
+                    setZakonActiveTask(null, 'active_completed');
+                    pauseZakonCombatAutomation('zakon_task_complete');
+                }
+                const incomplete = tasks.filter(t => !t.completed && Number(t.total) > 0 && Number(t.done || 0) < Number(t.total || 0));
                 const completed = tasks.filter(t => t.completed || (Number(t.total) > 0 && Number(t.done) >= Number(t.total)));
 
                 if (completed.length && !incomplete.length && botSettings.zakon.autoFinish) {
-                    stopZakonOwnedExp('zakon_tasks_done');
+                    setZakonActiveTask(null, 'finish_ready');
+                    pauseZakonCombatAutomation('zakon_tasks_done');
                     finishZakonDialog(completed[0]);
                     nextDelay = 3500;
                 } else if (incomplete.length) {
                     const task = chooseZakonTask(incomplete);
+                    const switched = setZakonActiveTask(task, 'zakon_tick');
+                    if (switched) pauseZakonCombatAutomation('zakon_task_switch');
                     if (task && loadZakonProfileForTask(task)) ensureZakonExpRunning();
                     nextDelay = window.isExping ? 2500 : 1800;
                 } else if (botSettings.zakon.autoAccept) {
@@ -17923,6 +18157,16 @@ function confirmExpKillSignal(reason = 'kill_signal', details = {}) {
     if (now - Number(window.__lastExpKillConfirmedAt || 0) < 90) return false;
     window.__lastExpKillConfirmedAt = now;
     const mapName = Engine?.map?.d?.name || window.__lastExpCombatTarget?.mapName || details.mapName || '';
+    try {
+        const targetForZakon = details.target
+            || window.__lastExpCombatTarget
+            || (typeof getExpTargetLock === 'function' ? getExpTargetLock() : null)
+            || window.expFocusTarget
+            || null;
+        if (typeof window.recordZakonMobKill === 'function') window.recordZakonMobKill(targetForZakon, reason);
+    } catch (e) {
+        try { console.warn('[ZAKON] kill counter failed', e); } catch (_) {}
+    }
     let changed = false;
     if (typeof forgetLastExpCombatTargets === 'function') {
         changed = forgetLastExpCombatTargets(reason, { retargetDelayMs: 0 }) || changed;
