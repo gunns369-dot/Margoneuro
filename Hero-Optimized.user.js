@@ -2789,7 +2789,19 @@ let opacityValue = 0.95;
         },
         logging: { level: 'INFO', dedupeWindowMs: 6000, verbose: false },
 
-        expProfiles: loadedProfiles
+        expProfiles: loadedProfiles,
+
+        zakon: {
+            enabled: false,
+            city: 'auto',
+            maxActive: 3,
+            autoAccept: true,
+            autoFinish: true,
+            autoStartExp: true,
+            selectedProfileIndex: -1,
+            selectedProfileName: '',
+            lastTasks: []
+        }
 
     };
 
@@ -5450,6 +5462,545 @@ window.heroMapOrder = heroMapOrder;
         }
         localStorage.setItem('hero_settings_db_v64', JSON.stringify(botSettings));
     }
+
+    const ZAKON_DEFAULT_SETTINGS = {
+        enabled: false,
+        city: 'auto',
+        maxActive: 3,
+        autoAccept: true,
+        autoFinish: true,
+        autoStartExp: true,
+        selectedProfileIndex: -1,
+        selectedProfileName: '',
+        lastTasks: []
+    };
+
+    const ZAKON_FALLBACK_NPCS = {
+        "Thuzal": { x: 72, y: 20 },
+        "Tuzmer": { x: 51, y: 33 },
+        "Karka-han": { x: 43, y: 28 },
+        "Werbin": { x: 27, y: 19 },
+        "Torneg": { x: 54, y: 28 },
+        "Ithan": { x: 56, y: 26 },
+        "Eder": { x: 26, y: 40 }
+    };
+
+    let zakonTimer = null;
+    let zakonRunId = null;
+    let zakonTickRunning = false;
+    let zakonQuestTextCache = { at: 0, text: '' };
+    let zakonLastLog = new Map();
+
+    function ensureZakonSettings() {
+        botSettings.zakon = { ...ZAKON_DEFAULT_SETTINGS, ...(botSettings.zakon || {}) };
+        if (!Array.isArray(botSettings.zakon.lastTasks)) botSettings.zakon.lastTasks = [];
+        botSettings.zakon.maxActive = Math.max(1, Math.min(8, Number(botSettings.zakon.maxActive) || 3));
+        return botSettings.zakon;
+    }
+
+    function getZakonNpcMap() {
+        try {
+            if (ZAKONNICY && typeof ZAKONNICY === 'object') return { ...ZAKON_FALLBACK_NPCS, ...ZAKONNICY };
+        } catch (_) {}
+        return { ...ZAKON_FALLBACK_NPCS };
+    }
+
+    function zakonNormalize(value) {
+        return String(value || '')
+            .replace(/<br\s*\/?>/gi, ' ')
+            .replace(/<[^>]*>/g, ' ')
+            .replace(/[\u200B-\u200D\uFEFF]/g, '')
+            .replace(/\u00A0/g, ' ')
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/[\u0142\u0141]/g, 'l')
+            .replace(/[\u0105\u0104]/g, 'a')
+            .replace(/[\u0107\u0106]/g, 'c')
+            .replace(/[\u0119\u0118]/g, 'e')
+            .replace(/[\u0144\u0143]/g, 'n')
+            .replace(/[\u015b\u015a]/g, 's')
+            .replace(/[\u017a\u0179\u017c\u017b]/g, 'z')
+            .toLowerCase()
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    function zakonEscapeHtml(value) {
+        return String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function zakonLog(message, color = '#90caf9', throttleMs = 1500) {
+        const key = zakonNormalize(message).slice(0, 120);
+        const now = Date.now();
+        if (zakonLastLog.get(key) && now - zakonLastLog.get(key) < throttleMs) return;
+        zakonLastLog.set(key, now);
+        const box = document.getElementById('zakonConsole');
+        if (box) {
+            const line = document.createElement('div');
+            line.style.color = color;
+            line.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            box.appendChild(line);
+            while (box.children.length > 70) box.removeChild(box.firstChild);
+            box.scrollTop = box.scrollHeight;
+        }
+        if (window.HeroLogger?.emit) HeroLogger.emit('INFO', 'ZAKON', message, color, { category: 'ZAKON' });
+        else console.log('[ZAKON]', message);
+    }
+
+    function zakonIsElementVisible(el) {
+        if (!el || !el.getClientRects || !el.getClientRects().length) return false;
+        const style = window.getComputedStyle ? window.getComputedStyle(el) : null;
+        return !style || (style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity || 1) !== 0);
+    }
+
+    function zakonCollectQuestText(force = false) {
+        const now = Date.now();
+        if (!force && zakonQuestTextCache.text && now - zakonQuestTextCache.at < 1800) return zakonQuestTextCache.text;
+
+        const selectors = [
+            '#questLog', '#quests', '#quest-window', '#journal', '#diary',
+            '.quest-window', '.quests-window', '.journal-window', '.diary-window',
+            '[class*="quest"]', '[id*="quest"]', '[class*="journal"]', '[id*="journal"]',
+            '.margo-window', '.dialogue-window'
+        ];
+        const parts = [];
+        const seen = new Set();
+        try {
+            const nodes = Array.from(document.querySelectorAll(selectors.join(','))).slice(0, 120);
+            for (const el of nodes) {
+                if (!zakonIsElementVisible(el)) continue;
+                const txt = String(el.innerText || el.textContent || '').replace(/\s+\n/g, '\n').trim();
+                if (!txt || txt.length < 8) continue;
+                const norm = zakonNormalize(txt);
+                if (!/(zakon rownowagi|dziennik zadan|zabij:|porozmawiaj z|rozpocznij zadanie)/.test(norm)) continue;
+                const sig = norm.slice(0, 180);
+                if (seen.has(sig)) continue;
+                seen.add(sig);
+                parts.push(txt.slice(0, 8000));
+                if (parts.join('\n').length > 30000) break;
+            }
+        } catch (e) {
+            console.warn('[ZAKON] quest DOM scan failed', e);
+        }
+
+        if (!parts.length && force && document.body) {
+            const bodyText = String(document.body.innerText || '').slice(0, 40000);
+            if (/(Zakon|Zabij:|Porozmawiaj z|Dziennik)/i.test(bodyText)) parts.push(bodyText);
+        }
+
+        zakonQuestTextCache = { at: now, text: parts.join('\n') };
+        return zakonQuestTextCache.text;
+    }
+
+    function zakonDetectCityFromText(text) {
+        const norm = zakonNormalize(text);
+        const known = Object.keys(getZakonNpcMap());
+        for (const city of known) {
+            if (norm.includes(zakonNormalize(city))) return city;
+        }
+        if (norm.includes('lisciaste rozstaje')) return 'Lisciaste Rozstaje';
+        return '';
+    }
+
+    function parseZakonTasksFromText(text) {
+        const tasks = [];
+        if (!text) return tasks;
+        const killRegex = /Zabij:\s*([^\(\n\r]+?)\s*\(\s*(\d+)\s*\/\s*(\d+)\s*\)/gi;
+        let match;
+        while ((match = killRegex.exec(text))) {
+            const mobName = String(match[1] || '').replace(/\s+/g, ' ').trim();
+            const done = Number(match[2] || 0);
+            const total = Number(match[3] || 0);
+            const before = text.slice(Math.max(0, match.index - 360), match.index);
+            const after = text.slice(match.index, Math.min(text.length, match.index + 420));
+            const levelMatches = Array.from(before.matchAll(/\((\d{1,3})\)\s*([^\n\r]{3,90}?)(?:\.|\n|$)/g));
+            const lastLevel = levelMatches.length ? levelMatches[levelMatches.length - 1] : null;
+            const level = lastLevel ? Number(lastLevel[1]) : 0;
+            const title = lastLevel ? String(lastLevel[2] || '').replace(/\s+/g, ' ').trim() : mobName;
+            const completed = (total > 0 && done >= total) || zakonNormalize(after).includes('porozmawiaj z zakonnik rownowagi');
+            const city = zakonDetectCityFromText(before + '\n' + after);
+            const id = `${zakonNormalize(title || mobName)}::${zakonNormalize(mobName)}::${total || 0}`;
+            tasks.push({ id, title, level, city, mobName, done, total, completed, scannedAt: Date.now() });
+        }
+        return tasks;
+    }
+
+    function scanZakonTasks(force = false) {
+        ensureZakonSettings();
+        const text = zakonCollectQuestText(force);
+        const tasks = parseZakonTasksFromText(text);
+        if (tasks.length) {
+            botSettings.zakon.lastTasks = tasks;
+            botSettings.zakon.lastScanAt = Date.now();
+            runWhenBrowserIdle(() => saveSettings(), { timeout: 1200 });
+        }
+        return { tasks: tasks.length ? tasks : (botSettings.zakon.lastTasks || []), text };
+    }
+    window.scanZakonTasks = scanZakonTasks;
+
+    function zakonGetProfileLevel(profile) {
+        const m = String(profile?.name || '').match(/\((\d+)\s*lvl\)/i);
+        return m ? Number(m[1]) : 0;
+    }
+
+    function zakonMobTokens(name) {
+        const norm = zakonNormalize(name);
+        const words = norm.split(/[^a-z0-9]+/).filter(w => w.length >= 3);
+        const tokens = new Set(words);
+        for (const word of words) {
+            const stem = word
+                .replace(/(owych|owych|owego|ami|ach|ego|ych|ow|ow|em|om|ie|y|a|e|i)$/g, '');
+            if (stem.length >= 3) tokens.add(stem);
+        }
+        if (norm.includes('ork')) { tokens.add('ork'); tokens.add('orcz'); }
+        if (norm.includes('goblin')) tokens.add('goblin');
+        if (norm.includes('berserker')) tokens.add('berserker');
+        if (norm.includes('dusz') || norm.includes('duch')) { tokens.add('dusz'); tokens.add('duch'); }
+        if (norm.includes('wiedz')) tokens.add('wiedz');
+        if (norm.includes('zagajnik')) tokens.add('zagajnik');
+        if (norm.includes('kruzo')) tokens.add('kruzo');
+        if (norm.includes('mechan')) tokens.add('mechan');
+        return Array.from(tokens).filter(t => t.length >= 3);
+    }
+
+    function findBestZakonExpProfile(task) {
+        const profiles = Array.isArray(botSettings.expProfiles) ? botSettings.expProfiles : [];
+        const taskNorm = zakonNormalize(`${task?.mobName || ''} ${task?.title || ''}`);
+        const tokens = zakonMobTokens(task?.mobName || task?.title || '');
+        let best = null;
+        profiles.forEach((profile, index) => {
+            if (!profile || !Array.isArray(profile.maps) || !profile.maps.length) return;
+            const hay = zakonNormalize(`${profile.name || ''} ${profile.desc || ''} ${(profile.maps || []).join(' ')}`);
+            let score = 0;
+            if (taskNorm && hay.includes(taskNorm)) score += 80;
+            for (const token of tokens) {
+                if (hay.includes(token)) score += token.length >= 5 ? 12 : 8;
+            }
+            const level = zakonGetProfileLevel(profile);
+            if (task?.level && level) {
+                const diff = Math.abs(level - task.level);
+                score += Math.max(0, 18 - Math.min(18, diff));
+            }
+            if (!best || score > best.score) best = { index, profile, score, level };
+        });
+        return best && best.score >= 12 ? best : null;
+    }
+    window.findBestZakonExpProfile = findBestZakonExpProfile;
+
+    function sameExpMapOrder(maps) {
+        const current = Array.isArray(botSettings?.exp?.mapOrder) ? botSettings.exp.mapOrder : [];
+        if (!Array.isArray(maps) || current.length !== maps.length) return false;
+        return current.every((m, i) => normalizeMapName(m) === normalizeMapName(maps[i]));
+    }
+
+    function loadZakonProfileForTask(task) {
+        ensureZakonSettings();
+        const best = findBestZakonExpProfile(task);
+        if (!best) {
+            zakonLog(`Nie znalazlem expowiska dla: ${task?.mobName || task?.title || 'zadania'}`, '#ffb74d', 4000);
+            return false;
+        }
+        if (!sameExpMapOrder(best.profile.maps)) {
+            setExpMapOrder(best.profile.maps, 'zakon_task_profile');
+            const baseLvl = best.level || Number(task?.level || 0);
+            if (baseLvl) {
+                botSettings.exp.minLvl = Math.max(1, baseLvl - 6);
+                botSettings.exp.maxLvl = baseLvl + 18;
+                const minInput = document.getElementById('expMinL');
+                const maxInput = document.getElementById('expMaxL');
+                if (minInput) minInput.value = botSettings.exp.minLvl;
+                if (maxInput) maxInput.value = botSettings.exp.maxLvl;
+            }
+            botSettings.zakon.selectedProfileIndex = best.index;
+            botSettings.zakon.selectedProfileName = best.profile.name || '';
+            runWhenBrowserIdle(() => saveSettings(), { timeout: 1200 });
+            if (typeof window.renderExpMaps === 'function') window.renderExpMaps();
+            zakonLog(`Wybrane expowisko: ${best.profile.name} dla ${task.mobName}`, '#4caf50', 3000);
+        }
+        return true;
+    }
+    window.loadZakonProfileForTask = loadZakonProfileForTask;
+
+    function ensureZakonExpRunning() {
+        ensureZakonSettings();
+        if (!botSettings.zakon.autoStartExp) return false;
+        if (window.isExping) return true;
+        try {
+            if (window.isPatrolling && typeof stopPatrol === 'function') stopPatrol(false);
+        } catch (_) {}
+        const btn = document.getElementById('btnStartExp');
+        if (!btn) return false;
+        window.__zakonOwnsExp = true;
+        btn.click();
+        zakonLog('Uruchamiam EXP dla zadania Zakonu.', '#4caf50', 2500);
+        return true;
+    }
+
+    function stopZakonOwnedExp(reason = 'zakon_stop') {
+        if (!window.__zakonOwnsExp || !window.isExping) return false;
+        const btn = document.getElementById('btnStartExp');
+        if (btn) btn.click();
+        window.__zakonOwnsExp = false;
+        zakonLog(`Zatrzymuje EXP: ${reason}`, '#ffb74d', 2500);
+        return true;
+    }
+
+    function resolveZakonCity(task = null) {
+        ensureZakonSettings();
+        const npcs = getZakonNpcMap();
+        const selected = botSettings.zakon.city;
+        if (selected && selected !== 'auto' && npcs[selected]) return selected;
+        if (task?.city && npcs[task.city]) return task.city;
+        const current = getCurrentMapName();
+        const exact = Object.keys(npcs).find(city => normalizeMapName(city) === normalizeMapName(current));
+        if (exact) return exact;
+        return 'Werbin';
+    }
+
+    function goToZakonnik(task = null) {
+        const city = resolveZakonCity(task);
+        const npcs = getZakonNpcMap();
+        const target = npcs[city] || npcs.Werbin;
+        const targetCity = npcs[city] ? city : 'Werbin';
+        const current = getCurrentMapName();
+        if (normalizeMapName(current) !== normalizeMapName(targetCity)) {
+            if (typeof window.rushToMap === 'function') {
+                zakonLog(`Ide do Zakonnika: ${targetCity}`, '#90caf9', 3000);
+                window.rushToMap(targetCity, target.x, target.y);
+                return true;
+            }
+            return false;
+        }
+        const npc = typeof findNearestNpcByNick === 'function'
+            ? findNearestNpcByNick(['Zakonnik Rownowagi', 'Zakonnik Równowagi'], target, 12)
+            : null;
+        if (npc && typeof startNpcDialogRobust === 'function') {
+            startNpcDialogRobust(npc, 'zakon');
+            return true;
+        }
+        if (typeof window.safeGoTo === 'function') return window.safeGoTo(target.x, target.y, false, { bypassThrottle: true });
+        if (Engine?.hero?.autoGoTo) Engine.hero.autoGoTo({ x: target.x, y: target.y });
+        return true;
+    }
+    window.goToZakonnik = goToZakonnik;
+
+    function zakonClickText(patterns, limit = 180) {
+        const normPatterns = (patterns || []).map(zakonNormalize).filter(Boolean);
+        if (!normPatterns.length) return false;
+        const selector = [
+            'button', '[role="button"]', '[onclick]', '.button', '.btn',
+            '.dialogue-window-answer', '.dialog-item', '.dialog-choice', '.option',
+            '.answer', '.dialog-answer', '#dialog li', '.dialog-options li',
+            '.dialog-texts li', '[data-option]'
+        ].join(',');
+        let nodes = [];
+        try { nodes = Array.from(document.querySelectorAll(selector)).slice(0, limit); } catch (_) {}
+        for (const el of nodes) {
+            if (!zakonIsElementVisible(el)) continue;
+            const text = zakonNormalize(`${el.innerText || el.textContent || ''} ${el.getAttribute?.('title') || ''} ${el.getAttribute?.('aria-label') || ''}`);
+            if (!text || !normPatterns.some(p => text.includes(p))) continue;
+            try {
+                if (typeof dispatchHumanMouseClick === 'function') dispatchHumanMouseClick(el);
+                else el.click();
+                return true;
+            } catch (_) {
+                try { el.click(); return true; } catch (e) {}
+            }
+        }
+        return false;
+    }
+
+    function finishZakonDialog(task = null) {
+        goToZakonnik(task);
+        setTimeout(() => {
+            const clickedFinish = (typeof clickDialogOptionByPatterns === 'function' && clickDialogOptionByPatterns([
+                'wykonalam dla ciebie zadanie',
+                'wykonalem dla ciebie zadanie',
+                'wykona'
+            ])) || zakonClickText(['wykona']);
+            if (clickedFinish) {
+                zakonLog('Oddaje wykonane zadanie u Zakonnika.', '#4caf50', 2500);
+            }
+            setTimeout(() => {
+                if (zakonClickText(['zakonczenie 1', 'zakonczenie'])) {
+                    setTimeout(() => zakonClickText(['akceptuj', 'odbierz', 'ok', 'dalej']), 300);
+                } else {
+                    zakonClickText(['akceptuj', 'odbierz', 'ok', 'dalej']);
+                }
+            }, 700);
+        }, 650);
+        return true;
+    }
+    window.finishZakonDialog = finishZakonDialog;
+
+    function startVisibleZakonTasks() {
+        ensureZakonSettings();
+        const active = scanZakonTasks(false).tasks.filter(t => !t.completed).length;
+        const limit = Math.max(0, botSettings.zakon.maxActive - active);
+        if (limit <= 0) return 0;
+        const selector = 'button,[role="button"],[onclick],.button,.btn,.quest-button,.quest-start';
+        let nodes = [];
+        try { nodes = Array.from(document.querySelectorAll(selector)).slice(0, 260); } catch (_) {}
+        const buttons = [];
+        for (const el of nodes) {
+            if (!zakonIsElementVisible(el)) continue;
+            const text = zakonNormalize(`${el.innerText || el.textContent || ''} ${el.getAttribute?.('title') || ''} ${el.getAttribute?.('aria-label') || ''}`);
+            const rawText = String(el.innerText || el.textContent || '').trim();
+            if (text.includes('rozpocznij zadanie') || rawText === '+') buttons.push(el);
+            if (buttons.length >= limit) break;
+        }
+        buttons.forEach((btn, idx) => setTimeout(() => {
+            try {
+                if (typeof dispatchHumanMouseClick === 'function') dispatchHumanMouseClick(btn);
+                else btn.click();
+            } catch (_) { try { btn.click(); } catch (e) {} }
+        }, idx * 400));
+        if (buttons.length) zakonLog(`Rozpoczynam widoczne zadania: ${buttons.length}`, '#4caf50', 2500);
+        return buttons.length;
+    }
+    window.startVisibleZakonTasks = startVisibleZakonTasks;
+
+    function chooseZakonTask(tasks) {
+        const incomplete = (tasks || []).filter(t => !t.completed && Number(t.total) > 0);
+        if (!incomplete.length) return null;
+        const currentMap = normalizeMapName(getCurrentMapName());
+        let best = null;
+        for (const task of incomplete) {
+            const profile = findBestZakonExpProfile(task);
+            const onCurrentRoute = profile?.profile?.maps?.some(m => normalizeMapName(m) === currentMap) ? 20 : 0;
+            const progress = task.total ? (task.done / task.total) : 0;
+            const score = (profile?.score || 0) + onCurrentRoute + progress;
+            if (!best || score > best.score) best = { task, score };
+        }
+        return best?.task || incomplete[0];
+    }
+
+    function renderZakonPanel() {
+        ensureZakonSettings();
+        const s = botSettings.zakon;
+        const citySel = document.getElementById('zakonCity');
+        if (citySel && citySel.value !== s.city) citySel.value = s.city;
+        const max = document.getElementById('zakonMaxActive');
+        if (max && String(max.value) !== String(s.maxActive)) max.value = s.maxActive;
+        const autoAccept = document.getElementById('zakonAutoAccept');
+        const autoFinish = document.getElementById('zakonAutoFinish');
+        const autoStartExp = document.getElementById('zakonAutoStartExp');
+        if (autoAccept) autoAccept.checked = !!s.autoAccept;
+        if (autoFinish) autoFinish.checked = !!s.autoFinish;
+        if (autoStartExp) autoStartExp.checked = !!s.autoStartExp;
+
+        const btn = document.getElementById('btnStartZakon');
+        if (btn) {
+            btn.textContent = window.isZakonRunning ? 'STOP ZAKON' : 'START ZAKON';
+            btn.style.borderColor = window.isZakonRunning ? '#f44336' : '#4caf50';
+            btn.style.color = window.isZakonRunning ? '#f44336' : '#4caf50';
+        }
+
+        const box = document.getElementById('zakonTasksList');
+        if (!box) return;
+        const tasks = s.lastTasks || [];
+        if (!tasks.length) {
+            box.innerHTML = '<div style="padding:8px; color:#777; text-align:center;">Brak wykrytych aktywnych zadan. Otworz dziennik i kliknij Skanuj.</div>';
+            return;
+        }
+        box.innerHTML = tasks.map(task => {
+            const best = findBestZakonExpProfile(task);
+            const status = task.completed ? 'gotowe do oddania' : `${task.done || 0}/${task.total || 0}`;
+            const color = task.completed ? '#4caf50' : '#ffb300';
+            return `
+                <div style="border:1px solid #3a3020; background:#141414; padding:5px; margin-bottom:4px;">
+                    <div style="display:flex; justify-content:space-between; gap:6px;">
+                        <b style="color:#e0d8c0;">${zakonEscapeHtml(task.title || task.mobName)}</b>
+                        <span style="color:${color}; white-space:nowrap;">${zakonEscapeHtml(status)}</span>
+                    </div>
+                    <div style="font-size:10px; color:#a99a75;">Mob: ${zakonEscapeHtml(task.mobName)}${task.level ? ` | lvl ${task.level}` : ''}${task.city ? ` | ${zakonEscapeHtml(task.city)}` : ''}</div>
+                    <div style="font-size:10px; color:#90caf9;">Exp: ${best ? zakonEscapeHtml(best.profile.name) : 'nie znaleziono profilu'}</div>
+                </div>`;
+        }).join('');
+    }
+    window.renderZakonPanel = renderZakonPanel;
+
+    function scheduleZakonTick(delay = 1500, runId = zakonRunId) {
+        if (zakonTimer) clearTimeout(zakonTimer);
+        if (!window.isZakonRunning || !runId) return;
+        zakonTimer = setTimeout(() => runZakonTick(runId), Math.max(400, delay));
+    }
+
+    async function runZakonTick(runId) {
+        if (!window.isZakonRunning || runId !== zakonRunId) return;
+        if (zakonTickRunning) {
+            scheduleZakonTick(1200, runId);
+            return;
+        }
+        zakonTickRunning = true;
+        let nextDelay = 1800;
+        try {
+            ensureZakonSettings();
+            const busy = typeof isGameBusyOrLoading === 'function' ? isGameBusyOrLoading({ source: 'zakon_tick' }) : { busy: false };
+            if (busy?.busy) {
+                nextDelay = 2500;
+            } else {
+                const scan = scanZakonTasks(false);
+                const tasks = scan.tasks || [];
+                const incomplete = tasks.filter(t => !t.completed && Number(t.total) > 0);
+                const completed = tasks.filter(t => t.completed || (Number(t.total) > 0 && Number(t.done) >= Number(t.total)));
+
+                if (completed.length && !incomplete.length && botSettings.zakon.autoFinish) {
+                    stopZakonOwnedExp('zakon_tasks_done');
+                    finishZakonDialog(completed[0]);
+                    nextDelay = 3500;
+                } else if (incomplete.length) {
+                    const task = chooseZakonTask(incomplete);
+                    if (task && loadZakonProfileForTask(task)) ensureZakonExpRunning();
+                    nextDelay = window.isExping ? 2500 : 1800;
+                } else if (botSettings.zakon.autoAccept) {
+                    const started = startVisibleZakonTasks();
+                    if (!started) zakonLog('Nie widze aktywnych zadan. Otworz Dostepne -> Zakon Rownowagi albo podejdz do Zakonnika.', '#90caf9', 6000);
+                    nextDelay = started ? 2500 : 4500;
+                }
+                renderZakonPanel();
+            }
+        } catch (e) {
+            console.warn('[ZAKON] tick failed', e);
+            zakonLog(`Blad modulu Zakonu: ${e?.message || e}`, '#f44336', 5000);
+            nextDelay = 3000;
+        } finally {
+            zakonTickRunning = false;
+            scheduleZakonTick(nextDelay, runId);
+        }
+    }
+
+    function startZakonAutomation() {
+        ensureZakonSettings();
+        if (window.isZakonRunning) return;
+        window.isZakonRunning = true;
+        botSettings.zakon.enabled = true;
+        zakonRunId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+        zakonLog('START Zakonu Rownowagi.', '#4caf50', 1000);
+        renderZakonPanel();
+        runWhenBrowserIdle(() => saveSettings(), { timeout: 1200 });
+        scheduleZakonTick(150, zakonRunId);
+    }
+    window.startZakonAutomation = startZakonAutomation;
+
+    function stopZakonAutomation(reason = 'manual') {
+        window.isZakonRunning = false;
+        ensureZakonSettings().enabled = false;
+        zakonRunId = null;
+        if (zakonTimer) clearTimeout(zakonTimer);
+        zakonTimer = null;
+        zakonTickRunning = false;
+        stopZakonOwnedExp(reason);
+        zakonLog(`STOP Zakonu: ${reason}`, '#f44336', 1000);
+        renderZakonPanel();
+        runWhenBrowserIdle(() => saveSettings(), { timeout: 1200 });
+    }
+    window.stopZakonAutomation = stopZakonAutomation;
 
     // --- SILNIK MARGONEURO: DISCORD WEBHOOK ---
     window.sendDiscordWebhook = function(title, description, colorHex = 16753920) {
@@ -11323,6 +11874,7 @@ function initGUI() {
                 <div id="e2ModeToggle" class="nav-tab">ELITY II</div>
                 <div id="kolosyModeToggle" class="nav-tab">KOLOSY</div>
                 <div id="expModeToggle" class="nav-tab">EXP</div>
+                <div id="zakonModeToggle" class="nav-tab">ZAKON</div>
                 <div id="teleportsModeToggle" class="nav-tab" style="display:none !important;">TP/EQ/HP</div>
             </div>
             <div class="gui-content" id="mainRoutingPanel">
@@ -11478,6 +12030,44 @@ function initGUI() {
                     </div>
 
                     <button id="btnStartExp" class="btn btn-go-sepia" style="margin-top:auto; padding: 6px; font-size: 12px; border: 1px solid #4caf50; color: #4caf50; font-weight:bold;">START</button>
+                </div>
+                <div id="zakonContainer" style="display:none; flex-direction:column; flex:1; min-height:0; gap:5px; padding-top:4px;">
+                    <div id="zakonConsole" style="height:84px; background:#050505; border:1px solid #3a3020; color:#d4af37; font-family:monospace; font-size:10px; overflow-y:auto; padding:4px;">[System] Modul Zakonu Rownowagi w gotowosci...</div>
+
+                    <div class="nav-row" style="display:grid; grid-template-columns: 1fr 76px; gap:5px; align-items:end;">
+                        <label style="font-size:10px; color:#a99a75;">Miasto Zakonu:
+                            <select id="zakonCity" style="width:100%; background:#000; color:#d4af37; border:1px solid #3a3020; padding:4px;">
+                                <option value="auto">Auto</option>
+                                <option value="Werbin">Werbin</option>
+                                <option value="Ithan">Ithan</option>
+                                <option value="Eder">Eder</option>
+                                <option value="Torneg">Torneg</option>
+                                <option value="Tuzmer">Tuzmer</option>
+                                <option value="Thuzal">Thuzal</option>
+                                <option value="Karka-han">Karka-han</option>
+                            </select>
+                        </label>
+                        <label style="font-size:10px; color:#a99a75;">Aktywne:
+                            <input type="number" id="zakonMaxActive" min="1" max="8" value="${botSettings.zakon?.maxActive || 3}" style="width:100%; background:#000; color:#d4af37; border:1px solid #3a3020; padding:4px; box-sizing:border-box;">
+                        </label>
+                    </div>
+
+                    <div style="display:grid; grid-template-columns: 1fr; gap:3px; border:1px solid #3a3020; background:#141414; padding:5px;">
+                        <label style="font-size:10px; color:#e0d8c0;"><input type="checkbox" id="zakonAutoAccept" ${botSettings.zakon?.autoAccept !== false ? 'checked' : ''}> Startuj widoczne zadania z dziennika</label>
+                        <label style="font-size:10px; color:#e0d8c0;"><input type="checkbox" id="zakonAutoStartExp" ${botSettings.zakon?.autoStartExp !== false ? 'checked' : ''}> Dobieraj expowisko i wlaczaj EXP</label>
+                        <label style="font-size:10px; color:#e0d8c0;"><input type="checkbox" id="zakonAutoFinish" ${botSettings.zakon?.autoFinish !== false ? 'checked' : ''}> Oddawaj gotowe zadania u Zakonnika</label>
+                    </div>
+
+                    <div style="display:grid; grid-template-columns: repeat(5, 1fr); gap:4px;">
+                        <button id="btnZakonScan" class="btn-sepia" style="padding:5px; background:#263238; border-color:#00acc1; color:#e0f7fa;">Skanuj</button>
+                        <button id="btnZakonStartVisible" class="btn-sepia" style="padding:5px; background:#33691e;">Start zad.</button>
+                        <button id="btnZakonPickExp" class="btn-sepia" style="padding:5px; background:#00838f;">Dobierz EXP</button>
+                        <button id="btnZakonGoNpc" class="btn-sepia" style="padding:5px; background:#6d4c41;">Do NPC</button>
+                        <button id="btnZakonFinish" class="btn-sepia" style="padding:5px; background:#4e342e;">Oddaj</button>
+                    </div>
+
+                    <div id="zakonTasksList" style="border:1px solid #3a3020; background:#000; overflow-y:auto; min-height:120px; max-height:260px; padding:4px; flex:1;"></div>
+                    <button id="btnStartZakon" class="btn btn-go-sepia" style="margin-top:auto; padding: 6px; font-size: 12px; border: 1px solid #4caf50; color: #4caf50; font-weight:bold;">START ZAKON</button>
                 </div>
                 <div id="teleportsContainer" style="display:none; flex-direction:column; flex:1; min-height:0; padding-top:4px; gap:6px;">
                     <button id="btnOpenTeleports" class="btn btn-go-sepia" style="padding:6px; background:#00838f; border-color:#00acc1; font-weight:bold; color:white;">Zarządzaj teleportami</button>
@@ -11948,7 +12538,7 @@ function setOnChange(id, handler) {
         } catch (_) {}
 
      // ZAKŁADKI (TABS) - POPRAWIONE BEZPIECZNE PRZEŁĄCZANIE
-       const tabs = ['hero', 'e2', 'kolosy', 'exp', 'teleports'];
+       const tabs = ['hero', 'e2', 'kolosy', 'exp', 'zakon', 'teleports'];
        tabs.forEach(tab => {
            let toggle = document.getElementById(tab + 'ModeToggle');
            if(toggle) {
@@ -11961,6 +12551,7 @@ function setOnChange(id, handler) {
                    let e2C = document.getElementById('e2Container'); if(e2C) e2C.style.display = tab === 'e2' ? 'flex' : 'none';
                    let kolosyC = document.getElementById('kolosyContainer'); if(kolosyC) kolosyC.style.display = tab === 'kolosy' ? 'flex' : 'none';
                    let expC = document.getElementById('expContainer'); if(expC) expC.style.display = tab === 'exp' ? 'flex' : 'none';
+                   let zakonC = document.getElementById('zakonContainer'); if(zakonC) zakonC.style.display = tab === 'zakon' ? 'flex' : 'none';
                    let tpC = document.getElementById('teleportsContainer'); if(tpC) tpC.style.display = tab === 'teleports' ? 'flex' : 'none';
 
                    // Radar widoczny TYLKO w zakładce Herosi
@@ -11968,6 +12559,7 @@ function setOnChange(id, handler) {
 
                    activeBossTarget = null;
                    if(tab === 'exp' && typeof renderExpMaps === 'function') renderExpMaps();
+                   if(tab === 'zakon' && typeof renderZakonPanel === 'function') renderZakonPanel();
                });
            }
        });
@@ -11979,6 +12571,84 @@ function setOnChange(id, handler) {
                if (typeof window.renderInternalMapGraph === 'function') window.renderInternalMapGraph(window.__internalSelectedMap, false);
            });
        }
+
+       if (typeof renderZakonPanel === 'function') renderZakonPanel();
+
+       const bindZakonClick = (id, handler) => {
+           const el = document.getElementById(id);
+           if (!el || el.__margoneuroZakonBound) return false;
+           el.__margoneuroZakonBound = true;
+           el.addEventListener('click', handler);
+           return true;
+       };
+       const bindZakonChange = (id, handler) => {
+           const el = document.getElementById(id);
+           if (!el || el.__margoneuroZakonBound) return false;
+           el.__margoneuroZakonBound = true;
+           el.addEventListener('change', handler);
+           return true;
+       };
+
+       bindZakonClick('btnStartZakon', () => {
+           if (window.isZakonRunning) {
+               if (typeof stopZakonAutomation === 'function') stopZakonAutomation('manual');
+           } else if (typeof startZakonAutomation === 'function') {
+               startZakonAutomation();
+           }
+       });
+       bindZakonClick('btnZakonScan', () => {
+           if (typeof scanZakonTasks === 'function') scanZakonTasks(true);
+           if (typeof renderZakonPanel === 'function') renderZakonPanel();
+       });
+       bindZakonClick('btnZakonStartVisible', () => {
+           if (typeof startVisibleZakonTasks === 'function') startVisibleZakonTasks();
+           setTimeout(() => {
+               if (typeof scanZakonTasks === 'function') scanZakonTasks(true);
+               if (typeof renderZakonPanel === 'function') renderZakonPanel();
+           }, 1200);
+       });
+       bindZakonClick('btnZakonPickExp', () => {
+           const scan = typeof scanZakonTasks === 'function' ? scanZakonTasks(true) : { tasks: [] };
+           const task = (scan.tasks || []).find(t => !t.completed) || (scan.tasks || [])[0];
+           if (task && typeof loadZakonProfileForTask === 'function') loadZakonProfileForTask(task);
+           if (typeof renderZakonPanel === 'function') renderZakonPanel();
+       });
+       bindZakonClick('btnZakonGoNpc', () => {
+           const scan = typeof scanZakonTasks === 'function' ? scanZakonTasks(false) : { tasks: [] };
+           const task = (scan.tasks || [])[0] || null;
+           if (typeof goToZakonnik === 'function') goToZakonnik(task);
+       });
+       bindZakonClick('btnZakonFinish', () => {
+           const scan = typeof scanZakonTasks === 'function' ? scanZakonTasks(true) : { tasks: [] };
+           const task = (scan.tasks || []).find(t => t.completed) || (scan.tasks || [])[0] || null;
+           if (typeof finishZakonDialog === 'function') finishZakonDialog(task);
+       });
+       bindZakonChange('zakonCity', e => {
+           ensureZakonSettings();
+           botSettings.zakon.city = e.target.value || 'auto';
+           saveSettings();
+       });
+       bindZakonChange('zakonMaxActive', e => {
+           ensureZakonSettings();
+           botSettings.zakon.maxActive = Math.max(1, Math.min(8, Number(e.target.value) || 3));
+           saveSettings();
+           if (typeof renderZakonPanel === 'function') renderZakonPanel();
+       });
+       bindZakonChange('zakonAutoAccept', e => {
+           ensureZakonSettings();
+           botSettings.zakon.autoAccept = !!e.target.checked;
+           saveSettings();
+       });
+       bindZakonChange('zakonAutoStartExp', e => {
+           ensureZakonSettings();
+           botSettings.zakon.autoStartExp = !!e.target.checked;
+           saveSettings();
+       });
+       bindZakonChange('zakonAutoFinish', e => {
+           ensureZakonSettings();
+           botSettings.zakon.autoFinish = !!e.target.checked;
+           saveSettings();
+       });
 
 
 const btnExp = document.getElementById('btnStartExp');
