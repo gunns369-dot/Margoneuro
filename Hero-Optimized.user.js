@@ -6956,6 +6956,9 @@ function cleanOldGateways() {
             reason,
             ts: Date.now()
         };
+        if (typeof wakeMovementAfterMapTransition === 'function') {
+            wakeMovementAfterMapTransition(fromMap, toMap, reason);
+        }
         if (changed) {
             if (typeof window.renderInternalMapGraph === 'function') window.renderInternalMapGraph();
             updateUI();
@@ -8499,11 +8502,13 @@ function autoDetectEngineData() {
             updateUI();
         }
 
-        if (isRushing) {
+        const activeRushAfterMapChange = !!(isRushing || window.isRushing || window.rushTarget);
+        if (activeRushAfterMapChange) {
+            if (typeof restoreRushLocalStateFromWindow === 'function') restoreRushLocalStateFromWindow('map_change');
             clearTimeout(rushInterval);
             let loadDelay = Math.floor(Math.random() * (botSettings.mapLoadMax - botSettings.mapLoadMin + 1)) + botSettings.mapLoadMin;
             setTimeout(() => {
-                if (isRushing && typeof window.executeRushStep === 'function') window.executeRushStep();
+                if ((isRushing || window.isRushing || window.rushTarget) && typeof window.executeRushStep === 'function') window.executeRushStep();
             }, loadDelay);
         } else if (isPatrolling) {
             clearTimeout(smoothPatrolInterval);
@@ -8526,6 +8531,10 @@ function autoDetectEngineData() {
             window.isRushing = false;
             rushTarget = "";
             window.rushTarget = null;
+            rushTargetX = null;
+            rushTargetY = null;
+            window.rushTargetX = null;
+            window.rushTargetY = null;
             window.rushNextMap = null;
             window._lastRushNextMap = null;
             clearTimeout(rushInterval);
@@ -8584,6 +8593,8 @@ function autoDetectEngineData() {
         window.__lastRushReissueAt = Date.now();
         rushTargetX = x;
         rushTargetY = y;
+        window.rushTargetX = x;
+        window.rushTargetY = y;
         try {
             const parsedFullPath = (typeof fullPath === 'string') ? JSON.parse(fullPath) : fullPath;
             window.rushFullPath = Array.isArray(parsedFullPath)
@@ -8860,6 +8871,77 @@ function scheduleRushStep(delayMs = 250, reason = 'rush_step') {
 }
 window.scheduleRushStep = scheduleRushStep;
 
+function restoreRushLocalStateFromWindow(reason = 'rush_sync') {
+    let changed = false;
+    const windowTarget = window.rushTarget ? String(window.rushTarget) : "";
+    const localTarget = rushTarget ? String(rushTarget) : "";
+    if (!localTarget && windowTarget) {
+        rushTarget = window.rushTarget;
+        changed = true;
+    } else if (localTarget && !windowTarget && (isRushing || window.isRushing)) {
+        window.rushTarget = rushTarget;
+        changed = true;
+    }
+
+    if ((rushTargetX === null || rushTargetX === undefined) && window.rushTargetX !== null && window.rushTargetX !== undefined) {
+        const wx = Number(window.rushTargetX);
+        if (Number.isFinite(wx)) {
+            rushTargetX = wx;
+            changed = true;
+        }
+    }
+    if ((rushTargetY === null || rushTargetY === undefined) && window.rushTargetY !== null && window.rushTargetY !== undefined) {
+        const wy = Number(window.rushTargetY);
+        if (Number.isFinite(wy)) {
+            rushTargetY = wy;
+            changed = true;
+        }
+    }
+    if (rushTargetX !== null && rushTargetX !== undefined) window.rushTargetX = rushTargetX;
+    if (rushTargetY !== null && rushTargetY !== undefined) window.rushTargetY = rushTargetY;
+
+    const hasTarget = !!(rushTarget || window.rushTarget);
+    if (!isRushing && window.isRushing && hasTarget) {
+        isRushing = true;
+        changed = true;
+    } else if (isRushing && !window.isRushing && hasTarget) {
+        window.isRushing = true;
+        changed = true;
+    }
+
+    if (changed) {
+        window.__lastRushStateRestore = { reason, at: Date.now(), target: rushTarget || window.rushTarget || null };
+    }
+    return changed;
+}
+window.restoreRushLocalStateFromWindow = restoreRushLocalStateFromWindow;
+
+function wakeMovementAfterMapTransition(fromMap, toMap, reason = 'transition') {
+    const now = Date.now();
+    window.__lastMovementTransition = { fromMap, toMap, reason, at: now };
+    const rushActive = !!(window.isRushing || isRushing || window.rushTarget);
+    if (rushActive) {
+        restoreRushLocalStateFromWindow(`transition:${reason}`);
+        if (window.rushNextMap && normMapName(window.rushNextMap) === normMapName(toMap)) {
+            window.rushNextMap = null;
+            window._lastRushNextMap = null;
+        }
+        window.__rushGatewayDoorCache = null;
+        window.__rushNoPathRecovery = null;
+        window.__rushAntiStuckSuppressUntil = now + 1400;
+        scheduleRushStep(260, `transition_continue:${reason}`);
+    }
+    if (window.isExping && typeof window.requestExpLogicSoon === 'function') {
+        window.requestExpLogicSoon(320, `transition_continue:${reason}`);
+    }
+    if (!rushActive && (typeof isPatrolling !== 'undefined' && isPatrolling) && typeof executePatrolStep === 'function') {
+        scheduleMovementTask(() => {
+            if ((typeof isPatrolling !== 'undefined' && isPatrolling) && typeof executePatrolStep === 'function') executePatrolStep();
+        }, 450, `patrol:transition_continue:${reason}`);
+    }
+}
+window.wakeMovementAfterMapTransition = wakeMovementAfterMapTransition;
+
 window.executeRushStep = function() {
     // Blokada spamu silnika Rush (max raz na 400ms)
         let nowRush = Date.now();
@@ -8888,6 +8970,7 @@ window.executeRushStep = function() {
             scheduleRushStep(450, 'rush_level_gate_replan');
             return;
         }
+        restoreRushLocalStateFromWindow('rush_step');
         if (!isRushing && !window.isRushing) return;
         // Samonaprawa synchronizacji flag rusha (część modułów ustawia tylko window.isRushing).
         if (!isRushing && window.isRushing && rushTarget) {
@@ -8897,6 +8980,10 @@ window.executeRushStep = function() {
             isRushing = false;
             window.isRushing = false;
             window.rushTarget = null;
+            rushTargetX = null;
+            rushTargetY = null;
+            window.rushTargetX = null;
+            window.rushTargetY = null;
             return;
         }
         let currentSysMap = getCurrentMapName();
@@ -8918,17 +9005,24 @@ window.executeRushStep = function() {
         }
 
         if (normMapName(currentSysMap) === normMapName(rushTarget)) {
+            const finalRushTargetX = rushTargetX;
+            const finalRushTargetY = rushTargetY;
             isRushing = false;
             window.isRushing = false;
+            rushTarget = "";
             window.rushTarget = null;
+            rushTargetX = null;
+            rushTargetY = null;
+            window.rushTargetX = null;
+            window.rushTargetY = null;
             window._lastRushNextMap = null;
             window._lastRushTargetLog = null;
             if (typeof syncBerserkState === 'function') syncBerserkState('rush_target_reached');
             let btn = document.getElementById('btnStartStop');
             if (btn) { btn.innerHTML = '<span class="btn-icon">▶</span><span>START HEROSI</span>'; btn.style.color = "#4caf50"; btn.style.borderColor = "#4caf50"; }
 
-            if (rushTargetX !== null && rushTargetY !== null) {
-                setTimeout(() => safeGoTo(rushTargetX, rushTargetY, false), 500);
+            if (finalRushTargetX !== null && finalRushTargetY !== null) {
+                setTimeout(() => safeGoTo(finalRushTargetX, finalRushTargetY, false), 500);
             }
 
             if (window.isExping) {
@@ -9386,6 +9480,7 @@ window.executeRushStep = function() {
     };
 
     window.checkRushArrival = function() {
+        restoreRushLocalStateFromWindow('rush_arrival');
         if (!isRushing && window.isRushing && rushTarget) isRushing = true;
         if (!isRushing || typeof Engine === 'undefined' || !Engine.hero) return;
         const arrivalBusy = typeof isGameBusyOrLoading === 'function' ? isGameBusyOrLoading({ source: 'rush_arrival' }) : { busy: false };
@@ -10468,7 +10563,7 @@ window.handleTeleportNPC = function(targetMap) {
     };
 
     function rescheduleTeleportCheck(targetMap) {
-        if (isRushing) { clearTimeout(rushInterval); rushInterval = setTimeout(() => window.handleTeleportNPC(targetMap), 600); }
+        if (isRushing || window.isRushing || window.rushTarget) { clearTimeout(rushInterval); rushInterval = setTimeout(() => window.handleTeleportNPC(targetMap), 600); }
         else if (isPatrolling) { clearTimeout(smoothPatrolInterval); smoothPatrolInterval = setTimeout(() => window.handleTeleportNPC(targetMap), 600); }
         else if (window.isExping) { setTimeout(() => window.handleTeleportNPC(targetMap), 600); }
     }
@@ -19046,6 +19141,39 @@ function stopExpRouteMovementForNoRoute(reason = 'no_route') {
     setExpBerserkState(false);
 }
 
+function getNextPendingExpRouteMap(currentMap = getCurrentMapName(), mapsPool = null) {
+    const pool = mergeAndDeduplicateExpMaps(Array.isArray(mapsPool) && mapsPool.length ? mapsPool : getCurrentExpHuntMaps()).maps;
+    if (!Array.isArray(pool) || !pool.length) return null;
+    const now = Date.now();
+    const currentKey = normMapName(currentMap);
+    const currentIdx = pool.findIndex(mapName => normMapName(mapName) === currentKey);
+    const ordered = [];
+    if (currentIdx >= 0) {
+        for (let step = 1; step <= pool.length; step++) ordered.push(pool[(currentIdx + step) % pool.length]);
+    } else {
+        ordered.push(...pool);
+    }
+
+    for (const mapName of ordered) {
+        const key = normMapName(mapName);
+        if (!key || key === currentKey) continue;
+        const cooldown = typeof getMapCooldownInfo === 'function' ? getMapCooldownInfo(mapName) : null;
+        if (cooldown?.isCleared) continue;
+        const banUntil = typeof getExpMapBanUntil === 'function' ? getExpMapBanUntil(mapName, now) : 0;
+        if (banUntil && banUntil > now) continue;
+        const state = typeof getExpMapState === 'function' ? getExpMapState(mapName) : null;
+        return {
+            mapName,
+            key,
+            state,
+            routeOrder: pool.findIndex(item => normMapName(item) === key),
+            reason: 'pending_uncleared_route_order'
+        };
+    }
+    return null;
+}
+window.getNextPendingExpRouteMap = getNextPendingExpRouteMap;
+
 function activateExpNoRouteBackoff(currentMap = getCurrentMapName(), mapsPool = null, reason = 'no_reachable_exp_route', details = {}) {
     const now = Date.now();
     const signature = getExpRouteSelectionSignature(currentMap, mapsPool);
@@ -19204,6 +19332,36 @@ function chooseNextExpMap(currentMap = getCurrentMapName(), mapsPool = null) {
             reason: 'route_order_fallback',
             score: 50000 + forwardDistance(best),
             candidate: { ...best, path: [], distance: null, routeFound: false, needsDynamicRushPlan: true },
+            shouldWait: false
+        });
+    }
+
+    const pendingMap = typeof getNextPendingExpRouteMap === 'function'
+        ? getNextPendingExpRouteMap(currentMap, mapsPool)
+        : null;
+    if (pendingMap?.mapName) {
+        clearExpNoRouteBackoff('pending_uncleared_route_order');
+        if (pendingMap.state) {
+            pendingMap.state.status = EXP_MAP_STATUS.TRANSIT;
+            pendingMap.state.isCurrentlyReachable = true;
+            pendingMap.state.unreachableUntil = 0;
+            pendingMap.state.failedPathAttempts = 0;
+            pendingMap.state.updatedAt = Date.now();
+            persistExpRouteState();
+        }
+        window.expWaitingForRespawn = false;
+        expPlannerDebugLog(
+            `route_pending_before_respawn:${pendingMap.key}`,
+            `[EXP-ROTATION] pending map before respawn wait=${pendingMap.mapName}; runtime will use rush routing`,
+            "#ffcc80",
+            3500
+        );
+        return cacheDecision({
+            targetMap: pendingMap.mapName,
+            path: [],
+            reason: 'pending_uncleared_route_order',
+            score: 60000 + Number(pendingMap.routeOrder || 0),
+            candidate: { ...pendingMap, path: [], distance: null, routeFound: false, needsDynamicRushPlan: true },
             shouldWait: false
         });
     }
