@@ -5627,19 +5627,64 @@ window.heroMapOrder = heroMapOrder;
             const id = `${zakonNormalize(title || mobName)}::${zakonNormalize(mobName)}::${total || 0}`;
             tasks.push({ id, title, level, city, mobName, done, total, completed, scannedAt: Date.now() });
         }
-        return tasks;
+        return dedupeZakonTasks(tasks);
+    }
+
+    function getZakonTaskDedupeKey(task = {}) {
+        const title = zakonNormalize(task.title || task.mobName || '');
+        const mob = zakonNormalize(task.mobName || task.title || '');
+        const total = Number(task.total || 0);
+        return `${title}::${mob}::${total}`;
+    }
+
+    function dedupeZakonTasks(tasks = []) {
+        const byKey = new Map();
+        for (const task of tasks || []) {
+            if (!task) continue;
+            const key = getZakonTaskDedupeKey(task);
+            if (!key || key === '::::0') continue;
+            const prev = byKey.get(key);
+            if (!prev) {
+                byKey.set(key, {
+                    ...task,
+                    id: task.id || key,
+                    done: Number(task.done || 0),
+                    total: Number(task.total || 0),
+                    completed: !!task.completed
+                });
+                continue;
+            }
+            const prevDone = Number(prev.done || 0);
+            const nextDone = Number(task.done || 0);
+            const prevTotal = Number(prev.total || 0);
+            const nextTotal = Number(task.total || 0);
+            byKey.set(key, {
+                ...prev,
+                ...task,
+                id: prev.id || task.id || key,
+                title: prev.title || task.title || task.mobName,
+                mobName: prev.mobName || task.mobName || task.title,
+                city: prev.city || task.city || '',
+                level: Number(prev.level || 0) || Number(task.level || 0) || 0,
+                done: Math.max(prevDone, nextDone),
+                total: Math.max(prevTotal, nextTotal),
+                completed: !!(prev.completed || task.completed || (Math.max(prevTotal, nextTotal) > 0 && Math.max(prevDone, nextDone) >= Math.max(prevTotal, nextTotal))),
+                scannedAt: Math.max(Number(prev.scannedAt || 0), Number(task.scannedAt || 0), Date.now())
+            });
+        }
+        return Array.from(byKey.values());
     }
 
     function scanZakonTasks(force = false) {
         ensureZakonSettings();
         const text = zakonCollectQuestText(force);
-        const tasks = parseZakonTasksFromText(text);
+        const tasks = dedupeZakonTasks(parseZakonTasksFromText(text));
         if (tasks.length) {
             botSettings.zakon.lastTasks = tasks;
             botSettings.zakon.lastScanAt = Date.now();
             runWhenBrowserIdle(() => saveSettings(), { timeout: 1200 });
         }
-        return { tasks: tasks.length ? tasks : (botSettings.zakon.lastTasks || []), text };
+        return { tasks: tasks.length ? tasks : dedupeZakonTasks(botSettings.zakon.lastTasks || []), text };
     }
     window.scanZakonTasks = scanZakonTasks;
 
@@ -5903,7 +5948,7 @@ window.heroMapOrder = heroMapOrder;
 
         const box = document.getElementById('zakonTasksList');
         if (!box) return;
-        const tasks = s.lastTasks || [];
+        const tasks = dedupeZakonTasks(s.lastTasks || []);
         if (!tasks.length) {
             box.innerHTML = '<div style="padding:8px; color:#777; text-align:center;">Brak wykrytych aktywnych zadan. Otworz dziennik i kliknij Skanuj.</div>';
             return;
@@ -8968,6 +9013,15 @@ function autoDetectEngineData() {
         if (previousMapName && typeof recordObservedMapTransition === 'function') {
             recordObservedMapTransition(previousMapName, currentName, 'engine-map-change');
         }
+        if (previousMapName && typeof wakeMovementAfterMapTransition === 'function') {
+            const lastWake = window.__lastMovementTransition || {};
+            const alreadyWoke = normMapName(lastWake.fromMap) === normMapName(previousMapName)
+                && normMapName(lastWake.toMap) === normMapName(currentName)
+                && Date.now() - Number(lastWake.at || 0) < 900;
+            if (!alreadyWoke) {
+                wakeMovementAfterMapTransition(previousMapName, currentName, 'engine-map-change-fallback');
+            }
+        }
         positionHistory = [];
         lastMapName = currentName;
         if (typeof syncBerserkState === 'function') syncBerserkState('map_change');
@@ -9551,26 +9605,101 @@ function pickGatewayStepOffTile(cx, cy, entry, nextMap = '') {
     return candidates[0];
 }
 
+function isAnyMovementModeActiveForStepOff() {
+    return !!(
+        window.isExping ||
+        window.isZakonRunning ||
+        window.isRushing ||
+        window.rushTarget ||
+        (typeof isRushing !== 'undefined' && isRushing) ||
+        (typeof isPatrolling !== 'undefined' && isPatrolling) ||
+        window.isPatrolling
+    );
+}
+
+function getPostTransitionNextMap(currentMap = '') {
+    const currNorm = normMapName(currentMap);
+    if (window.rushNextMap) return window.rushNextMap;
+    if (Array.isArray(window.rushFullPath) && window.rushFullPath.length > 1) {
+        const idx = window.rushFullPath.findIndex(m => normMapName(m) === currNorm);
+        if (idx >= 0 && idx < window.rushFullPath.length - 1) return window.rushFullPath[idx + 1];
+    }
+    return '';
+}
+
+function tryPostTransitionNextGatewayKick(meta = {}, attempt = 0) {
+    if (attempt < 1) return false;
+    const currentMap = typeof getCurrentMapName === 'function' ? getCurrentMapName() : Engine?.map?.d?.name || '';
+    if (meta.toMap && normMapName(currentMap) !== normMapName(meta.toMap)) return false;
+    const nextMap = getPostTransitionNextMap(currentMap);
+    if (!nextMap) return false;
+    if (isHeroActuallyMovingForStepOff({ ignorePassiveLock: true }) && attempt < 3) return false;
+    const door = typeof getRushGatewayDoorCached === 'function'
+        ? getRushGatewayDoorCached(currentMap, nextMap)
+        : (globalGateways?.[currentMap]?.[nextMap] || null);
+    const gx = Number(door?.targetX ?? door?.x);
+    const gy = Number(door?.targetY ?? door?.y);
+    if (!Number.isFinite(gx) || !Number.isFinite(gy)) return false;
+    const now = Date.now();
+    const key = `${normMapName(currentMap)}->${normMapName(nextMap)}:${gx},${gy}`;
+    if (window.__lastPostTransitionNextGateKey === key && now - Number(window.__lastPostTransitionNextGateAt || 0) < 850) return false;
+    window.__lastPostTransitionNextGateKey = key;
+    window.__lastPostTransitionNextGateAt = now;
+    const sent = typeof window.safeGoTo === 'function'
+        ? window.safeGoTo(gx, gy, false, { bypassThrottle: true, forceExact: true })
+        : (Engine?.hero?.autoGoTo ? (Engine.hero.autoGoTo({ x: gx, y: gy }), true) : false);
+    if (sent !== false) {
+        HeroLogger.emit('DEBUG', 'GATEWAY_NEXT_KICK', `Ponawiam ruch do nastepnej bramy: ${currentMap} -> ${nextMap} [${gx},${gy}]`, "#90caf9", { category: 'MOVE', dedupeMs: 2500 });
+        return true;
+    }
+    return false;
+}
+
+function kickMovementAfterGatewayStepOff(meta = {}, attempt = 0) {
+    const rushActive = !!(window.isRushing || (typeof isRushing !== 'undefined' && isRushing) || window.rushTarget);
+    const patrolActive = !!((typeof isPatrolling !== 'undefined' && isPatrolling) || window.isPatrolling);
+    if (rushActive && typeof scheduleRushStep === 'function') {
+        scheduleRushStep(attempt > 1 ? 180 : 280, `post_transition_kick:${attempt}`);
+    }
+    if (window.isExping && typeof window.requestExpLogicSoon === 'function') {
+        window.requestExpLogicSoon(attempt > 1 ? 180 : 320, `post_transition_kick_exp:${attempt}`);
+    }
+    if (window.isZakonRunning && typeof scheduleZakonTick === 'function') {
+        scheduleZakonTick(attempt > 1 ? 280 : 520);
+    }
+    if (!rushActive && patrolActive && typeof scheduleMovementTask === 'function' && typeof executePatrolStep === 'function') {
+        scheduleMovementTask(() => executePatrolStep(), attempt > 1 ? 240 : 520, `post_transition_kick_patrol:${attempt}`);
+    }
+}
+
 function tryPostTransitionGatewayStepOff(meta = {}, attempt = 0) {
-    if (!(window.isExping || window.isRushing || window.rushTarget || isRushing || isPatrolling || window.isPatrolling)) return false;
+    if (!isAnyMovementModeActiveForStepOff()) return false;
     const busy = typeof isGameBusyOrLoading === 'function' ? isGameBusyOrLoading({ source: 'gateway_step_off' }) : { busy: false };
     if (busy.busy && (typeof isMovementBlockingBusyReason !== 'function' || isMovementBlockingBusyReason(busy.reason))) return false;
     const currentMap = typeof getCurrentMapName === 'function' ? getCurrentMapName() : Engine?.map?.d?.name || '';
     if (meta.toMap && normMapName(currentMap) !== normMapName(meta.toMap)) return false;
-    if (isHeroActuallyMovingForStepOff({ ignorePassiveLock: attempt > 0 })) return false;
 
     const entry = getPostTransitionEntryPoint(meta);
     if (!entry) return false;
     const cx = Number(Engine?.hero?.d?.x);
     const cy = Number(Engine?.hero?.d?.y);
     if (!Number.isFinite(cx) || !Number.isFinite(cy)) return false;
+    const now = Date.now();
+    const posKey = `${normMapName(currentMap)}:${cx},${cy}`;
+    const lastPos = window.__postTransitionStepOffPos || null;
+    let staleSameTile = false;
+    if (lastPos && lastPos.key === posKey) {
+        staleSameTile = now - Number(lastPos.at || 0) > (attempt >= 2 ? 550 : 1100);
+    } else {
+        window.__postTransitionStepOffPos = { key: posKey, at: now };
+    }
+    if (!staleSameTile && isHeroActuallyMovingForStepOff({ ignorePassiveLock: attempt > 0 })) return false;
     const entryDist = Math.abs(cx - entry.x) + Math.abs(cy - entry.y);
-    if (entryDist > 1 + Math.min(attempt, 1)) return false;
+    if (entryDist > Math.max(2, 1 + Math.min(attempt, 3))) return false;
 
     const key = `${normMapName(currentMap)}:${entry.x},${entry.y}:${attempt}`;
-    const now = Date.now();
     if (window.__lastPostTransitionStepOffKey === key && now - Number(window.__lastPostTransitionStepOffAt || 0) < 900) return false;
-    const nextMap = window.rushNextMap || (Array.isArray(window.rushFullPath) ? window.rushFullPath.find((m, idx, arr) => idx > 0 && normMapName(arr[idx - 1]) === normMapName(currentMap)) : '');
+    const nextMap = getPostTransitionNextMap(currentMap);
     const tile = pickGatewayStepOffTile(cx, cy, entry, nextMap);
     if (!tile) return false;
 
@@ -9581,7 +9710,7 @@ function tryPostTransitionGatewayStepOff(meta = {}, attempt = 0) {
         : (Engine?.hero?.autoGoTo ? (Engine.hero.autoGoTo({ x: tile.nx, y: tile.ny }), true) : false);
     if (sent !== false) {
         HeroLogger.emit('DEBUG', 'GATEWAY_STEP_OFF', `Schodze z kratki przejscia ${currentMap} [${cx},${cy}] -> [${tile.nx},${tile.ny}]`, "#90caf9", { category: 'MOVE', dedupeMs: 2500 });
-        if (typeof scheduleRushStep === 'function' && (window.isRushing || isRushing || window.rushTarget)) {
+        if (typeof scheduleRushStep === 'function' && (window.isRushing || (typeof isRushing !== 'undefined' && isRushing) || window.rushTarget)) {
             scheduleRushStep(520, 'gateway_step_off_continue');
         }
         if (window.isExping && typeof window.requestExpLogicSoon === 'function') {
@@ -9597,11 +9726,18 @@ function tryPostTransitionGatewayStepOff(meta = {}, attempt = 0) {
 
 function schedulePostTransitionGatewayStepOff(meta = {}) {
     const seq = (window.__gatewayStepOffSeq = Number(window.__gatewayStepOffSeq || 0) + 1);
-    [420, 1050, 1900].forEach((delay, attempt) => {
-        setTimeout(() => {
+    if (Array.isArray(window.__gatewayStepOffTimers)) {
+        window.__gatewayStepOffTimers.forEach(t => { try { clearTimeout(t); } catch (e) {} });
+    }
+    window.__gatewayStepOffTimers = [];
+    [420, 950, 1650, 2550, 3900, 5400].forEach((delay, attempt) => {
+        const timer = setTimeout(() => {
             if (window.__gatewayStepOffSeq !== seq) return;
-            tryPostTransitionGatewayStepOff(meta, attempt);
+            const stepped = tryPostTransitionGatewayStepOff(meta, attempt);
+            if (!stepped) tryPostTransitionNextGatewayKick(meta, attempt);
+            kickMovementAfterGatewayStepOff(meta, attempt);
         }, delay);
+        window.__gatewayStepOffTimers.push(timer);
     });
 }
 window.schedulePostTransitionGatewayStepOff = schedulePostTransitionGatewayStepOff;
