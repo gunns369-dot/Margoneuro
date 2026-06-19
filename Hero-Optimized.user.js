@@ -8919,6 +8919,9 @@ window.restoreRushLocalStateFromWindow = restoreRushLocalStateFromWindow;
 function wakeMovementAfterMapTransition(fromMap, toMap, reason = 'transition') {
     const now = Date.now();
     window.__lastMovementTransition = { fromMap, toMap, reason, at: now };
+    if (typeof schedulePostTransitionGatewayStepOff === 'function') {
+        schedulePostTransitionGatewayStepOff({ fromMap, toMap, reason, at: now });
+    }
     const rushActive = !!(window.isRushing || isRushing || window.rushTarget);
     if (rushActive) {
         restoreRushLocalStateFromWindow(`transition:${reason}`);
@@ -8941,6 +8944,116 @@ function wakeMovementAfterMapTransition(fromMap, toMap, reason = 'transition') {
     }
 }
 window.wakeMovementAfterMapTransition = wakeMovementAfterMapTransition;
+
+function getPostTransitionEntryPoint(meta = {}) {
+    const fromMap = meta.fromMap || window.__lastRememberedTransition?.fromMap || '';
+    const toMap = meta.toMap || window.__lastRememberedTransition?.toMap || '';
+    const tr = window.__lastRememberedTransition || {};
+    const tx = Number.isFinite(Number(meta.toX)) ? Number(meta.toX) : Number(tr.toX);
+    const ty = Number.isFinite(Number(meta.toY)) ? Number(meta.toY) : Number(tr.toY);
+    if (Number.isFinite(tx) && Number.isFinite(ty)) return { x: tx, y: ty, source: 'transition' };
+    const backDoor = fromMap && toMap && globalGateways?.[toMap]?.[fromMap] ? globalGateways[toMap][fromMap] : null;
+    const bx = Number(backDoor?.x);
+    const by = Number(backDoor?.y);
+    if (Number.isFinite(bx) && Number.isFinite(by)) return { x: bx, y: by, source: 'back_gateway' };
+    return null;
+}
+
+function isHeroActuallyMovingForStepOff(options = {}) {
+    const path = Array.isArray(Engine?.hero?.d?.path) ? Engine.hero.d.path : [];
+    if (path.length > 0) return true;
+    const snap = typeof getHeroMovementSnapshot === 'function' ? getHeroMovementSnapshot() : null;
+    if (!snap) return false;
+    const activePathLike = !!(
+        Number(snap.autoPathCount || 0) > 0 ||
+        Number(snap.roadLen || 0) > 0 ||
+        Number(snap.roadNodesLen || 0) > 0 ||
+        Number(snap.stepsToSendLen || 0) > 0 ||
+        Number(snap.visualOffset || 0) > EXP_MOVE_VISUAL_OFFSET_WAIT
+    );
+    if (activePathLike) return true;
+    if (options.ignorePassiveLock) return false;
+    return !!(snap.locked || snap.autoWalkLock);
+}
+
+function pickGatewayStepOffTile(cx, cy, entry, nextMap = '') {
+    const dirs = [[1,0],[-1,0],[0,1],[0,-1],[1,1],[-1,-1],[1,-1],[-1,1]];
+    let nextDoor = null;
+    if (nextMap && typeof getRushGatewayDoorCached === 'function') {
+        try { nextDoor = getRushGatewayDoorCached(Engine?.map?.d?.name || '', nextMap); } catch (e) {}
+    }
+    const candidates = [];
+    for (const [dx, dy] of dirs) {
+        const nx = cx + dx;
+        const ny = cy + dy;
+        if (typeof Engine?.map?.checkCollision === 'function' && Engine.map.checkCollision(nx, ny)) continue;
+        const away = Math.abs(nx - entry.x) + Math.abs(ny - entry.y);
+        const currentAway = Math.abs(cx - entry.x) + Math.abs(cy - entry.y);
+        if (away < currentAway) continue;
+        const nextDoorDist = nextDoor
+            ? Math.abs(nx - Number(nextDoor.targetX ?? nextDoor.x ?? 0)) + Math.abs(ny - Number(nextDoor.targetY ?? nextDoor.y ?? 0))
+            : 0;
+        candidates.push({ nx, ny, score: away * 10 - nextDoorDist + Math.random() });
+    }
+    if (!candidates.length) return null;
+    candidates.sort((a, b) => b.score - a.score);
+    return candidates[0];
+}
+
+function tryPostTransitionGatewayStepOff(meta = {}, attempt = 0) {
+    if (!(window.isExping || window.isRushing || window.rushTarget || isRushing || isPatrolling || window.isPatrolling)) return false;
+    const busy = typeof isGameBusyOrLoading === 'function' ? isGameBusyOrLoading({ source: 'gateway_step_off' }) : { busy: false };
+    if (busy.busy && (typeof isMovementBlockingBusyReason !== 'function' || isMovementBlockingBusyReason(busy.reason))) return false;
+    const currentMap = typeof getCurrentMapName === 'function' ? getCurrentMapName() : Engine?.map?.d?.name || '';
+    if (meta.toMap && normMapName(currentMap) !== normMapName(meta.toMap)) return false;
+    if (isHeroActuallyMovingForStepOff({ ignorePassiveLock: attempt > 0 })) return false;
+
+    const entry = getPostTransitionEntryPoint(meta);
+    if (!entry) return false;
+    const cx = Number(Engine?.hero?.d?.x);
+    const cy = Number(Engine?.hero?.d?.y);
+    if (!Number.isFinite(cx) || !Number.isFinite(cy)) return false;
+    const entryDist = Math.abs(cx - entry.x) + Math.abs(cy - entry.y);
+    if (entryDist > 1 + Math.min(attempt, 1)) return false;
+
+    const key = `${normMapName(currentMap)}:${entry.x},${entry.y}:${attempt}`;
+    const now = Date.now();
+    if (window.__lastPostTransitionStepOffKey === key && now - Number(window.__lastPostTransitionStepOffAt || 0) < 900) return false;
+    const nextMap = window.rushNextMap || (Array.isArray(window.rushFullPath) ? window.rushFullPath.find((m, idx, arr) => idx > 0 && normMapName(arr[idx - 1]) === normMapName(currentMap)) : '');
+    const tile = pickGatewayStepOffTile(cx, cy, entry, nextMap);
+    if (!tile) return false;
+
+    window.__lastPostTransitionStepOffKey = key;
+    window.__lastPostTransitionStepOffAt = now;
+    const sent = typeof window.safeGoTo === 'function'
+        ? window.safeGoTo(tile.nx, tile.ny, false, { bypassThrottle: true, forceExact: true })
+        : (Engine?.hero?.autoGoTo ? (Engine.hero.autoGoTo({ x: tile.nx, y: tile.ny }), true) : false);
+    if (sent !== false) {
+        HeroLogger.emit('DEBUG', 'GATEWAY_STEP_OFF', `Schodze z kratki przejscia ${currentMap} [${cx},${cy}] -> [${tile.nx},${tile.ny}]`, "#90caf9", { category: 'MOVE', dedupeMs: 2500 });
+        if (typeof scheduleRushStep === 'function' && (window.isRushing || isRushing || window.rushTarget)) {
+            scheduleRushStep(520, 'gateway_step_off_continue');
+        }
+        if (window.isExping && typeof window.requestExpLogicSoon === 'function') {
+            window.requestExpLogicSoon(620, 'gateway_step_off_continue_exp');
+        }
+        if ((typeof isPatrolling !== 'undefined' && isPatrolling) && typeof executePatrolStep === 'function') {
+            scheduleMovementTask(() => executePatrolStep(), 700, 'gateway_step_off_continue_patrol');
+        }
+        return true;
+    }
+    return false;
+}
+
+function schedulePostTransitionGatewayStepOff(meta = {}) {
+    const seq = (window.__gatewayStepOffSeq = Number(window.__gatewayStepOffSeq || 0) + 1);
+    [420, 1050, 1900].forEach((delay, attempt) => {
+        setTimeout(() => {
+            if (window.__gatewayStepOffSeq !== seq) return;
+            tryPostTransitionGatewayStepOff(meta, attempt);
+        }, delay);
+    });
+}
+window.schedulePostTransitionGatewayStepOff = schedulePostTransitionGatewayStepOff;
 
 window.executeRushStep = function() {
     // Blokada spamu silnika Rush (max raz na 400ms)
@@ -19525,6 +19638,8 @@ function pruneExpRuntimeCaches(reason = 'tick', options = {}) {
 window.pruneExpRuntimeCaches = pruneExpRuntimeCaches;
 
 function isExpTransitMovementActiveForKick() {
+    const status = typeof getExpTransitMovementStatus === 'function' ? getExpTransitMovementStatus() : null;
+    if (status) return !!status.movementActive;
     const heroPath = Array.isArray(Engine?.hero?.d?.path) ? Engine.hero.d.path : [];
     if (heroPath.length > 0) return true;
     const snap = typeof getHeroMovementSnapshot === 'function' ? getHeroMovementSnapshot() : null;
@@ -19533,9 +19648,41 @@ function isExpTransitMovementActiveForKick() {
         ? Date.now() - Number(window.expLastMoveCommand.issuedAt || 0)
         : (guardAt ? Date.now() - guardAt : 999999);
     return typeof isExpSnapshotActivelyMoving === 'function'
-        ? isExpSnapshotActivelyMoving(snap, { ageMs: moveAge })
+        ? isExpSnapshotActivelyMoving(snap, { ageMs: moveAge, staleMinAgeMs: 650 })
         : !!(snap?.movementBusy || Number(snap?.visualOffset || 0) > EXP_MOVE_VISUAL_OFFSET_WAIT);
 }
+
+function getExpTransitMovementStatus() {
+    const now = Date.now();
+    const heroPath = Array.isArray(Engine?.hero?.d?.path) ? Engine.hero.d.path : [];
+    const snap = typeof getHeroMovementSnapshot === 'function' ? getHeroMovementSnapshot() : null;
+    const guardAt = Number(window.ExpMovementGuard?.state?.lastPathCommandAt || 0);
+    const commandAges = [
+        window.expLastMoveCommand?.issuedAt ? now - Number(window.expLastMoveCommand.issuedAt || 0) : Infinity,
+        window.expLastMoveCommandAt ? now - Number(window.expLastMoveCommandAt || 0) : Infinity,
+        guardAt ? now - guardAt : Infinity,
+        window.__lastRushReissueAt ? now - Number(window.__lastRushReissueAt || 0) : Infinity
+    ].filter(age => Number.isFinite(age) && age >= 0);
+    const moveAge = commandAges.length ? Math.min(...commandAges) : 999999;
+    const activeRush = !!(window.isRushing || window.rushTarget || (typeof isRushing !== 'undefined' && isRushing));
+    const movementActive = heroPath.length > 0 || (typeof isExpSnapshotActivelyMoving === 'function'
+        ? isExpSnapshotActivelyMoving(snap, { ageMs: moveAge, staleMinAgeMs: 650 })
+        : !!(snap?.movementBusy || Number(snap?.visualOffset || 0) > EXP_MOVE_VISUAL_OFFSET_WAIT));
+    const looksIdle = !movementActive &&
+        !snap?.locked &&
+        !snap?.autoWalkLock &&
+        Number(snap?.stepsToSendLen || 0) === 0 &&
+        Number(snap?.visualOffset || 0) <= EXP_MOVE_VISUAL_OFFSET_WAIT;
+    return {
+        activeRush,
+        movementActive,
+        looksIdle,
+        moveAge,
+        heroPathLen: heroPath.length,
+        snap
+    };
+}
+window.getExpTransitMovementStatus = getExpTransitMovementStatus;
 
 function relaxExpTransitRushTimers(reason = 'transit_kick') {
     const now = Date.now();
@@ -19560,9 +19707,14 @@ function kickExpTransitMovement(targetMap, currentMap = '', reason = 'transit', 
         const liveMap = typeof getCurrentMapName === 'function' ? getCurrentMapName() : Engine?.map?.d?.name || current;
         if (normMapName(liveMap) === targetKey) return true;
         const forceIssue = !!options.force || /after_clear|clean_map|current_cleared|soonest_respawn|target_map_selected/.test(String(reason || attemptReason || ''));
-        const liveHeroPath = Array.isArray(Engine?.hero?.d?.path) ? Engine.hero.d.path : [];
-        if (liveHeroPath.length > 0) return true;
-        if (!forceIssue && isExpTransitMovementActiveForKick()) return true;
+        const movementStatus = typeof getExpTransitMovementStatus === 'function'
+            ? getExpTransitMovementStatus()
+            : { movementActive: isExpTransitMovementActiveForKick(), looksIdle: false };
+        if (!forceIssue && movementStatus.movementActive) return true;
+        if (movementStatus.activeRush && movementStatus.looksIdle) {
+            window.isRushing = false;
+            try { isRushing = false; } catch (e) {}
+        }
         relaxExpTransitRushTimers(`transit_${attemptReason}`);
         if (pathArg) window.rushFullPath = pathArg.slice();
         return window.rushToMap(targetMap, null, null, pathArg, false);
@@ -23188,8 +23340,14 @@ function continueExpTransitFast(options = {}) {
             st.suppressRotationUntil = now + (routeMapOnEntry && !st.travelOnly ? 900 : 3500);
         }
 
-        const heroPath = Array.isArray(Engine?.hero?.d?.path) ? Engine.hero.d.path : [];
-        const activeRush = !!(window.isRushing || (typeof isRushing !== 'undefined' && isRushing));
+        const movementStatus = typeof getExpTransitMovementStatus === 'function'
+            ? getExpTransitMovementStatus()
+            : {
+                movementActive: Array.isArray(Engine?.hero?.d?.path) && Engine.hero.d.path.length > 0,
+                activeRush: !!(window.isRushing || (typeof isRushing !== 'undefined' && isRushing)),
+                looksIdle: false,
+                heroPathLen: Array.isArray(Engine?.hero?.d?.path) ? Engine.hero.d.path.length : 0
+            };
         const reissueMs = Number(options.reissueMs || EXP_TRANSIT_RUSH_REISSUE_MS);
         const routeMap = routeMapOnEntry;
         const transitCommitActive = now < Number(st.suppressRotationUntil || 0);
@@ -23215,12 +23373,18 @@ function continueExpTransitFast(options = {}) {
             }
         }
 
-        if (heroPath.length || (activeRush && now - Number(st.lastStepAt || 0) < reissueMs)) {
+        const lastStepAge = now - Number(st.lastStepAt || 0);
+        const staleRushIdle = !!(movementStatus.activeRush && movementStatus.looksIdle && lastStepAge > 550);
+        if (movementStatus.movementActive && !staleRushIdle && (Number(movementStatus.heroPathLen || 0) > 0 || lastStepAge < reissueMs)) {
             perf.transit.heavySkipped = Number(perf.transit.heavySkipped || 0) + 1;
             return { handled: true, moving: true, reason: 'continue_existing_path' };
         }
 
-        if (now - Number(st.lastStepAt || 0) >= reissueMs) {
+        if (staleRushIdle || lastStepAge >= reissueMs) {
+            if (staleRushIdle) {
+                window.isRushing = false;
+                try { isRushing = false; } catch (e) {}
+            }
             st.lastStepAt = now;
             st.lastDecisionAt = now;
             st.suppressRotationUntil = Math.max(Number(st.suppressRotationUntil || 0), now + 2200);
@@ -23232,7 +23396,10 @@ function continueExpTransitFast(options = {}) {
             setExpState(EXP_STATES.TRANSITING_TO_MAP, 'exp_transit_fast');
             setExpPlannerState(EXP_PLANNER_STATES.MOVING_TO_GATEWAY, `transit_fast:${st.targetMap}`);
             if (typeof kickExpTransitMovement === 'function') {
-                kickExpTransitMovement(st.targetMap, currentMap, 'transit_fast', st.routePath || []);
+                kickExpTransitMovement(st.targetMap, currentMap, staleRushIdle ? 'transit_fast_idle_reissue' : 'transit_fast', st.routePath || [], {
+                    force: staleRushIdle,
+                    retryDelays: staleRushIdle ? [320, 780, 1450] : undefined
+                });
             } else if (typeof window.rushToMap === 'function') {
                 window.rushToMap(st.targetMap, null, null, st.routePath || null, false);
             }
@@ -24811,7 +24978,8 @@ function runExpLogic() {
     // --- TRANZYT / ZMIANA MAPY ---
     const mapEntryGraceMs = 1200;
     const inEntryGrace = !!window.expMapEnteredAt && (now - window.expMapEnteredAt < mapEntryGraceMs);
-    if (inEntryGrace && validMobs.length === 0 && (!isExpMap || authoritativeVisibleMobs.length === 0)) {
+    const activeTransitDuringEntry = typeof isExpTransitActive === 'function' && isExpTransitActive();
+    if (!activeTransitDuringEntry && inEntryGrace && validMobs.length === 0 && (!isExpMap || authoritativeVisibleMobs.length === 0)) {
         HeroLogger.emit('DEBUG', 'EXP_WAIT_ENTRY_GRACE', `[EXP] waiting after map entry (${mapEntryGraceMs - (now - window.expMapEnteredAt)}ms)`, "#a5d6a7", { category: 'EXP', dedupeMs: 1000 });
         return;
     }
@@ -24843,6 +25011,56 @@ function runExpLogic() {
             setExpState(EXP_STATES.CLEARING_CURRENT_MAP, 'visible_mobs_guard');
             setExpPlannerState(EXP_PLANNER_STATES.CLEARING, 'visible_mobs_guard');
             expLastActionTime = now + 250;
+            return;
+        }
+
+        const pendingTransitTarget = routeStateForEmpty?.targetExpMap || (typeof getExpTransitState === 'function' ? getExpTransitState()?.targetMap : null);
+        const pendingTransitActive = !!pendingTransitTarget &&
+            normMapName(pendingTransitTarget) !== normMapName(currMap) &&
+            (routeStateForEmpty.isTravellingToNextExpMap || (typeof isExpTransitActive === 'function' && isExpTransitActive()));
+        if (pendingTransitActive) {
+            const continueKey = `${normMapName(currMap)}->${normMapName(pendingTransitTarget)}`;
+            const movementStatus = typeof getExpTransitMovementStatus === 'function'
+                ? getExpTransitMovementStatus()
+                : { movementActive: false, looksIdle: true, activeRush: !!window.isRushing };
+            const transitLooksIdle = !movementStatus.movementActive || movementStatus.looksIdle;
+            const shouldKickNow = window.__expEmptyTransitContinueKey !== continueKey ||
+                (transitLooksIdle && now - Number(window.__expEmptyTransitContinueAt || 0) > 650) ||
+                (!movementStatus.activeRush && now - Number(window.__expEmptyTransitContinueAt || 0) > 650) ||
+                now - Number(window.__expEmptyTransitContinueAt || 0) > 2200;
+            routeStateForEmpty.targetExpMap = pendingTransitTarget;
+            routeStateForEmpty.isTravellingToNextExpMap = true;
+            window.expWaitingForRespawn = false;
+            setExpState(EXP_STATES.TRANSITING_TO_MAP, 'empty_map_continue_transit');
+            setExpPlannerState(EXP_PLANNER_STATES.MOVING_TO_GATEWAY, `empty_transit:${pendingTransitTarget}`);
+            if (shouldKickNow) {
+                window.__expEmptyTransitContinueKey = continueKey;
+                window.__expEmptyTransitContinueAt = now;
+                const routePath = typeof getCachedRouteToTarget === 'function'
+                    ? (getCachedRouteToTarget(currMap, pendingTransitTarget, EXP_ROUTE_CACHE_TTL_MS) || [])
+                    : [];
+                const normalizedRoutePath = typeof normalizeExpTransitRoutePath === 'function'
+                    ? normalizeExpTransitRoutePath(routePath, currMap, pendingTransitTarget)
+                    : routePath;
+                if (typeof beginExpTransit === 'function') {
+                    beginExpTransit(pendingTransitTarget, {
+                        currentMap: currMap,
+                        routePath: normalizedRoutePath,
+                        reason: 'empty_map_continue_transit',
+                        suppressMs: 900,
+                        log: false
+                    });
+                }
+                if (typeof kickExpTransitMovement === 'function') {
+                    kickExpTransitMovement(pendingTransitTarget, currMap, 'empty_map_continue_transit', normalizedRoutePath, {
+                        force: transitLooksIdle,
+                        retryDelays: transitLooksIdle ? [300, 750, 1400] : [1100]
+                    });
+                } else if (typeof window.rushToMap === 'function') {
+                    window.rushToMap(pendingTransitTarget, null, null, normalizedRoutePath || null, false);
+                }
+            }
+            expLastActionTime = now + 300;
             return;
         }
 
