@@ -6018,6 +6018,7 @@ window.heroMapOrder = heroMapOrder;
                 done: Number(task.done || 0),
                 total: Number(task.total || 0),
                 completed: !!task.completed,
+                readyForTurnIn: !!task.readyForTurnIn,
                 scannedAt: Number(task.scannedAt || 0) || Date.now()
             };
             const key = getZakonTaskDedupeKey(normalizedTask);
@@ -6031,22 +6032,26 @@ window.heroMapOrder = heroMapOrder;
             const nextDone = Number(normalizedTask.done || 0);
             const prevTotal = Number(prev.total || 0);
             const nextTotal = Number(normalizedTask.total || 0);
-            const newer = Number(normalizedTask.scannedAt || 0) >= Number(prev.scannedAt || 0) ? normalizedTask : prev;
-            const required = getZakonRequiredMobName(newer) || getZakonRequiredMobName(prev) || requiredMobName;
-            const total = Math.max(prevTotal, nextTotal);
-            const done = Math.max(prevDone, nextDone);
+            const useNext = chooseBetterDuplicate(prev, normalizedTask);
+            const chosen = useNext ? normalizedTask : prev;
+            const fallback = useNext ? prev : normalizedTask;
+            const required = getZakonRequiredMobName(chosen) || getZakonRequiredMobName(fallback) || requiredMobName;
+            const total = Number(chosen.total || 0) || Math.max(prevTotal, nextTotal);
+            const done = Number(chosen.done || 0);
+            const completed = !!(chosen.completed || chosen.readyForTurnIn || (total > 0 && done >= total));
             byKey.set(key, {
-                ...prev,
-                ...newer,
+                ...fallback,
+                ...chosen,
                 id: prev.id || normalizedTask.id || key,
-                title: newer.title || prev.title || required,
+                title: chosen.title || fallback.title || required,
                 mobName: required,
                 requiredMobName: required,
-                city: newer.city || prev.city || '',
-                level: Number(newer.level || 0) || Number(prev.level || 0) || 0,
+                city: chosen.city || fallback.city || '',
+                level: Number(chosen.level || 0) || Number(fallback.level || 0) || 0,
                 done,
                 total,
-                completed: !!(prev.completed || normalizedTask.completed || (total > 0 && done >= total)),
+                completed,
+                readyForTurnIn: !!(chosen.readyForTurnIn || completed),
                 scannedAt: Math.max(Number(prev.scannedAt || 0), Number(normalizedTask.scannedAt || 0), Date.now())
             });
         }
@@ -6390,7 +6395,9 @@ window.heroMapOrder = heroMapOrder;
         ensureZakonSettings();
         const text = zakonCollectQuestText(force);
         const parsedTasks = parseZakonTasksFromText(text);
-        const combined = dedupeZakonTasks([...(botSettings.zakon.lastTasks || []), ...parsedTasks]);
+        const combined = (force && parsedTasks.length)
+            ? dedupeZakonTasks(parsedTasks)
+            : dedupeZakonTasks([...(botSettings.zakon.lastTasks || []), ...parsedTasks]);
         const split = splitZakonTasksByState(combined);
         const tasks = sortZakonTasksByLevel(split.todo);
         const readyTasks = sortZakonTasksByLevel(split.ready);
