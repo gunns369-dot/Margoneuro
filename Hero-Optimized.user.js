@@ -5987,8 +5987,7 @@ window.heroMapOrder = heroMapOrder;
         const requiredMobName = getZakonRequiredMobName(task);
         const title = zakonNormalize(task.title || requiredMobName || '');
         const mob = zakonNormalize(requiredMobName || task.title || '');
-        const total = Number(task.total || 0);
-        return `${title}::${mob}::${total}`;
+        return `${title}::${mob}`;
     }
 
     function dedupeZakonTasks(tasks = []) {
@@ -6022,7 +6021,7 @@ window.heroMapOrder = heroMapOrder;
                 scannedAt: Number(task.scannedAt || 0) || Date.now()
             };
             const key = getZakonTaskDedupeKey(normalizedTask);
-            if (!key || key === '::::0') continue;
+            if (!key || key === '::') continue;
             const prev = byKey.get(key);
             if (!prev) {
                 byKey.set(key, { ...normalizedTask, id: normalizedTask.id || key });
@@ -6055,12 +6054,12 @@ window.heroMapOrder = heroMapOrder;
         const byTitleTotal = new Map();
         for (const task of byKey.values()) {
             const titleKey = zakonNormalize(task.title || '');
-            const total = Number(task.total || 0);
-            if (!titleKey || !total) {
+            const mobKey = zakonNormalize(getZakonRequiredMobName(task) || task.mobName || '');
+            if (!titleKey && !mobKey) {
                 byTitleTotal.set(`${getZakonTaskDedupeKey(task)}::${byTitleTotal.size}`, task);
                 continue;
             }
-            const groupKey = `${titleKey}::${total}`;
+            const groupKey = `${titleKey}::${mobKey}`;
             const prev = byTitleTotal.get(groupKey);
             if (!prev) {
                 byTitleTotal.set(groupKey, task);
@@ -13285,8 +13284,9 @@ function initGUI() {
                         <label style="font-size:10px; color:#e0d8c0;"><input type="checkbox" id="zakonAutoFinish" ${botSettings.zakon?.autoFinish !== false ? 'checked' : ''}> Oddawaj gotowe zadania u Zakonnika</label>
                     </div>
 
-                    <div style="display:grid; grid-template-columns: repeat(5, 1fr); gap:4px;">
+                    <div style="display:grid; grid-template-columns: repeat(6, 1fr); gap:4px;">
                         <button id="btnZakonScan" class="btn-sepia" style="padding:5px; background:#263238; border-color:#00acc1; color:#e0f7fa;">Skanuj</button>
+                        <button id="btnZakonRefresh" class="btn-sepia" style="padding:5px; background:#37474f; border-color:#607d8b; color:#e0f7fa;">Od&#347;wie&#380;</button>
                         <button id="btnZakonStartVisible" class="btn-sepia" style="padding:5px; background:#33691e;">Start zad.</button>
                         <button id="btnZakonPickExp" class="btn-sepia" style="padding:5px; background:#00838f;">Dobierz EXP</button>
                         <button id="btnZakonGoNpc" class="btn-sepia" style="padding:5px; background:#6d4c41;">Do NPC</button>
@@ -13824,6 +13824,12 @@ function setOnChange(id, handler) {
            }
        });
        bindZakonClick('btnZakonScan', () => {
+           if (typeof scanZakonTasks === 'function') scanZakonTasks(true);
+           if (typeof renderZakonPanel === 'function') renderZakonPanel();
+       });
+       bindZakonClick('btnZakonRefresh', () => {
+           const s = typeof ensureZakonSettings === 'function' ? ensureZakonSettings() : botSettings.zakon;
+           if (s) s.lastTasks = filterFinishedZakonTasks(dedupeZakonTasks(s.lastTasks || []));
            if (typeof scanZakonTasks === 'function') scanZakonTasks(true);
            if (typeof renderZakonPanel === 'function') renderZakonPanel();
        });
