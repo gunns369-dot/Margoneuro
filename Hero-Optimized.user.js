@@ -2800,6 +2800,7 @@ let opacityValue = 0.95;
             autoStartExp: true,
             selectedProfileIndex: -1,
             selectedProfileName: '',
+            disabledTaskKeys: {},
             lastTasks: []
         }
 
@@ -5484,6 +5485,7 @@ window.heroMapOrder = heroMapOrder;
         lastSelectedProfileLogKey: '',
         lastSelectedProfileLogAt: 0,
         finishedKeys: {},
+        disabledTaskKeys: {},
         lastTasks: []
     };
 
@@ -5553,6 +5555,15 @@ window.heroMapOrder = heroMapOrder;
             else ready[key] = Number(at) || now;
         }
         zakon.readyTaskKeys = ready;
+
+        const disabled = (zakon.disabledTaskKeys && typeof zakon.disabledTaskKeys === 'object' && !Array.isArray(zakon.disabledTaskKeys))
+            ? { ...zakon.disabledTaskKeys }
+            : {};
+        for (const [key, at] of Object.entries(disabled)) {
+            if (!key) delete disabled[key];
+            else disabled[key] = Number(at) || now;
+        }
+        zakon.disabledTaskKeys = disabled;
 
         const tasks = Array.isArray(zakon.lastTasks) ? zakon.lastTasks : [];
         const seen = new Set();
@@ -6133,6 +6144,63 @@ window.heroMapOrder = heroMapOrder;
         return splitZakonTasksByState(tasks).ready;
     }
 
+    function getZakonTaskLevel(task = {}) {
+        const level = Number(task.level || task.lvl || 0);
+        return Number.isFinite(level) && level > 0 ? level : 9999;
+    }
+
+    function sortZakonTasksByLevel(tasks = []) {
+        return [...(Array.isArray(tasks) ? tasks : [])].sort((a, b) => {
+            const la = getZakonTaskLevel(a);
+            const lb = getZakonTaskLevel(b);
+            if (la !== lb) return la - lb;
+            const ta = Number(a.total || 0);
+            const tb = Number(b.total || 0);
+            if (ta !== tb) return ta - tb;
+            const da = Number(a.done || 0);
+            const db = Number(b.done || 0);
+            if (da !== db) return db - da;
+            const aa = zakonNormalize(a.title || a.requiredMobName || a.mobName || '');
+            const bb = zakonNormalize(b.title || b.requiredMobName || b.mobName || '');
+            return aa.localeCompare(bb);
+        });
+    }
+
+    function isZakonTaskSelected(taskOrKey = {}) {
+        const key = typeof taskOrKey === 'string' ? taskOrKey : getZakonTaskKey(taskOrKey);
+        const s = ensureZakonSettings();
+        return !(key && s.disabledTaskKeys && Object.prototype.hasOwnProperty.call(s.disabledTaskKeys, key));
+    }
+
+    function setZakonTaskSelected(taskOrKey, selected = true) {
+        const key = typeof taskOrKey === 'string' ? taskOrKey : getZakonTaskKey(taskOrKey);
+        if (!key) return false;
+        const s = ensureZakonSettings();
+        s.disabledTaskKeys = s.disabledTaskKeys || {};
+        if (selected) {
+            delete s.disabledTaskKeys[key];
+        } else {
+            s.disabledTaskKeys[key] = Date.now();
+            if (s.activeTaskKey === key || s.activeProfileTaskKey === key) {
+                setZakonActiveTask(null, 'task_disabled');
+                if (s.activeProfileTaskKey === key) {
+                    s.activeProfileTaskKey = '';
+                    s.activeProfileMaps = [];
+                }
+                try { clearZakonSelectedExpRoute('zakon_task_disabled'); } catch (_) {}
+                try { pauseZakonCombatAutomation('zakon_task_disabled'); } catch (_) {}
+            }
+        }
+        runWhenBrowserIdle(() => saveSettings(), { timeout: 700 });
+        renderZakonPanel();
+        if (window.isZakonRunning) scheduleZakonTick(300, zakonRunId);
+        return true;
+    }
+    window.setZakonTaskSelected = setZakonTaskSelected;
+    window.toggleZakonTaskSelection = function(key, checked) {
+        return setZakonTaskSelected(key, !!checked);
+    };
+
     function setZakonActiveTask(task = null, reason = 'update') {
         const s = ensureZakonSettings();
         const nextKey = task ? getZakonTaskKey(task) : '';
@@ -6264,6 +6332,7 @@ window.heroMapOrder = heroMapOrder;
             const key = getZakonTaskKey(t);
             return key
                 && key !== excludeKey
+                && isZakonTaskSelected(t)
                 && !t.completed
                 && !t.readyForTurnIn
                 && !isZakonTaskReadyKey(key)
@@ -6303,12 +6372,14 @@ window.heroMapOrder = heroMapOrder;
         const nextTask = getNextZakonTaskAfterReady(key);
         if (nextTask) {
             setZakonActiveTask(nextTask, 'zakon_next_task');
-            loadZakonProfileForTask(nextTask);
+            const loaded = loadZakonProfileForTask(nextTask);
             zakonLog(`Zakon: nastepne zadanie: ${nextTask.title || nextTask.mobName}.`, '#4caf50', 3500);
-            if (window.isZakonRunning && botSettings.zakon.autoStartExp) {
+            if (loaded && window.isZakonRunning && botSettings.zakon.autoStartExp) {
                 setTimeout(() => {
                     if (window.isZakonRunning && !window.autoSellState?.active) ensureZakonExpRunning();
                 }, 300);
+            } else if (!loaded) {
+                scheduleZakonTick(900, zakonRunId);
             }
         }
         runWhenBrowserIdle(() => saveSettings(), { timeout: 900 });
@@ -6322,8 +6393,8 @@ window.heroMapOrder = heroMapOrder;
         const parsedTasks = parseZakonTasksFromText(text);
         const combined = dedupeZakonTasks([...(botSettings.zakon.lastTasks || []), ...parsedTasks]);
         const split = splitZakonTasksByState(combined);
-        const tasks = split.todo;
-        const readyTasks = split.ready;
+        const tasks = sortZakonTasksByLevel(split.todo);
+        const readyTasks = sortZakonTasksByLevel(split.ready);
         if (readyTasks.length) {
             botSettings.zakon.readyTaskKeys = botSettings.zakon.readyTaskKeys || {};
             for (const task of readyTasks) {
@@ -6707,7 +6778,7 @@ window.heroMapOrder = heroMapOrder;
 
     function startVisibleZakonTasks() {
         ensureZakonSettings();
-        const active = scanZakonTasks(false).tasks.filter(t => !t.completed).length;
+        const active = scanZakonTasks(false).tasks.filter(t => isZakonTaskSelected(t) && !t.completed && !t.readyForTurnIn).length;
         const limit = Math.max(0, botSettings.zakon.maxActive - active);
         if (limit <= 0) return 0;
         const selector = 'button,[role="button"],[onclick],.button,.btn,.quest-button,.quest-start';
@@ -6733,25 +6804,16 @@ window.heroMapOrder = heroMapOrder;
     window.startVisibleZakonTasks = startVisibleZakonTasks;
 
     function chooseZakonTask(tasks) {
-        const incomplete = (tasks || []).filter(t => {
+        const incomplete = sortZakonTasksByLevel((tasks || []).filter(t => {
             const key = getZakonTaskKey(t);
-            return !t.completed
+            return isZakonTaskSelected(t)
+                && !t.completed
                 && !t.readyForTurnIn
                 && !isZakonTaskReadyKey(key)
                 && Number(t.total) > 0
                 && Number(t.done || 0) < Number(t.total || 0);
-        });
-        if (!incomplete.length) return null;
-        const currentMap = normalizeMapName(getCurrentMapName());
-        let best = null;
-        for (const task of incomplete) {
-            const profile = findBestZakonExpProfile(task);
-            const onCurrentRoute = profile?.profile?.maps?.some(m => normalizeMapName(m) === currentMap) ? 20 : 0;
-            const progress = task.total ? (task.done / task.total) : 0;
-            const score = (profile?.score || 0) + onCurrentRoute + progress;
-            if (!best || score > best.score) best = { task, score };
-        }
-        return best?.task || incomplete[0];
+        }));
+        return incomplete[0] || null;
     }
 
     function renderZakonPanel() {
@@ -6777,7 +6839,7 @@ window.heroMapOrder = heroMapOrder;
 
         const box = document.getElementById('zakonTasksList');
         if (!box) return;
-        const tasks = filterFinishedZakonTasks(dedupeZakonTasks(s.lastTasks || []));
+        const tasks = sortZakonTasksByLevel(filterFinishedZakonTasks(dedupeZakonTasks(s.lastTasks || [])));
         const previousKeys = (s.lastTasks || []).map(task => getZakonTaskKey(task)).join('|');
         const nextKeys = tasks.map(task => getZakonTaskKey(task)).join('|');
         if (tasks.length !== (s.lastTasks || []).length || previousKeys !== nextKeys) s.lastTasks = tasks;
@@ -6787,21 +6849,33 @@ window.heroMapOrder = heroMapOrder;
             return;
         }
         box.innerHTML = tasks.map(task => {
+            const key = getZakonTaskKey(task);
+            const selected = isZakonTaskSelected(task);
+            const checked = selected ? 'checked' : '';
             const requiredMobName = getZakonRequiredMobName(task) || task.mobName || task.title || '';
             const best = findBestZakonExpProfile(task);
             const status = task.completed ? 'gotowe do oddania' : `${task.done || 0}/${task.total || 0}`;
             const color = task.completed ? '#4caf50' : '#ffb300';
-            const isActive = activeKey && getZakonTaskKey(task) === activeKey;
+            const statusText = selected ? status : 'pominiete';
+            const isActive = activeKey && key === activeKey;
             return `
-                <div style="border:1px solid ${isActive ? '#4fc3f7' : '#3a3020'}; background:${isActive ? '#10222b' : '#141414'}; padding:5px; margin-bottom:4px;">
-                    <div style="display:flex; justify-content:space-between; gap:6px;">
-                        <b style="color:#e0d8c0;">${zakonEscapeHtml(task.title || requiredMobName)}</b>
-                        <span style="color:${color}; white-space:nowrap;">${zakonEscapeHtml(status)}</span>
+                <div style="border:1px solid ${isActive ? '#4fc3f7' : '#3a3020'}; background:${isActive ? '#10222b' : '#141414'}; padding:5px; margin-bottom:4px; opacity:${selected ? '1' : '0.48'};">
+                    <div style="display:flex; justify-content:space-between; gap:6px; align-items:center;">
+                        <label style="display:flex; align-items:center; gap:5px; min-width:0;">
+                            <input type="checkbox" ${checked} data-zakon-task-key="${zakonEscapeHtml(key)}" class="zakon-task-enabled" style="margin:0;">
+                            <b style="color:#e0d8c0; overflow:hidden; text-overflow:ellipsis;">${zakonEscapeHtml(task.title || requiredMobName)}</b>
+                        </label>
+                        <span style="color:${selected ? color : '#777'}; white-space:nowrap;">${zakonEscapeHtml(statusText)}</span>
                     </div>
                     <div style="font-size:10px; color:#a99a75;">Mob: ${zakonEscapeHtml(requiredMobName)}${task.level ? ` | lvl ${task.level}` : ''}${task.city ? ` | ${zakonEscapeHtml(task.city)}` : ''}</div>
                     <div style="font-size:10px; color:#90caf9;">Exp: ${best ? zakonEscapeHtml(best.profile.name) : 'nie znaleziono profilu'}</div>
                 </div>`;
         }).join('');
+        box.querySelectorAll('.zakon-task-enabled').forEach(input => {
+            input.addEventListener('change', () => {
+                setZakonTaskSelected(input.getAttribute('data-zakon-task-key') || '', input.checked);
+            });
+        });
     }
     window.renderZakonPanel = renderZakonPanel;
 
@@ -6868,7 +6942,8 @@ window.heroMapOrder = heroMapOrder;
         }
         const incomplete = tasks.filter(t => {
             const key = getZakonTaskKey(t);
-            return !t.completed
+            return isZakonTaskSelected(t)
+                && !t.completed
                 && !t.readyForTurnIn
                 && !isZakonTaskReadyKey(key)
                 && Number(t.total) > 0
@@ -6963,7 +7038,8 @@ window.heroMapOrder = heroMapOrder;
                 }
                 const incomplete = tasks.filter(t => {
                     const key = getZakonTaskKey(t);
-                    return !t.completed
+                    return isZakonTaskSelected(t)
+                        && !t.completed
                         && !t.readyForTurnIn
                         && !isZakonTaskReadyKey(key)
                         && Number(t.total) > 0
@@ -10641,6 +10717,10 @@ function tryPostTransitionNextGatewayKick(meta = {}, attempt = 0) {
     const gx = Number(door?.targetX ?? door?.x);
     const gy = Number(door?.targetY ?? door?.y);
     if (!Number.isFinite(gx) || !Number.isFinite(gy)) return false;
+    if (typeof window.isSafeGoToTarget === 'function' && !window.isSafeGoToTarget(gx, gy, { source: 'post_transition_next_gate' })) {
+        HeroLogger.emit('DEBUG', 'GATEWAY_NEXT_KICK_INVALID', `Pomijam bledna kratke nastepnej bramy: ${currentMap} -> ${nextMap} [${gx},${gy}]`, "#ff9800", { category: 'MOVE', dedupeMs: 3000 });
+        return false;
+    }
     const now = Date.now();
     const key = `${normMapName(currentMap)}->${normMapName(nextMap)}:${gx},${gy}`;
     if (window.__lastPostTransitionNextGateKey === key && now - Number(window.__lastPostTransitionNextGateAt || 0) < 850) return false;
@@ -10703,6 +10783,7 @@ function tryPostTransitionGatewayStepOff(meta = {}, attempt = 0) {
     const nextMap = getPostTransitionNextMap(currentMap);
     const tile = pickGatewayStepOffTile(cx, cy, entry, nextMap);
     if (!tile) return false;
+    if (typeof window.isSafeGoToTarget === 'function' && !window.isSafeGoToTarget(tile.nx, tile.ny, { source: 'gateway_step_off' })) return false;
 
     window.__lastPostTransitionStepOffKey = key;
     window.__lastPostTransitionStepOffAt = now;
@@ -13757,18 +13838,23 @@ function setOnChange(id, handler) {
            const scan = typeof scanZakonTasks === 'function' ? scanZakonTasks(true) : { tasks: [] };
            const task = typeof chooseZakonTask === 'function'
                ? chooseZakonTask(scan.tasks || [])
-               : ((scan.tasks || []).find(t => !t.completed && !t.readyForTurnIn) || null);
+               : ((scan.tasks || []).find(t => isZakonTaskSelected(t) && !t.completed && !t.readyForTurnIn) || null);
            if (task && typeof loadZakonProfileForTask === 'function') loadZakonProfileForTask(task);
            if (typeof renderZakonPanel === 'function') renderZakonPanel();
        });
        bindZakonClick('btnZakonGoNpc', () => {
-           const scan = typeof scanZakonTasks === 'function' ? scanZakonTasks(false) : { tasks: [] };
-           const task = (scan.tasks || [])[0] || null;
+           const scan = typeof scanZakonTasks === 'function' ? scanZakonTasks(false) : { tasks: [], readyTasks: [] };
+           const task = (scan.readyTasks || [])[0]
+               || (typeof chooseZakonTask === 'function'
+                   ? chooseZakonTask(scan.tasks || [])
+                   : ((scan.tasks || []).find(t => isZakonTaskSelected(t) && !t.completed && !t.readyForTurnIn) || null));
            if (typeof goToZakonnik === 'function') goToZakonnik(task);
        });
        bindZakonClick('btnZakonFinish', () => {
-           const scan = typeof scanZakonTasks === 'function' ? scanZakonTasks(true) : { tasks: [] };
-           const task = (scan.tasks || []).find(t => t.completed) || (scan.tasks || [])[0] || null;
+           const scan = typeof scanZakonTasks === 'function' ? scanZakonTasks(true) : { tasks: [], readyTasks: [] };
+           const task = (scan.readyTasks || []).find(t => t.completed || t.readyForTurnIn)
+               || (scan.tasks || []).find(t => t.completed || t.readyForTurnIn)
+               || null;
            if (typeof finishZakonDialog === 'function') finishZakonDialog(task);
        });
        bindZakonChange('zakonCity', e => {
@@ -15703,6 +15789,36 @@ function optimizeRoute() {
     }
 
 
+    function getSafeMapBoundsForGoTo() {
+        try {
+            const map = (typeof Engine !== 'undefined' && Engine?.map) ? Engine.map : null;
+            const d = map?.d || {};
+            const widths = [d.w, d.width, map?.w, map?.width, d.x]
+                .map(Number)
+                .filter(n => Number.isFinite(n) && n > 0 && n < 500);
+            const heights = [d.h, d.height, map?.h, map?.height, d.y]
+                .map(Number)
+                .filter(n => Number.isFinite(n) && n > 0 && n < 500);
+            if (widths.length && heights.length) return { w: widths[0], h: heights[0] };
+            const col = map?.col || map?.collisions || d.col || d.c || d.collisions;
+            if (Array.isArray(col) && col.length) {
+                const first = col[0];
+                if (Array.isArray(first) || typeof first === 'string') return { w: first.length, h: col.length };
+            }
+        } catch (_) {}
+        return null;
+    }
+
+    function isSafeGoToTarget(x, y, options = {}) {
+        const nx = Number(x);
+        const ny = Number(y);
+        if (!Number.isFinite(nx) || !Number.isFinite(ny) || nx < 0 || ny < 0) return false;
+        const bounds = getSafeMapBoundsForGoTo();
+        if (bounds && (nx >= bounds.w || ny >= bounds.h)) return false;
+        return true;
+    }
+    window.isSafeGoToTarget = isSafeGoToTarget;
+
    window.safeGoTo = function(targetX, targetY, useRandom, options = {}) {
         let now = Date.now();
         const bypassThrottle = !!options?.bypassThrottle;
@@ -15719,6 +15835,15 @@ function optimizeRoute() {
                 y += Math.floor(Math.random() * (radius * 2 + 1)) - radius;
                 x = Math.max(0, x); y = Math.max(0, y);
             }
+        }
+        x = Math.round(x);
+        y = Math.round(y);
+        if (!isSafeGoToTarget(x, y, options)) {
+            if (!window.__lastSafeGoToInvalidAt || Date.now() - window.__lastSafeGoToInvalidAt > 1500) {
+                window.__lastSafeGoToInvalidAt = Date.now();
+                console.warn('[Margoneuro][safeGoTo] invalid target blocked', { x, y, options });
+            }
+            return false;
         }
 
         if (typeof Engine !== 'undefined' && Engine.hero) {
@@ -15756,12 +15881,22 @@ function optimizeRoute() {
                 last.heroXAtIssue = Number.isFinite(hx) ? hx : null;
                 last.heroYAtIssue = Number.isFinite(hy) ? hy : null;
             }
-            if (typeof Engine.hero.autoGoTo === 'function') {
-                Engine.hero.autoGoTo({x: x, y: y});
-            } else if (typeof window.originalAutoWalk === 'function') {
-                window.originalAutoWalk.call(Engine.hero, x, y);
-            } else if (typeof Engine.hero.autoWalk === 'function') {
-                Engine.hero.autoWalk(x, y);
+            try {
+                if (typeof Engine.hero.autoGoTo === 'function') {
+                    Engine.hero.autoGoTo({x: x, y: y});
+                } else if (typeof window.originalAutoWalk === 'function') {
+                    window.originalAutoWalk.call(Engine.hero, x, y);
+                } else if (typeof Engine.hero.autoWalk === 'function') {
+                    Engine.hero.autoWalk(x, y);
+                } else {
+                    return false;
+                }
+            } catch (err) {
+                if (!window.__lastSafeGoToErrorAt || Date.now() - window.__lastSafeGoToErrorAt > 1500) {
+                    window.__lastSafeGoToErrorAt = Date.now();
+                    console.warn('[Margoneuro][safeGoTo] engine move blocked', { x, y, err });
+                }
+                return false;
             }
 
             let throttleDelay = Math.floor(Math.random() * (botSettings.throttleMax - botSettings.throttleMin + 1)) + botSettings.throttleMin;
@@ -26527,10 +26662,14 @@ function runExpLogic() {
     if ((window.isZakonRunning || window.__zakonOwnsExp) && typeof zakonTaskMatchesMob === 'function') {
         const zakonTasks = filterFinishedZakonTasks(dedupeZakonTasks(botSettings?.zakon?.lastTasks || []));
         const activeZakonKey = botSettings?.zakon?.activeTaskKey || window.__zakonActiveTaskKey || botSettings?.zakon?.activeProfileTaskKey || '';
-        const activeZakonTask = activeZakonKey
+        let activeZakonTask = activeZakonKey
             ? zakonTasks.find(t => getZakonTaskKey(t) === activeZakonKey)
             : chooseZakonTask(zakonTasks);
-        if (activeZakonTask && !activeZakonTask.completed && !activeZakonTask.readyForTurnIn && !isZakonTaskReadyKey(getZakonTaskKey(activeZakonTask))) {
+        if (activeZakonTask && !isZakonTaskSelected(activeZakonTask)) activeZakonTask = chooseZakonTask(zakonTasks);
+        if (!activeZakonTask) {
+            validMobs = [];
+            HeroLogger.emit('DEBUG', 'ZAKON_EXP_NO_SELECTED_TASK', `[ZAKON] Brak wybranego zadania do bicia, wstrzymuje cele EXP.`, "#90caf9", { category: 'EXP', dedupeMs: 5000 });
+        } else if (activeZakonTask && !activeZakonTask.completed && !activeZakonTask.readyForTurnIn && !isZakonTaskReadyKey(getZakonTaskKey(activeZakonTask))) {
             const beforeZakonFilter = validMobs.length;
             validMobs = validMobs.filter(mob => zakonTaskMatchesMob(activeZakonTask, mob));
             if (beforeZakonFilter && !validMobs.length) {
