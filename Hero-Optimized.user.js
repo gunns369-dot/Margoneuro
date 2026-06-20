@@ -5554,13 +5554,21 @@ window.heroMapOrder = heroMapOrder;
         const seen = new Set();
         zakon.lastTasks = tasks
             .filter(task => task && typeof task === 'object')
-            .map(task => ({ ...task }))
+            .map(task => {
+                const requiredMobName = String(task.requiredMobName || task.mobName || task.mob || task.targetName || '').replace(/\s+/g, ' ').trim();
+                return {
+                    ...task,
+                    mobName: requiredMobName || task.mobName,
+                    requiredMobName: requiredMobName || task.requiredMobName
+                };
+            })
             .filter(task => {
+                const requiredMobName = String(task.requiredMobName || task.mobName || task.mob || task.targetName || '').replace(/\s+/g, ' ').trim();
                 const key = [
                     task.key,
                     task.title,
                     task.city,
-                    task.mobName || task.mob || task.targetName,
+                    requiredMobName,
                     task.level || task.lvl
                 ].filter(Boolean).join('|').toLowerCase();
                 if (!key) return true;
@@ -5880,31 +5888,90 @@ window.heroMapOrder = heroMapOrder;
     }
 
     function parseZakonTasksFromText(text) {
+        const raw = String(text || '').replace(/\r/g, '\n');
+        if (!raw) return [];
+        const now = Date.now();
         const tasks = [];
-        if (!text) return tasks;
-        const killRegex = /Zabij:\s*([^\(\n\r]+?)\s*\(\s*(\d+)\s*\/\s*(\d+)\s*\)/gi;
-        let match;
-        while ((match = killRegex.exec(text))) {
-            const mobName = String(match[1] || '').replace(/\s+/g, ' ').trim();
-            const done = Number(match[2] || 0);
-            const total = Number(match[3] || 0);
-            const before = text.slice(Math.max(0, match.index - 360), match.index);
-            const after = text.slice(match.index, Math.min(text.length, match.index + 420));
-            const levelMatches = Array.from(before.matchAll(/\((\d{1,3})\)\s*([^\n\r]{3,90}?)(?:\.|\n|$)/g));
-            const lastLevel = levelMatches.length ? levelMatches[levelMatches.length - 1] : null;
-            const level = lastLevel ? Number(lastLevel[1]) : 0;
-            const title = lastLevel ? String(lastLevel[2] || '').replace(/\s+/g, ' ').trim() : mobName;
-            const completed = (total > 0 && done >= total) || zakonNormalize(after).includes('porozmawiaj z zakonnik rownowagi');
-            const city = zakonDetectCityFromText(before + '\n' + after);
-            const id = `${zakonNormalize(title || mobName)}::${zakonNormalize(mobName)}::${total || 0}`;
-            tasks.push({ id, title, level, city, mobName, done, total, completed, scannedAt: Date.now() });
+        const headerRegex = /\((\d{1,3})\)\s*([^\n\r]{3,90}?)(?:\.|\n|$)/g;
+        const headers = [];
+        let headerMatch;
+        while ((headerMatch = headerRegex.exec(raw))) {
+            headers.push({
+                index: headerMatch.index,
+                level: Number(headerMatch[1] || 0),
+                title: String(headerMatch[2] || '').replace(/\s+/g, ' ').trim()
+            });
+        }
+
+        const addTask = (mobName, done, total, level, title, block, index) => {
+            const requiredMobName = String(mobName || '').replace(/\s+/g, ' ').trim();
+            if (!requiredMobName) return;
+            const localBlock = String(block || '');
+            const completed = (total > 0 && done >= total)
+                || zakonNormalize(localBlock).includes('porozmawiaj z zakonnik rownowagi');
+            const city = zakonDetectCityFromText(localBlock);
+            const safeTitle = String(title || requiredMobName || '').replace(/\s+/g, ' ').trim();
+            const id = `${zakonNormalize(safeTitle)}::${zakonNormalize(requiredMobName)}::${total || 0}`;
+            tasks.push({
+                id,
+                title: safeTitle,
+                level: Number(level || 0),
+                city,
+                mobName: requiredMobName,
+                requiredMobName,
+                done: Number(done || 0),
+                total: Number(total || 0),
+                completed,
+                scannedAt: now,
+                source: 'journal_block',
+                sourceIndex: Number(index || 0)
+            });
+        };
+
+        if (headers.length) {
+            for (let i = 0; i < headers.length; i++) {
+                const header = headers[i];
+                const end = i + 1 < headers.length ? headers[i + 1].index : raw.length;
+                const block = raw.slice(header.index, end);
+                const killRegex = /Zabij:\s*([^\(\n\r]+?)\s*\(\s*(\d+)\s*\/\s*(\d+)\s*\)/gi;
+                let killMatch;
+                while ((killMatch = killRegex.exec(block))) {
+                    addTask(killMatch[1], Number(killMatch[2] || 0), Number(killMatch[3] || 0), header.level, header.title, block, header.index);
+                }
+            }
+        }
+
+        if (!tasks.length) {
+            const killRegex = /Zabij:\s*([^\(\n\r]+?)\s*\(\s*(\d+)\s*\/\s*(\d+)\s*\)/gi;
+            let match;
+            while ((match = killRegex.exec(raw))) {
+                const before = raw.slice(Math.max(0, match.index - 360), match.index);
+                const after = raw.slice(match.index, Math.min(raw.length, match.index + 420));
+                const levelMatches = Array.from(before.matchAll(/\((\d{1,3})\)\s*([^\n\r]{3,90}?)(?:\.|\n|$)/g));
+                const lastLevel = levelMatches.length ? levelMatches[levelMatches.length - 1] : null;
+                addTask(
+                    match[1],
+                    Number(match[2] || 0),
+                    Number(match[3] || 0),
+                    lastLevel ? Number(lastLevel[1]) : 0,
+                    lastLevel ? String(lastLevel[2] || '').replace(/\s+/g, ' ').trim() : String(match[1] || '').trim(),
+                    `${before}\n${after}`,
+                    match.index
+                );
+            }
         }
         return dedupeZakonTasks(tasks);
     }
 
+    function getZakonRequiredMobName(task = {}) {
+        return String(task?.requiredMobName || task?.mobName || '').replace(/\s+/g, ' ').trim();
+    }
+    window.getZakonRequiredMobName = getZakonRequiredMobName;
+
     function getZakonTaskDedupeKey(task = {}) {
-        const title = zakonNormalize(task.title || task.mobName || '');
-        const mob = zakonNormalize(task.mobName || task.title || '');
+        const requiredMobName = getZakonRequiredMobName(task);
+        const title = zakonNormalize(task.title || requiredMobName || '');
+        const mob = zakonNormalize(requiredMobName || task.title || '');
         const total = Number(task.total || 0);
         return `${title}::${mob}::${total}`;
     }
@@ -5913,38 +5980,72 @@ window.heroMapOrder = heroMapOrder;
         const byKey = new Map();
         for (const task of tasks || []) {
             if (!task) continue;
-            const key = getZakonTaskDedupeKey(task);
+            const requiredMobName = getZakonRequiredMobName(task) || String(task.title || '').trim();
+            const normalizedTask = {
+                ...task,
+                mobName: requiredMobName,
+                requiredMobName,
+                done: Number(task.done || 0),
+                total: Number(task.total || 0),
+                completed: !!task.completed,
+                scannedAt: Number(task.scannedAt || 0) || Date.now()
+            };
+            const key = getZakonTaskDedupeKey(normalizedTask);
             if (!key || key === '::::0') continue;
             const prev = byKey.get(key);
             if (!prev) {
-                byKey.set(key, {
-                    ...task,
-                    id: task.id || key,
-                    done: Number(task.done || 0),
-                    total: Number(task.total || 0),
-                    completed: !!task.completed
-                });
+                byKey.set(key, { ...normalizedTask, id: normalizedTask.id || key });
                 continue;
             }
             const prevDone = Number(prev.done || 0);
-            const nextDone = Number(task.done || 0);
+            const nextDone = Number(normalizedTask.done || 0);
             const prevTotal = Number(prev.total || 0);
-            const nextTotal = Number(task.total || 0);
+            const nextTotal = Number(normalizedTask.total || 0);
+            const newer = Number(normalizedTask.scannedAt || 0) >= Number(prev.scannedAt || 0) ? normalizedTask : prev;
+            const required = getZakonRequiredMobName(newer) || getZakonRequiredMobName(prev) || requiredMobName;
+            const total = Math.max(prevTotal, nextTotal);
+            const done = Math.max(prevDone, nextDone);
             byKey.set(key, {
                 ...prev,
-                ...task,
-                id: prev.id || task.id || key,
-                title: prev.title || task.title || task.mobName,
-                mobName: prev.mobName || task.mobName || task.title,
-                city: prev.city || task.city || '',
-                level: Number(prev.level || 0) || Number(task.level || 0) || 0,
-                done: Math.max(prevDone, nextDone),
-                total: Math.max(prevTotal, nextTotal),
-                completed: !!(prev.completed || task.completed || (Math.max(prevTotal, nextTotal) > 0 && Math.max(prevDone, nextDone) >= Math.max(prevTotal, nextTotal))),
-                scannedAt: Math.max(Number(prev.scannedAt || 0), Number(task.scannedAt || 0), Date.now())
+                ...newer,
+                id: prev.id || normalizedTask.id || key,
+                title: newer.title || prev.title || required,
+                mobName: required,
+                requiredMobName: required,
+                city: newer.city || prev.city || '',
+                level: Number(newer.level || 0) || Number(prev.level || 0) || 0,
+                done,
+                total,
+                completed: !!(prev.completed || normalizedTask.completed || (total > 0 && done >= total)),
+                scannedAt: Math.max(Number(prev.scannedAt || 0), Number(normalizedTask.scannedAt || 0), Date.now())
             });
         }
-        return Array.from(byKey.values());
+
+        const byTitleTotal = new Map();
+        for (const task of byKey.values()) {
+            const titleKey = zakonNormalize(task.title || '');
+            const total = Number(task.total || 0);
+            if (!titleKey || !total) {
+                byTitleTotal.set(`${getZakonTaskDedupeKey(task)}::${byTitleTotal.size}`, task);
+                continue;
+            }
+            const groupKey = `${titleKey}::${total}`;
+            const prev = byTitleTotal.get(groupKey);
+            if (!prev) {
+                byTitleTotal.set(groupKey, task);
+                continue;
+            }
+            const prevAt = Number(prev.scannedAt || 0);
+            const taskAt = Number(task.scannedAt || 0);
+            const prevDone = Number(prev.done || 0);
+            const taskDone = Number(task.done || 0);
+            const prevJournal = String(prev.source || '').includes('journal');
+            const taskJournal = String(task.source || '').includes('journal');
+            const chooseTask = (taskJournal && !prevJournal)
+                || (taskJournal === prevJournal && (taskAt > prevAt || (taskAt === prevAt && taskDone >= prevDone)));
+            byTitleTotal.set(groupKey, chooseTask ? task : prev);
+        }
+        return Array.from(byTitleTotal.values());
     }
 
     function getZakonTaskKey(task = {}) {
@@ -5967,8 +6068,11 @@ window.heroMapOrder = heroMapOrder;
         if (!isZakonTaskReadyKey(key)) return task;
         const total = Number(task.total || 0);
         const done = Number(task.done || 0);
+        const requiredMobName = getZakonRequiredMobName(task);
         return {
             ...task,
+            mobName: requiredMobName || task.mobName,
+            requiredMobName: requiredMobName || task.requiredMobName || task.mobName,
             done: total > 0 ? Math.max(done, total) : done,
             completed: true,
             readyForTurnIn: true
@@ -6089,8 +6193,11 @@ window.heroMapOrder = heroMapOrder;
         if (!key) return null;
         const total = Number(task.total || 0);
         const done = Number(task.done || 0);
+        const requiredMobName = getZakonRequiredMobName(task);
         const updated = {
             ...task,
+            mobName: requiredMobName || task.mobName,
+            requiredMobName: requiredMobName || task.requiredMobName || task.mobName,
             done: total > 0 ? Math.max(done, total) : done,
             completed: true,
             readyForTurnIn: true,
@@ -6206,17 +6313,77 @@ window.heroMapOrder = heroMapOrder;
         return Array.from(tokens).filter(t => t.length >= 3);
     }
 
+    function getZakonTaskProfileHints(task = {}) {
+        const required = zakonNormalize(getZakonRequiredMobName(task));
+        const title = zakonNormalize(task?.title || '');
+        const combined = `${required} ${title}`;
+        const hints = { prefer: [], forbid: [], skipGenericOrc: false };
+        const addPrefer = (...items) => items.forEach(item => {
+            const norm = zakonNormalize(item);
+            if (norm && !hints.prefer.includes(norm)) hints.prefer.push(norm);
+        });
+        const addForbid = (...items) => items.forEach(item => {
+            const norm = zakonNormalize(item);
+            if (norm && !hints.forbid.includes(norm)) hints.forbid.push(norm);
+        });
+
+        if (combined.includes('berserker')) {
+            addPrefer('berserkerzy', 'berserker', 'cenotaf berserkerow', 'czarcie oparzeliska', 'grobowiec przodkow', 'mala twierdza');
+            addForbid('czerwoni orkowie', 'czerwonych orkow', 'orcza wyzyna', 'osada czerwonych orkow', 'grota orczej', 'grota orczych', 'kurhany zwyciezonych');
+            hints.skipGenericOrc = true;
+        } else if (combined.includes('mechan') && combined.includes('goblin')) {
+            addPrefer('mechaniczne gobliny', 'lokum zlych goblinow');
+        } else if ((required.includes('eterycz') && (required.includes('dusz') || required.includes('duch'))) || title.includes('tajemnica kruzo')) {
+            addPrefer('dusze', 'upiorna droga', 'eteryczne dusze', 'korytarze milczacych intryg', 'sala ukrytych paktow');
+            addForbid('duchy orkow', 'kazamaty', 'nawiedzone kazamaty', 'czerwoni orkowie', 'orcza wyzyna', 'osada czerwonych orkow');
+        } else if ((required.includes('duch') || required.includes('dusz')) && (required.includes('ork') || required.includes('orcz'))) {
+            addPrefer('duchy orkow', 'kazamaty', 'nawiedzone kazamaty');
+            addForbid('dusze', 'eteryczne dusze', 'upiorna droga', 'czerwoni orkowie', 'orcza wyzyna', 'osada czerwonych orkow');
+            hints.skipGenericOrc = true;
+        } else if ((required.includes('pradawn') && (required.includes('ork') || required.includes('orcz'))) || title.includes('sala krolewska')) {
+            addPrefer('komnaty', 'sala krolewska', 'sala rady orkow', 'sala dowodcy orkow', 'nawiedzone komnaty');
+            addForbid('czerwoni orkowie', 'orcza wyzyna', 'osada czerwonych orkow', 'grota orczej', 'grota orczych');
+            hints.skipGenericOrc = true;
+        } else if (required.includes('czarn') && required.includes('gward')) {
+            addPrefer('komnaty czarnej gwardii', 'czarna gwardia', 'komnaty');
+            addForbid('czerwoni orkowie', 'orcza wyzyna', 'osada czerwonych orkow');
+            hints.skipGenericOrc = true;
+        } else if (required.includes('golem') || required.includes('nimf')) {
+            addPrefer('krysztalowa grota', 'krysztalowe korytarze', 'golemy i nimfy');
+        } else if (required.includes('wiedz')) {
+            addPrefer('wiedzmy', 'gorskie wiedzmy');
+        } else if (required.includes('hydr')) {
+            addPrefer('dziki zagajnik', 'hydry');
+        } else if ((required.includes('czerwon') || required.includes('czerwonosk')) && (required.includes('ork') || required.includes('orcz'))) {
+            addPrefer('czerwoni orkowie', 'orcza wyzyna', 'osada czerwonych orkow', 'grota orczej', 'grota orczych', 'kurhany zwyciezonych');
+        }
+        return hints;
+    }
+    window.getZakonTaskProfileHints = getZakonTaskProfileHints;
+
     function findBestZakonExpProfile(task) {
         const profiles = Array.isArray(botSettings.expProfiles) ? botSettings.expProfiles : [];
-        const taskNorm = zakonNormalize(`${task?.mobName || ''} ${task?.title || ''}`);
-        const tokens = zakonMobTokens(task?.mobName || task?.title || '');
+        const requiredMobName = getZakonRequiredMobName(task);
+        const requiredNorm = zakonNormalize(requiredMobName);
+        const titleNorm = zakonNormalize(task?.title || '');
+        const tokens = zakonMobTokens(requiredMobName);
+        const hints = getZakonTaskProfileHints(task);
         let best = null;
         profiles.forEach((profile, index) => {
             if (!profile || !Array.isArray(profile.maps) || !profile.maps.length) return;
             const hay = zakonNormalize(`${profile.name || ''} ${profile.desc || ''} ${(profile.maps || []).join(' ')}`);
             let score = 0;
-            if (taskNorm && hay.includes(taskNorm)) score += 80;
+            if (requiredNorm && hay.includes(requiredNorm)) score += 90;
+            if (titleNorm && hay.includes(titleNorm)) score += 6;
+            for (const phrase of hints.prefer) {
+                if (hay.includes(phrase)) score += phrase.length >= 12 ? 120 : 75;
+            }
+            for (const phrase of hints.forbid) {
+                if (hay.includes(phrase)) score -= 260;
+            }
             for (const token of tokens) {
+                if (hints.skipGenericOrc && (token === 'ork' || token === 'orcz')) continue;
+                if (token.length < 4) continue;
                 if (hay.includes(token)) score += token.length >= 5 ? 12 : 8;
             }
             const level = zakonGetProfileLevel(profile);
@@ -6226,7 +6393,7 @@ window.heroMapOrder = heroMapOrder;
             }
             if (!best || score > best.score) best = { index, profile, score, level };
         });
-        return best && best.score >= 12 ? best : null;
+        return best && best.score >= 18 ? best : null;
     }
     window.findBestZakonExpProfile = findBestZakonExpProfile;
 
@@ -6239,19 +6406,23 @@ window.heroMapOrder = heroMapOrder;
     function loadZakonProfileForTask(task) {
         ensureZakonSettings();
         const taskKey = getZakonTaskKey(task);
+        const requiredMobName = getZakonRequiredMobName(task);
         if (!task || task.completed || task.readyForTurnIn || isZakonTaskReadyKey(taskKey)) {
             if (task) handleZakonTaskReadyForNext(task, 'zakon_skip_ready_task');
             return false;
         }
         const best = findBestZakonExpProfile(task);
         if (!best) {
-            zakonLog(`Nie znalazlem expowiska dla: ${task?.mobName || task?.title || 'zadania'}`, '#ffb74d', 4000);
+            zakonLog(`Nie znalazlem expowiska dla: ${requiredMobName || task?.title || 'zadania'}`, '#ffb74d', 4000);
             return false;
         }
         const previousTaskKey = botSettings.zakon.activeProfileTaskKey || '';
         const previousMaps = Array.isArray(botSettings.zakon.activeProfileMaps) ? botSettings.zakon.activeProfileMaps : [];
-        if (previousTaskKey && previousTaskKey !== taskKey && previousMaps.length) {
-            clearZakonExpRouteMemoryForMaps(previousMaps, 'zakon_profile_switch');
+        const previousProfileName = botSettings.zakon.selectedProfileName || '';
+        const profileChanged = previousProfileName && previousProfileName !== (best.profile.name || '');
+        if ((previousTaskKey && previousTaskKey !== taskKey && previousMaps.length) || profileChanged) {
+            const mapsToClear = [...previousMaps, ...(Array.isArray(botSettings?.exp?.mapOrder) ? botSettings.exp.mapOrder : [])];
+            clearZakonExpRouteMemoryForMaps(mapsToClear, profileChanged ? 'zakon_profile_corrected' : 'zakon_profile_switch');
         }
         if (!sameExpMapOrder(best.profile.maps)) {
             setExpMapOrder(best.profile.maps, 'zakon_task_profile');
@@ -6271,7 +6442,7 @@ window.heroMapOrder = heroMapOrder;
         botSettings.zakon.activeProfileMaps = [...best.profile.maps];
         runWhenBrowserIdle(() => saveSettings(), { timeout: 1200 });
         if (typeof window.renderExpMaps === 'function') window.renderExpMaps();
-        zakonLog(`Wybrane expowisko: ${best.profile.name} dla ${task.mobName}`, '#4caf50', 3000);
+        zakonLog(`Wybrane expowisko: ${best.profile.name} dla ${requiredMobName || task.mobName}`, '#4caf50', 3000);
         return true;
     }
     window.loadZakonProfileForTask = loadZakonProfileForTask;
@@ -6548,6 +6719,7 @@ window.heroMapOrder = heroMapOrder;
             return;
         }
         box.innerHTML = tasks.map(task => {
+            const requiredMobName = getZakonRequiredMobName(task) || task.mobName || task.title || '';
             const best = findBestZakonExpProfile(task);
             const status = task.completed ? 'gotowe do oddania' : `${task.done || 0}/${task.total || 0}`;
             const color = task.completed ? '#4caf50' : '#ffb300';
@@ -6555,10 +6727,10 @@ window.heroMapOrder = heroMapOrder;
             return `
                 <div style="border:1px solid ${isActive ? '#4fc3f7' : '#3a3020'}; background:${isActive ? '#10222b' : '#141414'}; padding:5px; margin-bottom:4px;">
                     <div style="display:flex; justify-content:space-between; gap:6px;">
-                        <b style="color:#e0d8c0;">${zakonEscapeHtml(task.title || task.mobName)}</b>
+                        <b style="color:#e0d8c0;">${zakonEscapeHtml(task.title || requiredMobName)}</b>
                         <span style="color:${color}; white-space:nowrap;">${zakonEscapeHtml(status)}</span>
                     </div>
-                    <div style="font-size:10px; color:#a99a75;">Mob: ${zakonEscapeHtml(task.mobName)}${task.level ? ` | lvl ${task.level}` : ''}${task.city ? ` | ${zakonEscapeHtml(task.city)}` : ''}</div>
+                    <div style="font-size:10px; color:#a99a75;">Mob: ${zakonEscapeHtml(requiredMobName)}${task.level ? ` | lvl ${task.level}` : ''}${task.city ? ` | ${zakonEscapeHtml(task.city)}` : ''}</div>
                     <div style="font-size:10px; color:#90caf9;">Exp: ${best ? zakonEscapeHtml(best.profile.name) : 'nie znaleziono profilu'}</div>
                 </div>`;
         }).join('');
@@ -6583,16 +6755,36 @@ window.heroMapOrder = heroMapOrder;
         const mobName = getZakonKilledMobName(targetRef);
         if (!mobName || !task) return false;
         const hay = zakonNormalize(mobName);
-        const wanted = zakonNormalize(`${task.mobName || ''} ${task.title || ''}`);
-        if (wanted && hay.includes(wanted)) return true;
-        const tokens = zakonMobTokens(task.mobName || task.title || '').filter(t => t.length >= 3);
+        const wantedName = getZakonRequiredMobName(task);
+        const wanted = zakonNormalize(wantedName);
+        if (!wanted) return false;
+        if (hay.includes(wanted) || (hay.length >= 4 && wanted.includes(hay))) return true;
+
+        const hayOrc = hay.includes('ork') || hay.includes('orcz');
+        const wantedOrc = wanted.includes('ork') || wanted.includes('orcz');
+        if (wanted.includes('berserker')) return hay.includes('berserker');
+        if (wanted.includes('mechan') && wanted.includes('goblin')) return hay.includes('mechan') && hay.includes('goblin');
+        if ((wanted.includes('duch') || wanted.includes('dusz')) && wantedOrc) {
+            return (hay.includes('duch') || hay.includes('dusz')) && hayOrc;
+        }
+        if (wanted.includes('pradawn') && wantedOrc) return hay.includes('pradawn') && hayOrc;
+        if (wanted.includes('czarn') && wanted.includes('gward')) return hay.includes('czarn') && hay.includes('gward');
+        if ((wanted.includes('czerwon') || wanted.includes('czerwonosk')) && wantedOrc) {
+            return (hay.includes('czerwon') || hay.includes('czerwonosk')) && hayOrc;
+        }
+        if (wanted.includes('golem')) return hay.includes('golem');
+        if (wanted.includes('nimf')) return hay.includes('nimf');
+        if (wanted.includes('hydr')) return hay.includes('hydr');
+        if (wanted.includes('wiedz')) return hay.includes('wiedz');
+        if ((wanted.includes('dusz') || wanted.includes('duch')) && !wantedOrc) {
+            return hay.includes('dusz') || hay.includes('duch');
+        }
+
+        const hints = getZakonTaskProfileHints(task);
+        const tokens = zakonMobTokens(wantedName)
+            .filter(t => t.length >= 4 && !(hints.skipGenericOrc && (t === 'ork' || t === 'orcz')));
         if (!tokens.length) return false;
-        const strong = tokens.filter(t => t.length >= 4);
-        if (strong.some(t => hay.includes(t))) return true;
-        if ((wanted.includes('ork') || wanted.includes('orcz')) && (hay.includes('ork') || hay.includes('orcz') || hay.includes('czerwonosk'))) return true;
-        if (wanted.includes('goblin') && hay.includes('goblin')) return true;
-        if ((wanted.includes('dusz') || wanted.includes('duch')) && (hay.includes('dusz') || hay.includes('duch'))) return true;
-        if (wanted.includes('berserker') && hay.includes('berserker')) return true;
+        if (tokens.some(t => hay.includes(t))) return true;
         return false;
     }
 
@@ -6623,13 +6815,25 @@ window.heroMapOrder = heroMapOrder;
         }
         if (!task) task = chooseZakonTask(incomplete);
         if (!task) return false;
+        if (targetRef && task && !zakonTaskMatchesMob(task, targetRef)) {
+            if (matching.length) {
+                task = matching[0];
+            } else {
+                const killedName = getZakonKilledMobName(targetRef);
+                zakonLog(`Zakon: pomijam ${killedName} - nie pasuje do ${getZakonRequiredMobName(task) || task.title}.`, '#ff9800', 2500);
+                return false;
+            }
+        }
 
         const key = getZakonTaskKey(task);
         const currentDone = Number(task.done || 0);
         const total = Number(task.total || 0);
         const nextDone = total > 0 ? Math.min(total, currentDone + 1) : currentDone + 1;
+        const requiredMobName = getZakonRequiredMobName(task);
         const updated = {
             ...task,
+            mobName: requiredMobName || task.mobName,
+            requiredMobName: requiredMobName || task.requiredMobName || task.mobName,
             done: nextDone,
             total,
             completed: total > 0 && nextDone >= total,
