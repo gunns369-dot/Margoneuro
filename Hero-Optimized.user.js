@@ -5478,6 +5478,9 @@ window.heroMapOrder = heroMapOrder;
         selectedProfileIndex: -1,
         selectedProfileName: '',
         activeTaskKey: '',
+        readyTaskKeys: {},
+        activeProfileTaskKey: '',
+        activeProfileMaps: [],
         finishedKeys: {},
         lastTasks: []
     };
@@ -5524,6 +5527,10 @@ window.heroMapOrder = heroMapOrder;
         zakon.selectedProfileIndex = Number.isFinite(Number(zakon.selectedProfileIndex)) ? Number(zakon.selectedProfileIndex) : -1;
         zakon.selectedProfileName = String(zakon.selectedProfileName || '');
         zakon.activeTaskKey = String(zakon.activeTaskKey || '');
+        zakon.activeProfileTaskKey = String(zakon.activeProfileTaskKey || '');
+        zakon.activeProfileMaps = Array.isArray(zakon.activeProfileMaps)
+            ? [...new Set(zakon.activeProfileMaps.filter(Boolean).map(String))]
+            : [];
 
         const finished = (zakon.finishedKeys && typeof zakon.finishedKeys === 'object' && !Array.isArray(zakon.finishedKeys))
             ? { ...zakon.finishedKeys }
@@ -5533,6 +5540,15 @@ window.heroMapOrder = heroMapOrder;
             if (!until || Number(until) < now) delete finished[key];
         }
         zakon.finishedKeys = finished;
+
+        const ready = (zakon.readyTaskKeys && typeof zakon.readyTaskKeys === 'object' && !Array.isArray(zakon.readyTaskKeys))
+            ? { ...zakon.readyTaskKeys }
+            : {};
+        for (const [key, at] of Object.entries(ready)) {
+            if (!key) delete ready[key];
+            else ready[key] = Number(at) || now;
+        }
+        zakon.readyTaskKeys = ready;
 
         const tasks = Array.isArray(zakon.lastTasks) ? zakon.lastTasks : [];
         const seen = new Set();
@@ -5940,13 +5956,32 @@ window.heroMapOrder = heroMapOrder;
         return !!(key && Number(s.finishedKeys?.[key] || 0) > Date.now());
     }
 
+    function isZakonTaskReadyKey(key) {
+        const s = ensureZakonSettings();
+        return !!(key && s.readyTaskKeys && Object.prototype.hasOwnProperty.call(s.readyTaskKeys, key));
+    }
+
+    function applyZakonReadyState(task) {
+        if (!task) return task;
+        const key = getZakonTaskKey(task);
+        if (!isZakonTaskReadyKey(key)) return task;
+        const total = Number(task.total || 0);
+        const done = Number(task.done || 0);
+        return {
+            ...task,
+            done: total > 0 ? Math.max(done, total) : done,
+            completed: true,
+            readyForTurnIn: true
+        };
+    }
+
     function filterFinishedZakonTasks(tasks = []) {
         const s = ensureZakonSettings();
         return dedupeZakonTasks(tasks).filter(task => {
             const key = getZakonTaskKey(task);
             const until = Number(s.finishedKeys?.[key] || 0);
             return !until || until < Date.now();
-        });
+        }).map(applyZakonReadyState);
     }
 
     function setZakonActiveTask(task = null, reason = 'update') {
@@ -5971,11 +6006,165 @@ window.heroMapOrder = heroMapOrder;
         const key = getZakonTaskKey(task);
         if (!key) return false;
         s.finishedKeys[key] = Date.now() + 20 * 60 * 1000;
+        if (s.readyTaskKeys) delete s.readyTaskKeys[key];
+        if (s.activeProfileTaskKey === key) {
+            s.activeProfileTaskKey = '';
+            s.activeProfileMaps = [];
+        }
         s.lastTasks = filterFinishedZakonTasks((s.lastTasks || []).filter(t => getZakonTaskKey(t) !== key));
         if (s.activeTaskKey === key) setZakonActiveTask(null, reason);
         runWhenBrowserIdle(() => saveSettings(), { timeout: 900 });
         renderZakonPanel();
         return true;
+    }
+
+    function getZakonProfileMapsForTask(task) {
+        const best = findBestZakonExpProfile(task);
+        return Array.isArray(best?.profile?.maps) ? best.profile.maps.filter(Boolean) : [];
+    }
+
+    function clearZakonExpRouteMemoryForMaps(maps = [], reason = 'zakon_route_clear') {
+        const list = [...new Set((Array.isArray(maps) ? maps : []).filter(Boolean).map(String))];
+        if (!list.length) return { removed: 0, maps: [] };
+        const normSet = new Set(list.map(m => normalizeMapName(m)));
+        let removed = 0;
+
+        const removeFromBucket = (bucket) => {
+            if (!bucket || typeof bucket !== 'object') return;
+            for (const key of Object.keys(bucket)) {
+                const value = bucket[key];
+                const mapName = value?.mapName || value?.name || value?.map || key;
+                if (normSet.has(normalizeMapName(key)) || normSet.has(normalizeMapName(mapName))) {
+                    delete bucket[key];
+                    removed++;
+                }
+            }
+        };
+
+        try {
+            const store = typeof getExpRouteStore === 'function' ? getExpRouteStore() : window.expRoutePlannerState;
+            if (store) {
+                removeFromBucket(store.maps);
+                removeFromBucket(store.clearedMaps);
+                if (store.plannerState) store.plannerState = '';
+            }
+        } catch (_) {}
+
+        try {
+            window.mapClearTimes = window.mapClearTimes || {};
+            removeFromBucket(window.mapClearTimes);
+        } catch (_) {}
+
+        try {
+            if (window.expMonsterCache instanceof Map) {
+                for (const [key, mob] of [...window.expMonsterCache.entries()]) {
+                    const mapName = mob?.mapName || mob?.map || String(key).split(':')[0] || '';
+                    if (!mapName || normSet.has(normalizeMapName(mapName))) {
+                        window.expMonsterCache.delete(key);
+                        removed++;
+                    }
+                }
+            }
+        } catch (_) {}
+
+        try { if (typeof clearExpTargetLock === 'function') clearExpTargetLock(reason); } catch (_) {}
+        try { if (typeof clearExpTransitState === 'function') clearExpTransitState(reason); } catch (_) {}
+        try { if (typeof clearSafeExpResumeTravel === 'function') clearSafeExpResumeTravel(reason); } catch (_) {}
+        window.__currentVisibleExpMobsCache = null;
+        window.__currentExpHuntMapsCache = null;
+        window.__expChooseNextMapCache = null;
+        window.__expFastPathCache = {};
+        window.expFocusTarget = null;
+        window.expCurrentTargetGroupKey = null;
+        window.expWaitingForRespawn = false;
+        window.expAllMapsClearedAt = 0;
+        if (removed) zakonLog(`Zakon: czyszcze pamiec EXP dla zakonczonego zadania (${removed}).`, '#90caf9', 3500);
+        return { removed, maps: list };
+    }
+
+    function markZakonTaskReady(task, reason = 'ready') {
+        if (!task) return null;
+        const s = ensureZakonSettings();
+        const key = getZakonTaskKey(task);
+        if (!key) return null;
+        const total = Number(task.total || 0);
+        const done = Number(task.done || 0);
+        const updated = {
+            ...task,
+            done: total > 0 ? Math.max(done, total) : done,
+            completed: true,
+            readyForTurnIn: true,
+            scannedAt: Date.now()
+        };
+        s.readyTaskKeys = s.readyTaskKeys || {};
+        s.readyTaskKeys[key] = Date.now();
+        s.lastTasks = filterFinishedZakonTasks([
+            ...(s.lastTasks || []).filter(t => getZakonTaskKey(t) !== key),
+            updated
+        ]);
+        if (s.activeTaskKey === key) setZakonActiveTask(null, reason);
+        runWhenBrowserIdle(() => saveSettings(), { timeout: 900 });
+        renderZakonPanel();
+        return updated;
+    }
+
+    function getNextZakonTaskAfterReady(excludeKey = '') {
+        const s = ensureZakonSettings();
+        const tasks = filterFinishedZakonTasks(dedupeZakonTasks(s.lastTasks || []));
+        const candidates = tasks.filter(t => {
+            const key = getZakonTaskKey(t);
+            return key
+                && key !== excludeKey
+                && !t.completed
+                && !t.readyForTurnIn
+                && !isZakonTaskReadyKey(key)
+                && Number(t.total || 0) > 0
+                && Number(t.done || 0) < Number(t.total || 0);
+        });
+        return chooseZakonTask(candidates);
+    }
+
+    function clearZakonSelectedExpRoute(reason = 'zakon_task_ready') {
+        try {
+            if (typeof setExpMapOrder === 'function') {
+                setExpMapOrder([], reason, { silent: true, skipRouteState: true, deferPersist: true });
+            } else if (botSettings?.exp) {
+                botSettings.exp.mapOrder = [];
+            }
+            if (typeof window.renderExpMaps === 'function') window.renderExpMaps();
+        } catch (_) {}
+    }
+
+    function handleZakonTaskReadyForNext(task, reason = 'zakon_task_ready') {
+        const s = ensureZakonSettings();
+        const readyTask = markZakonTaskReady(task, reason) || task;
+        const key = getZakonTaskKey(readyTask);
+        const mapsToClear = [
+            ...(Array.isArray(s.activeProfileMaps) ? s.activeProfileMaps : []),
+            ...getZakonProfileMapsForTask(readyTask),
+            ...(Array.isArray(botSettings?.exp?.mapOrder) ? botSettings.exp.mapOrder : [])
+        ];
+        clearZakonExpRouteMemoryForMaps(mapsToClear, reason);
+        if (s.activeProfileTaskKey === key) {
+            s.activeProfileTaskKey = '';
+            s.activeProfileMaps = [];
+        }
+        clearZakonSelectedExpRoute(reason);
+        pauseZakonCombatAutomation(reason);
+        const nextTask = getNextZakonTaskAfterReady(key);
+        if (nextTask) {
+            setZakonActiveTask(nextTask, 'zakon_next_task');
+            loadZakonProfileForTask(nextTask);
+            zakonLog(`Zakon: nastepne zadanie: ${nextTask.title || nextTask.mobName}.`, '#4caf50', 3500);
+            if (window.isZakonRunning && botSettings.zakon.autoStartExp) {
+                setTimeout(() => {
+                    if (window.isZakonRunning && !window.autoSellState?.active) ensureZakonExpRunning();
+                }, 300);
+            }
+        }
+        runWhenBrowserIdle(() => saveSettings(), { timeout: 900 });
+        scheduleZakonTick(300, zakonRunId);
+        return readyTask;
     }
 
     function scanZakonTasks(force = false) {
@@ -6049,10 +6238,20 @@ window.heroMapOrder = heroMapOrder;
 
     function loadZakonProfileForTask(task) {
         ensureZakonSettings();
+        const taskKey = getZakonTaskKey(task);
+        if (!task || task.completed || task.readyForTurnIn || isZakonTaskReadyKey(taskKey)) {
+            if (task) handleZakonTaskReadyForNext(task, 'zakon_skip_ready_task');
+            return false;
+        }
         const best = findBestZakonExpProfile(task);
         if (!best) {
             zakonLog(`Nie znalazlem expowiska dla: ${task?.mobName || task?.title || 'zadania'}`, '#ffb74d', 4000);
             return false;
+        }
+        const previousTaskKey = botSettings.zakon.activeProfileTaskKey || '';
+        const previousMaps = Array.isArray(botSettings.zakon.activeProfileMaps) ? botSettings.zakon.activeProfileMaps : [];
+        if (previousTaskKey && previousTaskKey !== taskKey && previousMaps.length) {
+            clearZakonExpRouteMemoryForMaps(previousMaps, 'zakon_profile_switch');
         }
         if (!sameExpMapOrder(best.profile.maps)) {
             setExpMapOrder(best.profile.maps, 'zakon_task_profile');
@@ -6067,10 +6266,12 @@ window.heroMapOrder = heroMapOrder;
             }
             botSettings.zakon.selectedProfileIndex = best.index;
             botSettings.zakon.selectedProfileName = best.profile.name || '';
-            runWhenBrowserIdle(() => saveSettings(), { timeout: 1200 });
-            if (typeof window.renderExpMaps === 'function') window.renderExpMaps();
-            zakonLog(`Wybrane expowisko: ${best.profile.name} dla ${task.mobName}`, '#4caf50', 3000);
         }
+        botSettings.zakon.activeProfileTaskKey = taskKey;
+        botSettings.zakon.activeProfileMaps = [...best.profile.maps];
+        runWhenBrowserIdle(() => saveSettings(), { timeout: 1200 });
+        if (typeof window.renderExpMaps === 'function') window.renderExpMaps();
+        zakonLog(`Wybrane expowisko: ${best.profile.name} dla ${task.mobName}`, '#4caf50', 3000);
         return true;
     }
     window.loadZakonProfileForTask = loadZakonProfileForTask;
@@ -6148,7 +6349,11 @@ window.heroMapOrder = heroMapOrder;
     }
 
     function stopZakonOwnedExp(reason = 'zakon_stop') {
-        if (!window.__zakonOwnsExp || !window.isExping) return false;
+        if (!window.__zakonOwnsExp) return false;
+        if (!window.isExping) {
+            window.__zakonOwnsExp = false;
+            return false;
+        }
         const btn = document.getElementById('btnStartExp');
         if (btn) btn.click();
         window.__zakonOwnsExp = false;
@@ -6291,7 +6496,14 @@ window.heroMapOrder = heroMapOrder;
     window.startVisibleZakonTasks = startVisibleZakonTasks;
 
     function chooseZakonTask(tasks) {
-        const incomplete = (tasks || []).filter(t => !t.completed && Number(t.total) > 0);
+        const incomplete = (tasks || []).filter(t => {
+            const key = getZakonTaskKey(t);
+            return !t.completed
+                && !t.readyForTurnIn
+                && !isZakonTaskReadyKey(key)
+                && Number(t.total) > 0
+                && Number(t.done || 0) < Number(t.total || 0);
+        });
         if (!incomplete.length) return null;
         const currentMap = normalizeMapName(getCurrentMapName());
         let best = null;
@@ -6388,10 +6600,22 @@ window.heroMapOrder = heroMapOrder;
         if (!window.isZakonRunning && !window.__zakonOwnsExp) return false;
         const s = ensureZakonSettings();
         const tasks = dedupeZakonTasks(s.lastTasks || []);
-        const incomplete = tasks.filter(t => !t.completed && Number(t.total) > 0 && Number(t.done || 0) < Number(t.total || 0));
+        const activeKey = s.activeTaskKey || window.__zakonActiveTaskKey || s.activeProfileTaskKey || '';
+        if (activeKey && isZakonTaskReadyKey(activeKey)) {
+            const readyTask = tasks.find(t => getZakonTaskKey(t) === activeKey);
+            if (readyTask) handleZakonTaskReadyForNext(readyTask, 'active_ready_kill_guard');
+            return false;
+        }
+        const incomplete = tasks.filter(t => {
+            const key = getZakonTaskKey(t);
+            return !t.completed
+                && !t.readyForTurnIn
+                && !isZakonTaskReadyKey(key)
+                && Number(t.total) > 0
+                && Number(t.done || 0) < Number(t.total || 0);
+        });
         if (!incomplete.length) return false;
 
-        const activeKey = s.activeTaskKey || window.__zakonActiveTaskKey || '';
         let task = activeKey ? incomplete.find(t => getZakonTaskKey(t) === activeKey) : null;
         const matching = targetRef ? incomplete.filter(t => zakonTaskMatchesMob(t, targetRef)) : [];
         if ((!task || (matching.length && !matching.some(t => getZakonTaskKey(t) === getZakonTaskKey(task)))) && matching.length) {
@@ -6419,9 +6643,7 @@ window.heroMapOrder = heroMapOrder;
 
         if (updated.completed) {
             zakonLog(`Zakon: ${updated.title || updated.mobName} gotowe, zmieniam cel.`, '#4caf50', 3500);
-            setZakonActiveTask(null, 'task_completed_by_kill');
-            pauseZakonCombatAutomation('zakon_task_complete');
-            scheduleZakonTick(350, zakonRunId);
+            handleZakonTaskReadyForNext(updated, 'task_completed_by_kill');
         }
         return true;
     }
@@ -6452,15 +6674,32 @@ window.heroMapOrder = heroMapOrder;
                 const scan = scanZakonTasks(false);
                 const tasks = scan.tasks || [];
                 const activeKey = botSettings.zakon.activeTaskKey || '';
-                const activeCompleted = activeKey
-                    ? tasks.find(t => getZakonTaskKey(t) === activeKey && (t.completed || (Number(t.total) > 0 && Number(t.done) >= Number(t.total))))
+                const activeProfileKey = botSettings.zakon.activeProfileTaskKey || '';
+                const watchedKeys = [...new Set([activeKey, activeProfileKey].filter(Boolean))];
+                const activeCompleted = watchedKeys.length
+                    ? tasks.find(t => {
+                        const key = getZakonTaskKey(t);
+                        return watchedKeys.includes(key)
+                            && (t.completed || t.readyForTurnIn || isZakonTaskReadyKey(key) || (Number(t.total) > 0 && Number(t.done) >= Number(t.total)));
+                    })
                     : null;
                 if (activeCompleted) {
-                    setZakonActiveTask(null, 'active_completed');
-                    pauseZakonCombatAutomation('zakon_task_complete');
+                    handleZakonTaskReadyForNext(activeCompleted, 'active_completed');
+                    nextDelay = 500;
+                    return;
                 }
-                const incomplete = tasks.filter(t => !t.completed && Number(t.total) > 0 && Number(t.done || 0) < Number(t.total || 0));
-                const completed = tasks.filter(t => t.completed || (Number(t.total) > 0 && Number(t.done) >= Number(t.total)));
+                const incomplete = tasks.filter(t => {
+                    const key = getZakonTaskKey(t);
+                    return !t.completed
+                        && !t.readyForTurnIn
+                        && !isZakonTaskReadyKey(key)
+                        && Number(t.total) > 0
+                        && Number(t.done || 0) < Number(t.total || 0);
+                });
+                const completed = tasks.filter(t => {
+                    const key = getZakonTaskKey(t);
+                    return t.completed || t.readyForTurnIn || isZakonTaskReadyKey(key) || (Number(t.total) > 0 && Number(t.done) >= Number(t.total));
+                });
 
                 if (completed.length && !incomplete.length && botSettings.zakon.autoFinish) {
                     setZakonActiveTask(null, 'finish_ready');
@@ -6469,6 +6708,10 @@ window.heroMapOrder = heroMapOrder;
                     nextDelay = 3500;
                 } else if (incomplete.length) {
                     const task = chooseZakonTask(incomplete);
+                    if (!task) {
+                        nextDelay = 1200;
+                        return;
+                    }
                     const switched = setZakonActiveTask(task, 'zakon_tick');
                     if (switched) pauseZakonCombatAutomation('zakon_task_switch');
                     if (task && loadZakonProfileForTask(task)) ensureZakonExpRunning();
@@ -9769,6 +10012,21 @@ function autoDetectEngineData() {
         return tps;
     };
 
+    function getAutoSellPreferredShopMap() {
+        const state = window.autoSellState || null;
+        if (!state || !state.active) return "";
+        const targetText = [
+            state.preferredTargetMap,
+            state.targetNpc?.npc_name,
+            state.targetNpc?.map_name,
+            window.rushTarget,
+            typeof rushTarget !== "undefined" ? rushTarget : ""
+        ].filter(Boolean).join(" ");
+        if (botSettings?.autosell?.onlyTunia || /tuni|dom tunii/i.test(targetText)) return "Dom Tunii";
+        return state.targetNpc?.map_name || "";
+    }
+    window.getAutoSellPreferredShopMap = getAutoSellPreferredShopMap;
+
     window.useItemById = function(itemId) {
         try {
             let itemObj = null;
@@ -10385,53 +10643,62 @@ window.executeRushStep = function() {
         // --- ZWOJE TELEPORTACJI (Tylko EXP + histereza) ---
         const shopReturnActiveForEq = typeof isExpShopReturnActive === 'function' ? isExpShopReturnActive() : false;
         const eqTeleportBlockedByShopReturn = shopReturnActiveForEq || Date.now() < Number(window.__disableEqTeleportForShopReturnUntil || 0);
+        const preferredShopMapForEq = typeof getAutoSellPreferredShopMap === 'function' ? getAutoSellPreferredShopMap() : "";
         const autoSellTargetText = [
+            preferredShopMapForEq,
             rushTarget,
             window.rushTarget,
             window.autoSellState?.targetNpc?.npc_name,
             window.autoSellState?.targetNpc?.map_name
         ].filter(Boolean).join(' ');
-        const autoSellTuniaRush = !!(window.autoSellState?.active && /tuni|dom tunii/i.test(autoSellTargetText));
-        const canEvaluateEqTeleport = !window.isExping || currentDistance >= 5;
+        const autoSellTuniaRush = !!(window.autoSellState?.active && (preferredShopMapForEq === "Dom Tunii" || /tuni|dom tunii/i.test(autoSellTargetText)));
+        const eqTeleportTargetMap = autoSellTuniaRush ? "Dom Tunii" : rushTarget;
+        const comparableCurrentDistance = Number.isFinite(Number(currentDistance)) ? Number(currentDistance) : 9999;
+        const canEvaluateEqTeleport = autoSellTuniaRush || !window.isExping || comparableCurrentDistance >= 5;
+        const eqTeleportEvalCooldown = autoSellTuniaRush ? 700 : (window.isExping ? 10000 : 1800);
         const canTryEqTeleport = !!(
-            path &&
+            (path || autoSellTuniaRush) &&
             canEvaluateEqTeleport &&
             (window.isExping || autoSellTuniaRush) &&
             (!window.autoSellState?.active || autoSellTuniaRush) &&
             (!window.isRushingToShop || autoSellTuniaRush) &&
             !eqTeleportBlockedByShopReturn &&
             botSettings.exp.useTeleportsEq &&
-            (!window.__lastEqTeleportEvalAt || Date.now() - Number(window.__lastEqTeleportEvalAt || 0) > (window.isExping ? 10000 : 1800))
+            (!window.__lastEqTeleportEvalAt || Date.now() - Number(window.__lastEqTeleportEvalAt || 0) > eqTeleportEvalCooldown)
         );
         if (canTryEqTeleport) window.__lastEqTeleportEvalAt = Date.now();
         let tps = canTryEqTeleport ? window.getAvailableTeleports() : [];
         let bestTp = null;
-        const minSavedMaps = autoSellTuniaRush ? 1 : 3;
-        let bestDist = currentDistance;
+        const minSavedMaps = autoSellTuniaRush ? 0 : 3;
+        let bestDist = comparableCurrentDistance;
 
         for (let tp of tps) {
-            if (tp.map === currentSysMap) continue;
+            if (normMapName(tp.map) === normMapName(currentSysMap)) continue;
             let tpPath = typeof getExpRoutePlanCached === 'function'
-                ? getExpRoutePlanCached(tp.map, rushTarget, routePathOptions(), 'rush_tp_eval')
-                : (typeof getShortestPath === 'function' ? getShortestPath(tp.map, rushTarget, routePathOptions()) : null);
-            if (tpPath && tpPath.length < bestDist) {
-                bestDist = tpPath.length;
-                bestTp = tp;
-            } else if (tp.map.toLowerCase() === rushTarget.toLowerCase() && 0 < bestDist) {
-                bestDist = 0;
+                ? getExpRoutePlanCached(tp.map, eqTeleportTargetMap, routePathOptions(), autoSellTuniaRush ? 'autosell_tunia_tp_eval' : 'rush_tp_eval')
+                : (typeof getShortestPath === 'function' ? getShortestPath(tp.map, eqTeleportTargetMap, routePathOptions()) : null);
+            const tpDirectTarget = normMapName(tp.map) === normMapName(eqTeleportTargetMap);
+            const tuniaNearHint = autoSellTuniaRush && /kwieciste\s+przejscie|kwieciste\s+przejście/i.test(tp.map || "");
+            const tpDist = tpDirectTarget ? 0 : (tpPath && tpPath.length ? tpPath.length : (tuniaNearHint ? 1 : Infinity));
+            if (tpDist < bestDist || (autoSellTuniaRush && tuniaNearHint && !bestTp)) {
+                bestDist = tpDist;
                 bestTp = tp;
             }
         }
 
         const lastEqTpAt = window.__lastEqTeleportAt || 0;
-        const eqTpCooldown = 30000;
+        const eqTpCooldown = autoSellTuniaRush ? 7000 : 30000;
         const eqTeleportReady = Date.now() - lastEqTpAt >= eqTpCooldown;
-        const savesEnough = bestTp && (bestDist <= currentDistance - minSavedMaps);
+        const savesEnough = bestTp && (
+            autoSellTuniaRush
+                ? (bestDist <= comparableCurrentDistance || /kwieciste\s+przejscie|kwieciste\s+przejście/i.test(bestTp.map || ""))
+                : (bestDist <= comparableCurrentDistance - minSavedMaps)
+        );
 
         if (bestTp && eqTeleportReady && savesEnough) {
             if (window._lastRushNextMap !== bestTp.map) {
-                let msg = `📜 Używam zwoju: ${bestTp.map}! (Trasa skraca się z ${currentDistance} do ${bestDist} map)`;
-                if (autoSellTuniaRush) msg = `Auto-sprzedaz do Tunii: uzywam zwoju ${bestTp.map} (trasa ${currentDistance} -> ${bestDist} map)`;
+                let msg = `📜 Używam zwoju: ${bestTp.map}! (Trasa skraca się z ${comparableCurrentDistance} do ${bestDist} map)`;
+                if (autoSellTuniaRush) msg = `Auto-sprzedaz do Tunii: uzywam zwoju ${bestTp.map} (trasa ${comparableCurrentDistance} -> ${bestDist} map)`;
                 if (window.logExp) window.logExp(msg, "#e040fb");
                 if (window.logHero) window.logHero(msg, "#e040fb");
                 window._lastRushNextMap = bestTp.map;
@@ -13215,7 +13482,9 @@ function setOnChange(id, handler) {
        });
        bindZakonClick('btnZakonPickExp', () => {
            const scan = typeof scanZakonTasks === 'function' ? scanZakonTasks(true) : { tasks: [] };
-           const task = (scan.tasks || []).find(t => !t.completed) || (scan.tasks || [])[0];
+           const task = typeof chooseZakonTask === 'function'
+               ? chooseZakonTask(scan.tasks || [])
+               : ((scan.tasks || []).find(t => !t.completed && !t.readyForTurnIn) || null);
            if (task && typeof loadZakonProfileForTask === 'function') loadZakonProfileForTask(task);
            if (typeof renderZakonPanel === 'function') renderZakonPanel();
        });
@@ -25982,6 +26251,20 @@ function runExpLogic() {
             }
         }
     }
+    if ((window.isZakonRunning || window.__zakonOwnsExp) && typeof zakonTaskMatchesMob === 'function') {
+        const zakonTasks = filterFinishedZakonTasks(dedupeZakonTasks(botSettings?.zakon?.lastTasks || []));
+        const activeZakonKey = botSettings?.zakon?.activeTaskKey || window.__zakonActiveTaskKey || botSettings?.zakon?.activeProfileTaskKey || '';
+        const activeZakonTask = activeZakonKey
+            ? zakonTasks.find(t => getZakonTaskKey(t) === activeZakonKey)
+            : chooseZakonTask(zakonTasks);
+        if (activeZakonTask && !activeZakonTask.completed && !activeZakonTask.readyForTurnIn && !isZakonTaskReadyKey(getZakonTaskKey(activeZakonTask))) {
+            const beforeZakonFilter = validMobs.length;
+            validMobs = validMobs.filter(mob => zakonTaskMatchesMob(activeZakonTask, mob));
+            if (beforeZakonFilter && !validMobs.length) {
+                HeroLogger.emit('DEBUG', 'ZAKON_EXP_FILTER_EMPTY', `[ZAKON] Brak mobow zadania na tej mapie, nie bije pobocznych celow.`, "#90caf9", { category: 'EXP', dedupeMs: 5000 });
+            }
+        }
+    }
     const rememberedCandidatesCount = validMobs.filter(m => m.memoryOnly).length;
     HeroLogger.emit('DEBUG', 'EXP_VISIBLE_CANDIDATES', `[EXP] Visible mobs: ${liveVisibleValidCount}, reachable: ${validMobs.length}, unreachable: ${unreachableMobs}, skipped temporary: ${skippedTemporaryCount}`, "#90caf9", { category: 'EXP', dedupeMs: 8000 });
     HeroLogger.emit('DEBUG', 'EXP_MOB_FILTER_COUNTS', `[EXP] normal mobs remaining=${validMobs.length} ignoredDangerous=${ignoredDangerousCount}`, "#90caf9", { category: 'EXP', dedupeMs: 9000 });
@@ -30582,6 +30865,16 @@ if (isDead) {
             window.autoSellState.failedNPCs = [];
             window.autoSellState.shopWaitStartTime = 0;
             window.autoSellState.targetNpc = null;
+            const autoSellTriggerReason = String(options.trigger?.reason || reason || "");
+            const preferTuniaForFullBag = !!(
+                botSettings.autosell?.onlyTunia ||
+                /full|bag|inventory|space|plecak|zakon_full_bag|autopot_need_space/i.test(autoSellTriggerReason)
+            );
+            window.autoSellState.preferredTargetMap = preferTuniaForFullBag ? "Dom Tunii" : "";
+            if (preferTuniaForFullBag) {
+                window.__lastEqTeleportEvalAt = 0;
+                window.__autoSellPreferredTeleportUntil = Date.now() + 90000;
+            }
             window.autoSellState.isAsyncRunning = false;
             window.autoSellState.verifyPasses = 0;
             window.autoSellState.emptySellScanCount = 0;
@@ -31224,8 +31517,14 @@ window.openShopAsync = async (namePart) => {
 
                         // Wybór listy dozwolonych kupców w zależności od Checkboxa
                         let allowedNames = ['Flineks', 'Makin', 'Rozen', 'Tuni', 'Unil', 'Aukcjoner', 'Syntia', 'Jemen'];
-                        if (botSettings.autosell && botSettings.autosell.onlyTunia) {
+                        const preferTuniaMerchant = !!(
+                            (botSettings.autosell && botSettings.autosell.onlyTunia)
+                            || window.autoSellState?.preferredTargetMap === "Dom Tunii"
+                            || Date.now() < Number(window.__autoSellPreferredTeleportUntil || 0)
+                        );
+                        if (preferTuniaMerchant) {
                             allowedNames = ['Tuni']; // Ograniczamy listę wyłącznie do Tunii
+                            if (window.autoSellState) window.autoSellState.preferredTargetMap = "Dom Tunii";
                         }
 
                         let validMerchants = kupcy.filter(k => allowedNames.some(n => k.npc_name.includes(n)));
