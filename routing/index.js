@@ -12,6 +12,8 @@ const { RepairEngine } = require('./repair-engine');
 const { SemanticLoopDetector } = require('./loop-detection');
 const { buildRouteDebugDump } = require('./debug-tools');
 const { ROUTE_STAGES, stateIdentityKey, transitionIdentityKey, navigationState } = require('./state-model');
+const imperiumBehaviorKnowledge = require('./imperium-behavior-knowledge');
+const imperiumMovementExecutor = require('./imperium-movement-executor');
 
 module.exports = {
   RouteGraph,
@@ -33,5 +35,7 @@ module.exports = {
   ROUTE_STAGES,
   stateIdentityKey,
   transitionIdentityKey,
-  navigationState
+  navigationState,
+  imperiumBehaviorKnowledge,
+  imperiumMovementExecutor
 };
