@@ -9519,8 +9519,11 @@ let attackInterval = null;
 
 
 
-        let targetId = parseInt(npcId, 10);
-        if (!Number.isFinite(targetId) || targetId <= 0) return false;
+        let targetId = typeof normalizeMargoneuroRuntimeId === 'function' ? normalizeMargoneuroRuntimeId(npcId) : parseInt(npcId, 10);
+        if (targetId === null || !Number.isFinite(targetId)) return false;
+        const attackCommand = typeof buildMargoneuroFightAttackCommand === 'function'
+            ? buildMargoneuroFightAttackCommand(targetId)
+            : `fight&a=attack&id=${targetId}&ff=1`;
 
         HERO_LOG.info(`Cel namierzony (ID: ${targetId}). Włączam Kieszonkowego Berserka...`);
 
@@ -9529,9 +9532,9 @@ let attackInterval = null;
         // METODA GARGONEMA - Włącza natywnego auto-ataka prosto na serwerze gry
 
         if (typeof window.updateServerBerserk === 'function') window.updateServerBerserk('attack_target');
-        if (!window.RouteCombatFSM || window.RouteCombatFSM.canAutoAttack()) sendGameCommand(`fight&a=attack&id=${targetId}`, reason);
+        if (!window.RouteCombatFSM || window.RouteCombatFSM.canAutoAttack()) sendGameCommand(attackCommand, reason);
         window.margoneuroBerserkDiag.lastTargetId = targetId;
-        window.margoneuroBerserkDiag.lastAttackCommand = `fight&a=attack&id=${targetId}`;
+        window.margoneuroBerserkDiag.lastAttackCommand = attackCommand;
 
         attackInterval = setInterval(() => {
 
@@ -9628,7 +9631,7 @@ let attackInterval = null;
                             Engine.npcs.interact(targetId);
                             clicked = true;
                         }
-                        if (!clicked) sendGameCommand(`fight&a=attack&id=${targetId}`, 'attack_target_retry');
+                        if (!clicked) sendGameCommand(attackCommand, 'attack_target_retry');
                     }
 
                     let confirmBtn = document.querySelector(".green.button, .podejdz-btn, .zaatakuj-btn");
@@ -14288,10 +14291,62 @@ bindChange('useTeleportsEq', (e) => { botSettings.exp.useTeleportsEq = e.target.
             }
             return fn;
         }
+        function normalizeMargoneuroRuntimeId(value) {
+            const id = parseInt(value, 10);
+            return Number.isFinite(id) && id !== 0 ? id : null;
+        }
+        function buildMargoneuroFightAttackCommand(targetId, fastFight = 1) {
+            const id = normalizeMargoneuroRuntimeId(targetId);
+            if (id === null) return '';
+            return `fight&a=attack&id=${id}&ff=${fastFight ? 1 : 0}`;
+        }
+        function buildMargoneuroLootCommand(itemRuntimeId, options = {}) {
+            const id = normalizeMargoneuroRuntimeId(itemRuntimeId);
+            if (id === null) return '';
+            const final = options.final ?? 1;
+            const not = options.not ?? '';
+            const must = options.must ?? '';
+            return `loot&want=${id}&not=${not}&must=${must}&final=${final}`;
+        }
+        function normalizeMargoneuroGameCommand(command) {
+            const text = String(command || '').trim();
+            if (!text) return '';
+            const attackMatch = text.match(/^fight&a=attack&id=(-?\d+)(?:&|$)/);
+            if (attackMatch && !/[?&]ff=/.test(text)) return `${text}&ff=1`;
+            return text;
+        }
+        function getMargoneuroCommandThrottleMs(command) {
+            if (String(command).startsWith('fight&a=attack')) return 850;
+            if (String(command).startsWith('loot&want=')) return 650;
+            if (String(command).startsWith('talk&id=')) return 250;
+            if (String(command).startsWith('quests&')) return 300;
+            return 120;
+        }
+        function shouldThrottleMargoneuroCommand(command, now = Date.now()) {
+            const state = window.__margoneuroCommandThrottle || (window.__margoneuroCommandThrottle = { byCommand: {} });
+            const key = String(command || '');
+            const minGap = getMargoneuroCommandThrottleMs(key);
+            const last = state.byCommand[key] || 0;
+            if (last && now - last < minGap) {
+                state.lastSkipped = { command: key, at: now, waitMs: minGap - (now - last) };
+                return true;
+            }
+            state.byCommand[key] = now;
+            return false;
+        }
+        window.normalizeMargoneuroRuntimeId = normalizeMargoneuroRuntimeId;
+        window.buildMargoneuroFightAttackCommand = buildMargoneuroFightAttackCommand;
+        window.buildMargoneuroLootCommand = buildMargoneuroLootCommand;
         function sendGameCommand(command, reason = 'unknown') {
+            command = normalizeMargoneuroGameCommand(command);
+            if (!command) return false;
+            if (shouldThrottleMargoneuroCommand(command)) {
+                window.margoneuroBerserkDiag.lastThrottle = { command, reason, at: Date.now() };
+                return false;
+            }
             const g = getGameCommandFunction();
             if (!g) return false;
-            const attackMatch = String(command || '').match(/fight&a=attack&id=(\d+)/);
+            const attackMatch = String(command || '').match(/fight&a=attack&id=(-?\d+)/);
             const expAttackSnapshot = attackMatch && window.isExping && typeof getHeroExpKillSnapshot === 'function'
                 ? getHeroExpKillSnapshot()
                 : null;
@@ -23603,8 +23658,10 @@ function resetExpMoveCommand(reason = 'reset') {
 window.resetExpMoveCommand = resetExpMoveCommand;
 
 function pokeExpAdjacentTarget(mob, reason = 'adjacent_target') {
-    const id = parseInt(mob?.id ?? mob?.npcId, 10);
-    if (!Number.isFinite(id) || id <= 0) return false;
+    const id = typeof normalizeMargoneuroRuntimeId === 'function'
+        ? normalizeMargoneuroRuntimeId(mob?.id ?? mob?.npcId)
+        : parseInt(mob?.id ?? mob?.npcId, 10);
+    if (id === null || !Number.isFinite(id)) return false;
     if (Engine?.battle && (Engine.battle.show || Engine.battle.d)) return false;
     const now = Date.now();
     const expBeforeAttack = typeof getHeroExpKillSnapshot === 'function' ? getHeroExpKillSnapshot() : null;
@@ -23639,7 +23696,10 @@ function pokeExpAdjacentTarget(mob, reason = 'adjacent_target') {
         // Avoid double-poking the server: clickNpc usually sends the attack intent.
         // Raw command is only a fallback when clickNpc is unavailable or failed.
         if (!sent && typeof sendGameCommand === 'function' && (!window.RouteCombatFSM || window.RouteCombatFSM.canAutoAttack())) {
-            sent = sendGameCommand(`fight&a=attack&id=${id}`, reason) || sent;
+            const attackCommand = typeof buildMargoneuroFightAttackCommand === 'function'
+                ? buildMargoneuroFightAttackCommand(id)
+                : `fight&a=attack&id=${id}&ff=1`;
+            sent = sendGameCommand(attackCommand, reason) || sent;
         }
     } catch (e) {}
     if (sent && typeof rememberExpCombatTarget === 'function') rememberExpCombatTarget(mob, reason);
