@@ -20,7 +20,7 @@ class HeroRouteCombatFSM {
   }
 
   shouldEnableBerserk() {
-    return !!(this.state.running && this.state.currentTask === 'EXP' && this.state.inRouteMap && this.state.berserkCheckbox);
+    return false;
   }
 
   syncBerserk(reason = 'sync') {
@@ -93,11 +93,8 @@ class HeroRouteCombatFSM {
   }
 
   autoAttack() {
-    if (!this.state.berserkActive) {
-      this.log('attack_suppressed');
-      return false;
-    }
     this.attackCalls += 1;
+    this.log('quick_attack_allowed');
     return true;
   }
 }
