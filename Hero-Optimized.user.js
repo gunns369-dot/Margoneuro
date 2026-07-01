@@ -3688,6 +3688,10 @@ let opacityValue = 0.95;
 
     function runEventHeroSearchTick() {
         if (!eventHeroSearchState?.active) return;
+        if (Number(window.__margoneuroRushStopUntil || 0) > Date.now()) {
+            stopEventHeroSearch('manual_stop_guard');
+            return;
+        }
         rememberCurrentMapIdentity('event-search');
         const maps = Array.isArray(eventHeroSearchState.maps) ? eventHeroSearchState.maps : [];
         if (!maps.length) return stopEventHeroSearch('empty_route');
@@ -3755,6 +3759,8 @@ let opacityValue = 0.95;
             if (typeof heroAlert === 'function') heroAlert('Brak zapisanej trasy eventowej.');
             return false;
         }
+        window.__margoneuroRushStopUntil = 0;
+        window.margoneuroStoppedManually = false;
         const optimized = optimizeEventHeroMapOrder(route.maps, getCurrentMapName());
         eventHeroSearchState = {
             active: true,
@@ -3773,6 +3779,8 @@ let opacityValue = 0.95;
         if (radarChk) radarChk.checked = true;
         if (typeof saveSettings === 'function') saveSettings();
         if (typeof stopPatrol === 'function') stopPatrol(false);
+        window.__margoneuroRushStopUntil = 0;
+        window.margoneuroStoppedManually = false;
         if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
             try { Notification.requestPermission(); } catch (e) {}
         }
@@ -6447,6 +6455,7 @@ function loadData() {
             ...(botSettings.auctionSeller || {})
         };
         if (!Array.isArray(botSettings.auctionSeller.individualPrices)) botSettings.auctionSeller.individualPrices = [];
+        botSettings.autoheal = { ...(botSettings.autoheal || {}), enabled: false, removed: true };
         if (Array.isArray(botSettings?.expProfiles)) deduplicateExpProfiles(botSettings.expProfiles, 'load_settings');
         if (Array.isArray(botSettings?.exp?.mapOrder)) setExpMapOrder(botSettings.exp.mapOrder, 'load_settings', { deferRouteState: true, deferPersist: true });
         if (typeof restoreCurrentHeroExpRoute === 'function') restoreCurrentHeroExpRoute('load_settings');
@@ -11206,6 +11215,7 @@ function autoDetectEngineData() {
     // RUSH MODE (PŁYNNY RUCH)
     // ==========================================
     window.rushToMap = function(targetMapName, x = null, y = null, fullPath = null, resumePatrol = false) {
+        if (Number(window.__margoneuroRushStopUntil || 0) > Date.now()) return false;
         let currentSysMap = getCurrentMapName();
         if (normMapName(currentSysMap) === normMapName(targetMapName)) {
             isRushing = false;
@@ -11558,6 +11568,49 @@ function cancelMovementScheduler(reason = 'cancel') {
     window.rushInterval = null;
 }
 window.cancelMovementScheduler = cancelMovementScheduler;
+
+function stopMargoneuroRushAndSearch(reason = 'manual_stop', options = {}) {
+    const blockMs = Math.max(1500, Number(options.blockMs || 5000));
+    if (options.manual !== false) {
+        window.__margoneuroRushStopUntil = Date.now() + blockMs;
+        window.margoneuroStoppedManually = true;
+    }
+    try { cancelMovementScheduler(reason); } catch (e) {}
+    try { clearTimeout(rushInterval); } catch (e) {}
+    try { if (window.rushInterval) clearTimeout(window.rushInterval); } catch (e) {}
+    try { clearTimeout(smoothPatrolInterval); } catch (e) {}
+    isRushing = false;
+    window.isRushing = false;
+    window.isRushingToShop = false;
+    window.isRushingToAuctioneer = false;
+    rushTarget = "";
+    rushTargetX = null;
+    rushTargetY = null;
+    window.rushTarget = null;
+    window.rushTargetX = null;
+    window.rushTargetY = null;
+    window.rushNextMap = null;
+    window._lastRushNextMap = null;
+    window.rushFullPath = [];
+    window.resumePatrolAfterRush = false;
+    if (options.stopPatrol !== false) {
+        isPatrolling = false;
+        window.isPatrolling = false;
+        try { if (typeof stopEventHeroSearch === 'function') stopEventHeroSearch(reason); } catch (e) {}
+    }
+    try { if (Engine?.hero?.d?.path) Engine.hero.d.path = []; } catch (e) {}
+    try { if (typeof Engine?.hero?.stop === 'function') Engine.hero.stop(); } catch (e) {}
+    const btn = document.getElementById('btnStartStop');
+    if (btn) {
+        btn.innerHTML = '<span class="btn-icon">▶</span><span>START HEROSI</span>';
+        btn.style.color = "#4caf50";
+        btn.style.borderColor = "#4caf50";
+    }
+    if (typeof window.logHero === 'function') window.logHero(`[RUSH] Stop: ${reason}`, '#f44336');
+    if (typeof window.logExp === 'function') window.logExp(`[RUSH] Stop: ${reason}`, '#f44336');
+    return true;
+}
+window.stopMargoneuroRushAndSearch = stopMargoneuroRushAndSearch;
 
 function scheduleRushStep(delayMs = 250, reason = 'rush_step') {
     window.__lastRushStepScheduleReason = reason;
@@ -14293,24 +14346,19 @@ function initGUI() {
                             <label style="color:#a99a75; font-size:10px; flex:1;">Mniejszy od nas o lvl:<br><input type="number" id="berserkMinLvl" value="${Math.abs(botSettings.berserk?.minLvlOffset ?? 20)}" style="width:100%; padding:2px; font-size:10px; text-align:center;"></label>
                         </div>
                     </div>
-                   <div class="accordion-header" id="accAutoheal" data-exp-section="autoheal" onclick="toggleSettingsAcc('accAutoheal')" style="background: rgba(76, 175, 80, 0.2); border-color: #4caf50; color: #4caf50; margin-bottom: 0;">Autoheal i auto-sprzedaż</div>
+                   <div class="accordion-header" id="accAutoheal" data-exp-section="autosell" onclick="toggleSettingsAcc('accAutoheal')" style="background: rgba(76, 175, 80, 0.2); border-color: #4caf50; color: #4caf50; margin-bottom: 0;">Auto-poty i auto-sprzedaz</div>
                     <div id="accAutohealContent" style="display:none; padding: 8px; background: rgba(0,0,0,0.3); border: 1px solid #4caf50; border-top: none; margin-bottom: 5px;">
                         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                             <div style="display:flex; gap:10px; align-items:center;">
-                                <label style="color:#4caf50; font-weight:bold; display:flex; align-items:center; gap:5px; cursor: pointer; margin:0;"><input type="checkbox" id="autohealEnabled" ${botSettings.autoheal?.enabled ? 'checked' : ''}> Autoheal</label>
                                 <div style="display:flex; align-items:center; gap:5px;">
                                     <label style="color:#e91e63; font-weight:bold; display:flex; align-items:center; gap:5px; cursor: pointer; margin:0;"><input type="checkbox" id="autopotEnabled" ${botSettings.autopot?.enabled ? 'checked' : ''}> Auto Poty</label>
                                     <span id="btnAutoPotSettings" style="cursor:pointer; font-size:12px; filter: grayscale(20%); transition: 0.2s;" title="Ustawienia Auto-Potów">Opcje</span>
                                 </div>
                             </div>
-                            <label style="color:#a99a75; font-size:10px; display:flex; align-items:center; gap:5px; margin:0;">Od ilu %: <input type="number" id="autohealThreshold" value="${botSettings.autoheal?.threshold ?? 80}" min="1" max="99" style="width:35px; padding:2px; font-size:10px; text-align:center; background:#000; color:#fff; border:1px solid #444;"></label>
+                            <span style="color:#a5d6a7; font-size:10px;">Leczenie obsluguje gra.</span>
                         </div>
                         <div id="autopotSettingsPanel" style="display:none; background:rgba(0,0,0,0.5); padding:6px; border:1px solid #e91e63; border-radius:3px; margin-bottom:8px;">
                             <label style="color:#e0d8c0; font-size:10px; display:flex; align-items:center; justify-content:space-between; margin:0;">Ilość staków do kupienia (1 stak = 15 szt): <input type="number" id="autopotStacks" value="${botSettings.autopot?.stacks ?? 14}" min="1" max="50" style="width:40px; padding:2px; font-size:10px; text-align:center; background:#000; color:#fff; border:1px solid #444;"></label>
-                        </div>
-                        <div style="display:flex; gap:5px;">
-                            <div style="flex:1;"><label style="color:#a99a75; font-size:9px; display:block; margin-bottom:2px;">Nigdy nie używaj przedmiotów:</label><textarea id="autohealIgnore" style="width:100%; height:50px; background:#0f0f0f; color:#e0d8c0; border:1px solid #4a3f2b; font-size:9px; resize:none;">${botSettings.autoheal?.ignoreItems || ""}</textarea></div>
-                            <div style="flex:1;"><label style="color:#a99a75; font-size:9px; display:block; margin-bottom:2px;">Przedmioty niezidentyfikowane:</label><textarea id="autohealUnid" style="width:100%; height:50px; background:#0f0f0f; color:#e0d8c0; border:1px solid #4a3f2b; font-size:9px; resize:none;">${botSettings.autoheal?.unidItems || ""}</textarea></div>
                         </div>
                         <div style="border-top:1px solid #333; margin-top:6px; padding-top:6px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:4px;">
                             <label style="color:#ffb300; font-weight:bold; display:flex; align-items:center; gap:5px; cursor: pointer; margin:0;"><input type="checkbox" id="autosellEnabled" ${botSettings.autosell?.enabled ? 'checked' : ''}> Auto-sprzedaż</label>
@@ -14643,7 +14691,7 @@ function initGUI() {
 
             const sectionNames = {
                 accBerserk: 'Szybki atak PPM',
-                accAutoheal: 'Autoheal i auto-sprzedaż',
+                accAutoheal: 'Auto-poty i auto-sprzedaz',
                 accAlerts: 'Alarmy i powiadomienia',
                 accExpRules: 'Zasady walki i bezpieczeństwo',
                 accRoute: 'Trasa expowiska',
@@ -14670,6 +14718,7 @@ function initGUI() {
                 const map = {
                     berserk: 'accBerserk',
                     autoheal: 'accAutoheal',
+                    autosell: 'accAutoheal',
                     alarms: 'accAlerts',
                     rules: 'accExpRules',
                     route: 'accRoute'
@@ -15281,8 +15330,12 @@ expEmptyScans = 0;
             this.style.borderColor = "#4caf50";
             this.style.color = "#4caf50";
             // TWARDE ZATRZYMANIE BOTA I POSTACI
-            window.isRushing = false;
-            if (window.rushInterval) clearTimeout(window.rushInterval);
+            if (typeof window.stopMargoneuroRushAndSearch === 'function') {
+                window.stopMargoneuroRushAndSearch('exp_stop', { blockMs: 8000 });
+            } else {
+                window.isRushing = false;
+                if (window.rushInterval) clearTimeout(window.rushInterval);
+            }
             if (typeof stopPatrol === 'function') stopPatrol(true); // Wciska fizyczny hamulec na mapie
 
             console.log("[EXP] STOP expienia/trasy");
@@ -15332,7 +15385,7 @@ if (!botSettings.berserk) {
         if (botSettings.berserk.disableBerserkOnStop === undefined) botSettings.berserk.disableBerserkOnStop = false;
         if (window.RouteCombatFSM) window.RouteCombatFSM.syncFromSettings();
 
-        if (!botSettings.autoheal) { botSettings.autoheal = { enabled: false, threshold: 80, ignoreItems: "Zielona pietruszka\nKandyzowane wisienki w cukrze", unidItems: "Czarna perła życia" }; saveSettings(); }
+        botSettings.autoheal = { ...(botSettings.autoheal || {}), enabled: false, removed: true };
         if (!botSettings.autopot) { botSettings.autopot = { enabled: false, stacks: 14 }; saveSettings(); }
         if (botSettings.exp.autoChangeRoute === undefined) { botSettings.exp.autoChangeRoute = false; saveSettings(); }
         if (botSettings.exp.expMapLevelLead === undefined) { botSettings.exp.expMapLevelLead = 0; saveSettings(); }
@@ -15429,9 +15482,7 @@ bindChange('useTeleportsEq', (e) => { botSettings.exp.useTeleportsEq = e.target.
             }
         });
 
-        bindChange('autohealEnabled', (e) => { botSettings.autoheal.enabled = e.target.checked; saveSettings(); });
         bindChange('autopotEnabled', (e) => { botSettings.autopot.enabled = e.target.checked; saveSettings(); });
-        bindChange('autohealThreshold', (e) => { botSettings.autoheal.threshold = parseInt(e.target.value) || 80; saveSettings(); });
         bindChange('autopotStacks', (e) => { botSettings.autopot.stacks = parseInt(e.target.value) || 14; saveSettings(); });
         // Natychmiastowa reakcja po kliknięciu "Automatyczna zmiana Expowiska"
         bindChange('autoChangeExpRoute', (e) => {
@@ -16959,7 +17010,14 @@ selHero.addEventListener('change', (e) => {
 
         document.getElementById('btnStartStop').addEventListener('click', () => {
 
-            if (isPatrolling || isRushing) stopPatrol(false);
+            if (isPatrolling || isRushing || window.isRushing || window.rushTarget || window.eventHeroSearchState?.active) {
+                if (typeof window.stopMargoneuroRushAndSearch === 'function') {
+                    window.stopMargoneuroRushAndSearch('btn_start_stop', { blockMs: 8000 });
+                } else {
+                    stopPatrol(false);
+                }
+                return;
+            }
 
             else {
 
@@ -16969,6 +17027,8 @@ selHero.addEventListener('change', (e) => {
 
                 } else {
 
+                    window.__margoneuroRushStopUntil = 0;
+                    window.margoneuroStoppedManually = false;
                     startPatrol();
 
                 }
@@ -18027,6 +18087,7 @@ function stopPatrol(hardStop = true) {
     }
 
     function startPatrol() {
+        window.__margoneuroRushStopUntil = 0;
         window.margoneuroStoppedManually = false;
         let hero = document.getElementById('selHero').value;
         let mapList = heroMapOrder[hero];
@@ -32489,6 +32550,9 @@ window.renderEqItems = function(filterType = 'Wszystkie') {
         window.getUsableAutoPotionInventory = getUsableAutoPotionInventory;
 
         setInterval(() => {
+            if (botSettings?.autoheal) botSettings.autoheal.enabled = false;
+            window.isRegeneratingToFull = false;
+            return;
             if (typeof Engine === 'undefined' || !Engine.hero || !Engine.hero.d) return;
 
             // Awaryjne zdjęcie locka (jeśli internet zlaguje)
@@ -33055,16 +33119,57 @@ function setAuctionSellerStatus(message, color = '#80deea') {
 window.setAuctionSellerStatus = setAuctionSellerStatus;
 
 function getAuctionHeroItems() {
-    try {
-        if (Engine?.items && typeof Engine.items.testMyItems === 'function') {
-            return Object.values(Engine.items.testMyItems()).filter(Boolean);
+    const out = [];
+    const seen = new Set();
+    const looksLikeAuctionItem = item => {
+        const d = item?.d || item || {};
+        return !!(
+            item?.d ||
+            d.id !== undefined ||
+            d.name ||
+            d.nick ||
+            d.stat ||
+            d.stats ||
+            d.cl !== undefined ||
+            d.item_class !== undefined ||
+            d.loc !== undefined ||
+            d.st !== undefined
+        );
+    };
+    const addMany = (src, source, depth = 0) => {
+        if (!src) return;
+        let list = [];
+        try {
+            if (Array.isArray(src)) list = src;
+            else if (typeof src === 'object') list = Object.values(src);
+        } catch (e) {
+            return;
         }
-        if (Engine?.heroEquipment && typeof Engine.heroEquipment.getHItems === 'function') {
-            return Object.values(Engine.heroEquipment.getHItems()).filter(Boolean);
+        for (const item of list) {
+            if (!item) continue;
+            if (!looksLikeAuctionItem(item)) {
+                if (depth < 2 && typeof item === 'object') {
+                    addMany(item.items || item.list || item.content || item.children || item.slots, `${source}:nested`, depth + 1);
+                }
+                continue;
+            }
+            const d = item?.d || item || {};
+            const cached = item?._cachedStats || d?._cachedStats || {};
+            const key = d.id ?? item?.id ?? cached.id ?? `${source}:${d.name || cached.name || item?.name || ''}:${d.slot ?? d.pos ?? item?.slot ?? item?.pos ?? out.length}`;
+            if (seen.has(String(key))) continue;
+            seen.add(String(key));
+            out.push(item);
         }
-        if (Engine?.items?.d) return Object.values(Engine.items.d).filter(Boolean);
-    } catch (e) {}
-    return [];
+    };
+    try { addMany(Engine?.items?.testMyItems?.(), 'testMyItems'); } catch (e) {}
+    try { addMany(Engine?.items?.d, 'items.d'); } catch (e) {}
+    try { addMany(Engine?.heroEquipment?.getHItems?.(), 'heroEquipment'); } catch (e) {}
+    try { addMany(Engine?.items?.myItems, 'items.myItems'); } catch (e) {}
+    try { addMany(Engine?.items?.inventory, 'items.inventory'); } catch (e) {}
+    try { addMany(Engine?.hero?.items, 'hero.items'); } catch (e) {}
+    try { addMany(Engine?.inventory?.items, 'inventory.items'); } catch (e) {}
+    try { addMany(Engine?.bags, 'bags'); } catch (e) {}
+    return out;
 }
 
 function getAuctionItemData(item) {
@@ -33077,14 +33182,40 @@ function getAuctionItemData(item) {
     const text = auctionNorm([
         name,
         stat,
+        d.opis,
+        d.desc,
+        d.description,
+        cached.opis,
+        cached.desc,
+        cached.description,
         d.rarity,
+        d.rarityName,
+        d.itemRarity,
+        d.itemRarityName,
         d.rank,
         d.tip,
         d.pr,
         d.quality,
+        d.color,
+        d.border,
+        d.className,
+        d.attrs,
+        d.type,
+        d.item_class,
+        d.itemType,
+        d.tt,
+        d.tip,
+        d.tipType,
         cached.rarity,
+        cached.rarityName,
+        cached.itemRarity,
+        cached.itemRarityName,
         cached.rank,
-        cached.tip
+        cached.tip,
+        cached.color,
+        cached.border,
+        cached.className,
+        Object.values(cached || {}).filter(v => typeof v === 'string').join(' ')
     ].filter(Boolean).join(' '));
     return {
         raw: item,
@@ -33095,20 +33226,23 @@ function getAuctionItemData(item) {
         loc,
         st,
         cl: Number(d.cl ?? item?.cl ?? cached.cl ?? 0),
+        slot: Number(d.slot ?? d.pos ?? d.position ?? item?.slot ?? item?.pos ?? item?.position),
+        bag: Number(d.bag ?? d.bagNo ?? d.container ?? item?.bag ?? item?.bagNo ?? item?.container),
+        equipped: !!(d.equipped || d.isEquipped || item?.equipped || item?.isEquipped),
         text
     };
 }
 
 function detectAuctionItemRarity(itemData) {
     const t = itemData?.text || '';
-    if (/legend|legendarn/.test(t)) return 'legendary';
-    if (/heroic|heroik|heroiczn|heroicz/.test(t)) return 'heroic';
-    if (/unikat|unique/.test(t)) return 'unique';
+    if (/legend|legendarn|rarity[=: ]legend|rarity[=: ]5/.test(t)) return 'legendary';
+    if (/heroic|heroik|heroiczn|heroicz|rarity[=: ]hero|rarity[=: ]4/.test(t)) return 'heroic';
+    if (/unikat|unique|uniqe|zolty|zloty|yellow|rarity[=: ]uni|rarity[=: ]3|rarity[=: ]2/.test(t)) return 'unique';
     const raw = itemData?.data || {};
-    const numeric = Number(raw.rarity ?? raw.rank ?? raw.pr ?? raw.quality);
+    const numeric = Number(raw.rarity ?? raw.rank ?? raw.pr ?? raw.quality ?? raw.color ?? raw.border);
     if (numeric >= 5) return 'legendary';
     if (numeric === 4) return 'heroic';
-    if (numeric === 3) return 'unique';
+    if (numeric === 3 || numeric === 2) return 'unique';
     return '';
 }
 
@@ -33119,7 +33253,9 @@ function isAuctionItemBoundOrBlocked(itemData, settings = ensureAuctionSellerSet
         .map(auctionNorm)
         .filter(Boolean);
     if (never.some(pattern => text.includes(pattern))) return true;
-    if (/quest|questitem|zadani|zwiaz|zwi[a-z]*zan|bind|bound|soulbound|owner|przypisan|nie mozna sprzedac|niesprzedawaln|unid/.test(text)) return true;
+    if (/quest|questitem|zadani|nie mozna sprzedac|niesprzedawaln|nie mozna handlowac|unid/.test(text)) return true;
+    if (/(?:bind|bound|soulbound|owner)[=:](?:1|true|yes|tak)/.test(text)) return true;
+    if (/zwiazany|zwiazane|zwiazana|zwi[a-z]*zan|przypisan/.test(text) && !/(?:zwiaz|zwi[a-z]*zan|bind|bound|soulbound)[=:](?:0|false|nie|no)/.test(text)) return true;
     if (settings.skipTeleportItems !== false && /teleport|zwoj|zw[oó]j|przenosi|przenies/.test(text)) return true;
     return false;
 }
@@ -33159,42 +33295,98 @@ function getAuctionPriceForItem(itemData, rarity, settings = ensureAuctionSeller
 }
 
 function isAuctionSellerCandidateItem(item, options = {}) {
-    const settings = ensureAuctionSellerSettings();
-    if (!options.includeDisabled && !options.force && !settings.enabled) return false;
-    const data = getAuctionItemData(item);
-    if (!data || !data.id || data.cl === 24 || data.st > 0) return false;
-    if (/shop|sklep|basket|kosz|sell|sprzed|trade|merchant|auction/.test(data.loc)) return false;
-    const inBag = data.st === 0 || data.loc === 'g' || data.loc === 'bag' || data.loc === '';
-    if (!inBag) return false;
-    if (isAuctionItemBoundOrBlocked(data, settings)) return false;
-    const rarity = detectAuctionItemRarity(data);
-    if (rarity === 'legendary' && !settings.listLegendary) return false;
-    if (rarity === 'heroic' && !settings.listHeroic) return false;
-    if (rarity === 'unique' && !settings.listUnique) return false;
-    if (!rarity && !settings.listCommon) return false;
-    const price = getAuctionPriceForItem(data, rarity || 'common', settings);
-    if (Number(price.bid || 0) <= 0 && Number(price.buyNow || 0) <= 0) return false;
-    return { ...data, rarity: rarity || 'common', price };
+    const decision = getAuctionCandidateDecision(item, options);
+    return decision.ok ? decision.item : false;
 }
 window.isAuctionSellerCandidateItem = isAuctionSellerCandidateItem;
 
-function getAuctionSellerCandidates(options = {}) {
+function getAuctionInventoryState(itemData) {
+    const loc = auctionNorm(itemData?.loc || '');
+    const text = itemData?.text || '';
+    const st = Number(itemData?.st || 0);
+    const slot = Number(itemData?.slot);
+    const bag = Number(itemData?.bag);
+    const cl = Number(itemData?.cl || 0);
+    const raw = itemData?.data || {};
+    const isBagContainer = cl === 24 || /typ[=: ]torba|bag_type|pojemnosc torby|miejsce w torbie/.test(text);
+    const shopLike = /shop|sklep|basket|kosz|sell|sprzed|trade|merchant|auction/.test(loc);
+    const bagLikeLoc = /^(g|bag|bags|torba|torby|plecak|inventory|inv|items?)\b/.test(loc);
+    const equippedLoc = /equip|equipped|worn|body|hero|wear/.test(loc);
+    const hasBagHint = bagLikeLoc || (Number.isFinite(bag) && bag > 0) || (Number.isFinite(slot) && slot >= 0);
+    const equipped = !!itemData?.equipped || raw.owner === 1 || raw.equip === 1 || raw.worn === 1 || equippedLoc || (st > 0 && !hasBagHint);
+    return {
+        isBagContainer,
+        shopLike,
+        equipped,
+        inBag: !shopLike && !equipped && !isBagContainer && (hasBagHint || st === 0)
+    };
+}
+window.getAuctionInventoryState = getAuctionInventoryState;
+
+function getAuctionCandidateDecision(item, options = {}) {
+    const settings = ensureAuctionSellerSettings();
+    if (!options.includeDisabled && !options.force && !settings.enabled) return { ok: false, reason: 'disabled' };
+    const data = getAuctionItemData(item);
+    if (!data || !data.id) return { ok: false, reason: 'missing_id', data };
+    const inv = getAuctionInventoryState(data);
+    if (inv.isBagContainer) return { ok: false, reason: 'bag_item', data };
+    if (inv.equipped) return { ok: false, reason: 'equipped', data };
+    if (!inv.inBag) return { ok: false, reason: inv.shopLike ? 'not_in_bag' : 'unknown_location', data };
+    if (isAuctionItemBoundOrBlocked(data, settings)) return { ok: false, reason: 'blocked_or_bound', data };
+    const rarity = detectAuctionItemRarity(data);
+    if (rarity === 'legendary' && !settings.listLegendary) return { ok: false, reason: 'legendary_disabled', data, rarity };
+    if (rarity === 'heroic' && !settings.listHeroic) return { ok: false, reason: 'heroic_disabled', data, rarity };
+    if (rarity === 'unique' && !settings.listUnique) return { ok: false, reason: 'unique_disabled', data, rarity };
+    const price = getAuctionPriceForItem(data, rarity || 'common', settings);
+    if (!rarity && !settings.listCommon && price.source !== 'individual') return { ok: false, reason: 'rarity_not_allowed', data, rarity: '' };
+    if (Number(price.bid || 0) <= 0 && Number(price.buyNow || 0) <= 0) return { ok: false, reason: 'no_price', data, rarity: rarity || 'common', price };
+    return { ok: true, reason: 'ok', item: { ...data, rarity: rarity || 'common', price } };
+}
+window.getAuctionCandidateDecision = getAuctionCandidateDecision;
+
+function getAuctionSellerScanReport(options = {}) {
     const items = getAuctionHeroItems();
-    const candidates = [];
+    const reasons = {};
+    const accepted = [];
+    const samples = [];
     const seen = new Set();
     for (const item of items) {
-        const candidate = isAuctionSellerCandidateItem(item, options);
-        if (!candidate) continue;
-        const key = String(candidate.id || candidate.name);
-        if (seen.has(key)) continue;
-        seen.add(key);
-        candidates.push(candidate);
+        const decision = getAuctionCandidateDecision(item, options);
+        if (decision.ok) {
+            const key = String(decision.item.id || decision.item.name);
+            if (!seen.has(key)) {
+                seen.add(key);
+                accepted.push(decision.item);
+            }
+            continue;
+        }
+        const reason = decision.reason || 'unknown';
+        reasons[reason] = Number(reasons[reason] || 0) + 1;
+        if (samples.length < 8 && decision.data?.name) {
+            samples.push({
+                name: decision.data.name,
+                reason,
+                rarity: decision.rarity || detectAuctionItemRarity(decision.data) || '',
+                cl: decision.data.cl,
+                st: decision.data.st,
+                loc: decision.data.loc,
+                slot: Number.isFinite(decision.data.slot) ? decision.data.slot : null,
+                bag: Number.isFinite(decision.data.bag) ? decision.data.bag : null
+            });
+        }
     }
+    return { scanned: items.length, count: accepted.length, items: accepted, reasons, samples, settings: ensureAuctionSellerSettings() };
+}
+window.getAuctionSellerScanReport = getAuctionSellerScanReport;
+
+function getAuctionSellerCandidates(options = {}) {
+    const report = getAuctionSellerScanReport(options);
+    const candidates = report.items || [];
     candidates.sort((a, b) => {
         const weight = { legendary: 4, heroic: 3, unique: 2, common: 1 };
         return (weight[b.rarity] || 0) - (weight[a.rarity] || 0) || String(a.name).localeCompare(String(b.name));
     });
-    return { count: candidates.length, items: candidates, settings: ensureAuctionSellerSettings() };
+    return { ...report, count: candidates.length, items: candidates, settings: ensureAuctionSellerSettings() };
 }
 window.getAuctionSellerCandidates = getAuctionSellerCandidates;
 
@@ -33202,7 +33394,21 @@ function renderAuctionSellerPanel() {
     const settings = ensureAuctionSellerSettings();
     const list = document.getElementById('auctionIndividualList');
     const report = getAuctionSellerCandidates({ includeDisabled: true, force: true });
-    setAuctionSellerStatus(`Do aukcji: ${report.count} itemow.`, report.count ? '#4dd0e1' : '#90a4ae');
+    const reasonText = Object.entries(report.reasons || {})
+        .sort((a, b) => Number(b[1]) - Number(a[1]))
+        .slice(0, 3)
+        .map(([key, count]) => `${key}:${count}`)
+        .join(', ');
+    const sampleText = (report.samples || [])
+        .slice(0, 2)
+        .map(s => `${s.name}:${s.reason}`)
+        .join(' | ');
+    setAuctionSellerStatus(
+        report.count
+            ? `Do aukcji: ${report.count}/${report.scanned || 0} itemow.`
+            : `Do aukcji: 0/${report.scanned || 0}. ${reasonText || 'brak itemow w torbach'}${sampleText ? ` | ${sampleText}` : ''}`,
+        report.count ? '#4dd0e1' : '#90a4ae'
+    );
     if (list) {
         if (!settings.individualPrices.length) {
             list.innerHTML = '<div style="color:#607d8b; text-align:center;">Brak indywidualnych cen.</div>';
@@ -33279,7 +33485,19 @@ function initAuctionSellerUI() {
     }
     bindClick('btnAuctionSellNow', () => {
         const started = window.startAuctionSeller?.('manual_force', { force: true });
-        if (!started?.ok && window.heroAlert) heroAlert(`Aukcjoner: ${started?.reason || 'brak itemow do wystawienia'}`);
+        if (!started?.ok && window.heroAlert) {
+            const report = started?.report || window.getAuctionSellerScanReport?.({ includeDisabled: true, force: true }) || {};
+            const reasonText = Object.entries(report.reasons || {})
+                .sort((a, b) => Number(b[1]) - Number(a[1]))
+                .slice(0, 5)
+                .map(([key, count]) => `${key}: ${count}`)
+                .join('\n');
+            const samples = (report.samples || [])
+                .slice(0, 5)
+                .map(s => `- ${s.name}: ${s.reason}${s.rarity ? ` (${s.rarity})` : ''}`)
+                .join('\n');
+            heroAlert(`Aukcjoner: ${started?.reason || 'brak itemow do wystawienia'}\nSkan torby: ${report.scanned || 0} itemow\nDo aukcji: ${report.count || 0}\n${reasonText || 'Brak rozpoznanych itemow aukcyjnych.'}${samples ? `\nPrzyklady:\n${samples}` : ''}`);
+        }
     });
     renderAuctionSellerPanel();
 }
