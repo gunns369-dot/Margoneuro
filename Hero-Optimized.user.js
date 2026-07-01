@@ -2776,7 +2776,7 @@ let opacityValue = 0.95;
 
             enabled: false, minLvl: 1, maxLvl: 300,
 
-            normal: true, elite: true, berserk: 999,
+            normal: true, elite: true, berserk: 999, expMapLevelLead: 0,
 
             mapOrder: JSON.parse(localStorage.getItem('exp_map_order_v64') || '[]')
 
@@ -9525,14 +9525,13 @@ let attackInterval = null;
             ? buildMargoneuroFightAttackCommand(targetId)
             : `fight&a=attack&id=${targetId}&ff=1`;
 
-        HERO_LOG.info(`Cel namierzony (ID: ${targetId}). Włączam Kieszonkowego Berserka...`);
+        HERO_LOG.info(`Cel namierzony (ID: ${targetId}). Ide obok i odpalam szybki PPM...`);
 
 
 
         // METODA GARGONEMA - Włącza natywnego auto-ataka prosto na serwerze gry
 
-        if (typeof window.updateServerBerserk === 'function') window.updateServerBerserk('attack_target');
-        if (!window.RouteCombatFSM || window.RouteCombatFSM.canAutoAttack()) sendGameCommand(attackCommand, reason);
+        // Quick attack mode: approach first, then trigger native PPM/quickFight next to the mob.
         window.margoneuroBerserkDiag.lastTargetId = targetId;
         window.margoneuroBerserkDiag.lastAttackCommand = attackCommand;
 
@@ -9550,7 +9549,7 @@ let attackInterval = null;
 
                 if (window.BerserkController?.disable) window.BerserkController.disable('fight_started');
 
-                HERO_LOG.success("Walka rozpoczęta. Berserk wyłączony.");
+                HERO_LOG.success("Walka rozpoczeta. Tryb szybkiego ataku czeka na kolejny cel.");
 
                 return;
 
@@ -9623,15 +9622,11 @@ let attackInterval = null;
                 let now = Date.now();
                 if (!manualAttackIssued || now - lastManualAttackAt > 1800) {
                     if (!window.RouteCombatFSM || window.RouteCombatFSM.canAutoAttack()) {
-                        let clicked = false;
-                        if (Engine.npcs && typeof Engine.npcs.clickNpc === 'function') {
-                            Engine.npcs.clickNpc(targetId);
-                            clicked = true;
-                        } else if (Engine.npcs && typeof Engine.npcs.interact === 'function') {
-                            Engine.npcs.interact(targetId);
-                            clicked = true;
-                        }
-                        if (!clicked) sendGameCommand(attackCommand, 'attack_target_retry');
+                        const sentQuickFight = typeof window.tryMargoneuroQuickFight === 'function'
+                            ? window.tryMargoneuroQuickFight(targetId, { reason: 'attack_target_quick_fight' })
+                            : false;
+                        if (!sentQuickFight) sendGameCommand(attackCommand, 'attack_target_retry');
+                        else if (typeof window.requestExpLogicSoon === 'function') window.requestExpLogicSoon(220, 'attack_target_quick_fight');
                     }
 
                     let confirmBtn = document.querySelector(".green.button, .podejdz-btn, .zaatakuj-btn");
@@ -13162,10 +13157,10 @@ function initGUI() {
                     <div id="expConsole" style="background:#080808; border:1px solid #333; padding:4px; font-size:10px; color:#a99a75; height:55px; min-height: 55px; max-height: 250px; resize: vertical; overflow-y:auto; font-family:monospace; box-shadow:inset 0 1px 3px #000; margin-bottom:2px;">
                         <span style="color:#777;">[System]</span> Włączony moduł Smart-Roam (dynamiczne czyszczenie)...
                     </div>
-                   <div class="accordion-header" id="accBerserk" data-exp-section="berserk" onclick="toggleSettingsAcc('accBerserk')" style="background: rgba(255, 152, 0, 0.2); border-color: #ff9800; color: #ff9800; margin-bottom: 0;">Kieszonkowy Berserk</div>
+                   <div class="accordion-header" id="accBerserk" data-exp-section="berserk" onclick="toggleSettingsAcc('accBerserk')" style="background: rgba(255, 152, 0, 0.2); border-color: #ff9800; color: #ff9800; margin-bottom: 0;">Szybki atak PPM</div>
                     <div id="accBerserkContent" style="display:none; padding: 8px; background: rgba(0,0,0,0.3); border: 1px solid #ff9800; border-top: none; margin-bottom: 5px;">
                         <label style="color:#ff9800; font-weight:bold; display:flex; align-items:center; gap:5px; margin-bottom: 8px; cursor: pointer;">
-                            <input type="checkbox" id="berserkEnabled" ${botSettings.berserk?.userEnabled ? 'checked' : ''}> Aktywuj Berserka
+                            <input type="checkbox" id="berserkEnabled" ${botSettings.berserk?.userEnabled ? 'checked' : ''}> Aktywuj szybki atak
                         </label>
                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding-left: 5px; margin-bottom: 8px;">
                             <label style="color:#e0d8c0; font-size:10px; cursor: pointer;"><input type="checkbox" id="berserkCommon" ${botSettings.berserk?.common ? 'checked' : ''}> Zwykłe potwory</label>
@@ -13254,7 +13249,12 @@ function initGUI() {
                     </div>
                    <div class="accordion-header" id="accRoute" data-exp-section="route" onclick="toggleSettingsAcc('accRoute')" style="background: rgba(0, 150, 136, 0.2); border-color: #009688; color: #009688; margin-top: 5px; margin-bottom: 0;">Trasa expowiska</div>
                     <div id="accRouteContent" style="display:none; padding: 8px; background: rgba(0,0,0,0.3); border: 1px solid #009688; border-top: none; margin-bottom: 5px;">
-                        <label style="color:#00e5ff; font-size:10px; cursor:pointer; font-weight:bold; margin-bottom:6px; display:block;"><input type="checkbox" id="autoChangeExpRoute" ${botSettings.exp.autoChangeRoute ? 'checked' : ''}> Automatyczna zmiana expowiska</label>
+                        <div style="display:grid; grid-template-columns:minmax(0,1fr) 82px; gap:6px; align-items:end; margin-bottom:6px;">
+                            <label style="color:#00e5ff; font-size:10px; cursor:pointer; font-weight:bold; display:flex; align-items:center; gap:4px;"><input type="checkbox" id="autoChangeExpRoute" ${botSettings.exp.autoChangeRoute ? 'checked' : ''}> Automatyczna zmiana expowiska</label>
+                            <label style="color:#a99a75; font-size:9px; display:flex; flex-direction:column; gap:2px;">Przewaga lvl
+                                <input type="number" id="expMapLevelLead" min="0" max="80" step="1" value="${botSettings.exp.expMapLevelLead ?? 0}" style="background:#000; color:#00e5ff; border:1px solid #009688; padding:3px; width:100%; box-sizing:border-box;">
+                            </label>
+                        </div>
                         <input type="hidden" id="expRange" value="999">
                        <label style="color:#a99a75; font-size:11px; margin-top:2px; display:flex; justify-content:space-between; align-items:center;">Baza map: <div style="display:flex; gap:8px;"><span id="btnClearExpRoute" style="color:#e53935; cursor:pointer; font-weight:bold;" title="Wyczyść całą trasę">Wyczyść</span></div></label>
                         <div id="expMapList" style="border:1px solid #3a3020; background:#000; overflow-y:auto; min-height:80px; max-height:160px; padding:2px;"></div>
@@ -13415,7 +13415,7 @@ function initGUI() {
             }
 
             const sectionNames = {
-                accBerserk: 'Kieszonkowy Berserk',
+                accBerserk: 'Szybki atak PPM',
                 accAutoheal: 'Autoheal i auto-sprzedaż',
                 accAlerts: 'Alarmy i powiadomienia',
                 accExpRules: 'Zasady walki i bezpieczeństwo',
@@ -14046,10 +14046,8 @@ expEmptyScans = 0;
                 botSettings.berserk.enabled = false;
                 if (typeof saveSettings === 'function') saveSettings();
                 if (typeof window.updateServerBerserk === 'function') window.updateServerBerserk('exp_stop');
-                sendGameCommand("settings&action=update&id=34&v=0", "exp_stop_force_disable");
-                sendGameCommand("settings&action=update&id=35&v=0", "exp_stop_force_disable");
             }
-            if (window.logExp) window.logExp("[BERSERK] real disable sent after EXP stop", "#ffb74d");
+            if (window.logExp) window.logExp("[QUICK ATTACK] EXP stop: server berserk left disabled.", "#ffb74d");
         }
         const expClickElapsed = ((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) - expClickStarted;
         const expCtlAfterClick = typeof getExpControlState === 'function' ? getExpControlState() : null;
@@ -14085,6 +14083,15 @@ if (!botSettings.berserk) {
         if (!botSettings.autoheal) { botSettings.autoheal = { enabled: false, threshold: 80, ignoreItems: "Zielona pietruszka\nKandyzowane wisienki w cukrze", unidItems: "Czarna perła życia" }; saveSettings(); }
         if (!botSettings.autopot) { botSettings.autopot = { enabled: false, stacks: 14 }; saveSettings(); }
         if (botSettings.exp.autoChangeRoute === undefined) { botSettings.exp.autoChangeRoute = false; saveSettings(); }
+        if (botSettings.exp.expMapLevelLead === undefined) { botSettings.exp.expMapLevelLead = 0; saveSettings(); }
+        bindChange('expMapLevelLead', (e) => {
+            const value = Math.max(0, Math.min(80, parseInt(e.target.value, 10) || 0));
+            botSettings.exp.expMapLevelLead = value;
+            e.target.value = value;
+            if (typeof saveSettings === 'function') saveSettings();
+            if (botSettings.exp.autoChangeRoute && typeof window.checkAndLoadBestExpProfile === 'function') window.checkAndLoadBestExpProfile(true);
+            if (typeof window.renderRecommendedExp === 'function') window.renderRecommendedExp();
+        });
       if (botSettings.exp.captchaAlert === undefined) { botSettings.exp.captchaAlert = true; saveSettings(); }
         bindChange('captchaAlert', (e) => { botSettings.exp.captchaAlert = e.target.checked; saveSettings(); if (e.target.checked && Notification.permission !== "granted") Notification.requestPermission(); });
 
@@ -14207,6 +14214,8 @@ bindChange('useTeleportsEq', (e) => { botSettings.exp.useTeleportsEq = e.target.
             if (typeof Engine === 'undefined' || !Engine.hero || !Engine.hero.d || !Engine.hero.d.lvl) return;
 
             let currentLvl = Engine.hero.d.lvl;
+            let levelLead = Math.max(0, Math.min(80, parseInt(botSettings.exp.expMapLevelLead, 10) || 0));
+            let maxAllowedProfileLvl = currentLvl + levelLead;
             let bestProfile = null;
             let highestValidLvl = -1;
             let profIdx = -1;
@@ -14215,7 +14224,7 @@ bindChange('useTeleportsEq', (e) => { botSettings.exp.useTeleportsEq = e.target.
                 let match = p.name.match(/\((\d+)\s*lvl\)/i);
                 if (match) {
                     let pLvl = parseInt(match[1]);
-                    if (pLvl <= currentLvl && pLvl > highestValidLvl) {
+                    if (pLvl <= maxAllowedProfileLvl && pLvl > highestValidLvl) {
                         highestValidLvl = pLvl; bestProfile = p; profIdx = idx;
                     }
                 }
@@ -14224,7 +14233,7 @@ bindChange('useTeleportsEq', (e) => { botSettings.exp.useTeleportsEq = e.target.
             if (bestProfile) {
                 if (forceLoad || botSettings.exp.activeProfileName !== bestProfile.name || !botSettings.exp.mapOrder || botSettings.exp.mapOrder.length === 0) {
 
-                    let logMsg = `đź—şď¸Ź Ustawiam najlepsze expowisko dla ${currentLvl} lvl: ${bestProfile.name}!`;
+                    let logMsg = `Ustawiam najlepsze expowisko dla ${currentLvl} lvl (+${levelLead}): ${bestProfile.name}!`;
                     if (window._lastExpLog !== logMsg || Date.now() - (window._lastExpLogTime || 0) > 2000) {
                         if (window.logExp) window.logExp(logMsg, "#00e5ff");
                         window._lastExpLog = logMsg;
@@ -14300,6 +14309,107 @@ bindChange('useTeleportsEq', (e) => { botSettings.exp.useTeleportsEq = e.target.
             if (id === null) return '';
             return `fight&a=attack&id=${id}&ff=${fastFight ? 1 : 0}`;
         }
+        function createMargoneuroContextMenuEvent() {
+            return {
+                button: 2,
+                which: 3,
+                type: 'contextmenu',
+                stopPropagation() {},
+                preventDefault() {}
+            };
+        }
+        function getMargoneuroNpcMap() {
+            try {
+                if (typeof Engine === 'undefined' || !Engine?.npcs) return {};
+                if (typeof Engine.npcs.check === 'function') return Engine.npcs.check() || {};
+                return Engine.npcs.d || {};
+            } catch (e) {
+                return Engine?.npcs?.d || {};
+            }
+        }
+        function getMargoneuroNpcEntry(targetId, npcs = null) {
+            const id = normalizeMargoneuroRuntimeId(targetId);
+            if (id === null) return null;
+            const list = npcs || getMargoneuroNpcMap();
+            const direct = list?.[id] || list?.[String(id)];
+            if (direct) return { id, npc: direct, data: direct.d || direct };
+            for (const key in (list || {})) {
+                const npc = list[key];
+                const data = npc?.d || npc || {};
+                if (String(data.id ?? key) === String(id)) return { id, npc, data };
+            }
+            return null;
+        }
+        function isMargoneuroNpcAdjacent(npcData) {
+            const hx = Number(Engine?.hero?.d?.x);
+            const hy = Number(Engine?.hero?.d?.y);
+            const nx = Number(npcData?.x);
+            const ny = Number(npcData?.y);
+            return Number.isFinite(hx) && Number.isFinite(hy) && Number.isFinite(nx) && Number.isFinite(ny)
+                && Math.abs(hx - nx) <= 1
+                && Math.abs(hy - ny) <= 1;
+        }
+        function isMargoneuroQuickFightCandidate(npcData, options = {}) {
+            const src = npcData?.d || npcData || {};
+            if (!src || src.dead || src.del || src.delete) return false;
+            if (![1, 2, 3].includes(Number(src.type))) return false;
+            if (options.checkLevelRange === false) return true;
+            const level = typeof getMobLevelValue === 'function'
+                ? getMobLevelValue(src)
+                : Number(src.lvl ?? src.level ?? src.l ?? 0);
+            if (!Number.isFinite(level) || level <= 0) return true;
+            const minLvl = Number(botSettings?.exp?.minLvl || 1);
+            const maxLvl = Number(botSettings?.exp?.maxLvl || 300);
+            return level >= minLvl && level <= maxLvl;
+        }
+        function executeMargoneuroQuickFight(entry, reason = 'quick_fight') {
+            if (!entry?.npc || !entry?.data) return false;
+            if (typeof entry.npc.oncontextmenu === 'function') {
+                entry.npc.oncontextmenu(createMargoneuroContextMenuEvent());
+                return true;
+            }
+            if (Engine?.interactions && typeof Engine.interactions.quickFight === 'function') {
+                Engine.interactions.quickFight(entry.id);
+                return true;
+            }
+            if (Engine?.npcs && typeof Engine.npcs.clickNpc === 'function') {
+                Engine.npcs.clickNpc(entry.id);
+                return true;
+            }
+            const attackCommand = buildMargoneuroFightAttackCommand(entry.id);
+            return typeof sendGameCommand === 'function' ? sendGameCommand(attackCommand, reason) : false;
+        }
+        function tryMargoneuroQuickFight(targetId = null, options = {}) {
+            if (typeof Engine === 'undefined' || !Engine?.hero?.d || !Engine?.npcs) return false;
+            if (Engine?.battle && (Engine.battle.show || Engine.battle.d)) return false;
+            const npcs = getMargoneuroNpcMap();
+            const candidates = [];
+            if (targetId !== null && targetId !== undefined) {
+                const entry = getMargoneuroNpcEntry(targetId, npcs);
+                if (entry) candidates.push(entry);
+            } else {
+                for (const key in (npcs || {})) {
+                    const npc = npcs[key];
+                    const data = npc?.d || npc || {};
+                    candidates.push({ id: normalizeMargoneuroRuntimeId(data.id ?? key), npc, data });
+                }
+            }
+            for (const entry of candidates) {
+                if (entry.id === null || !entry.npc || !entry.data) continue;
+                if (!isMargoneuroQuickFightCandidate(entry.data, options)) continue;
+                if (!options.allowNonAdjacent && !isMargoneuroNpcAdjacent(entry.data)) continue;
+                const sent = executeMargoneuroQuickFight(entry, options.reason || 'quick_fight');
+                if (!sent) continue;
+                window.__lastMargoneuroQuickFight = {
+                    id: entry.id,
+                    nick: entry.data.nick || entry.data.name || '',
+                    at: Date.now(),
+                    reason: options.reason || 'quick_fight'
+                };
+                return true;
+            }
+            return false;
+        }
         function buildMargoneuroLootCommand(itemRuntimeId, options = {}) {
             const id = normalizeMargoneuroRuntimeId(itemRuntimeId);
             if (id === null) return '';
@@ -14337,6 +14447,7 @@ bindChange('useTeleportsEq', (e) => { botSettings.exp.useTeleportsEq = e.target.
         window.normalizeMargoneuroRuntimeId = normalizeMargoneuroRuntimeId;
         window.buildMargoneuroFightAttackCommand = buildMargoneuroFightAttackCommand;
         window.buildMargoneuroLootCommand = buildMargoneuroLootCommand;
+        window.tryMargoneuroQuickFight = tryMargoneuroQuickFight;
         function sendGameCommand(command, reason = 'unknown') {
             command = normalizeMargoneuroGameCommand(command);
             if (!command) return false;
@@ -14387,25 +14498,15 @@ bindChange('useTeleportsEq', (e) => { botSettings.exp.useTeleportsEq = e.target.
             const activeNow = !!(botSettings?.berserk?.enabled || Engine?.settings?.d?.fight_auto_solo);
             chk.checked = desiredAuto;
             chk.title = desiredAuto
-                ? (activeNow ? 'Berserk aktywny' : 'Berserk auto-aktywny (chwilowo OFF poza EXP/trasą)')
-                : 'Auto-berserk dla EXP wyłączony';
+                ? 'Szybki atak PPM aktywny dla EXP'
+                : 'Szybki atak PPM dla EXP wyłączony';
         }
 
         // Nowa, ostateczna funkcja do wysyłania komend natywnego Berserka bezpośrednio do gry
         window.updateServerBerserk = function(reason = 'manual') {
             let b = botSettings.berserk;
-            console.log(`[BERSERK] ${b.enabled ? 'enable' : 'disable'} reason=${reason}`);
-
-            [34, 35].forEach(id => {
-                sendGameCommand(`settings&action=update&id=${id}&v=${b.enabled ? 1 : 0}`, `berserk_${reason}`);
-                if (b.enabled) {
-                    sendGameCommand(`settings&action=update&id=${id}&key=common&v=${b.common ? 1 : 0}`, `berserk_${reason}`);
-                    sendGameCommand(`settings&action=update&id=${id}&key=elite&v=${b.e1 ? 1 : 0}`, `berserk_${reason}`);
-                    sendGameCommand(`settings&action=update&id=${id}&key=elite2&v=${(b.e2 || b.hero) ? 1 : 0}`, `berserk_${reason}`);
-                    sendGameCommand(`settings&action=update&id=${id}&key=lvlmin&v=${b.minLvlOffset}`, `berserk_${reason}`);
-                    sendGameCommand(`settings&action=update&id=${id}&key=lvlmax&v=${b.maxLvlOffset}`, `berserk_${reason}`);
-                }
-            });
+            if (b) b.enabled = false;
+            console.log(`[QUICK ATTACK] server berserk skipped reason=${reason}`);
 
             if (window._lastBerserkLogState !== b.enabled) {
                 window._lastBerserkLogState = b.enabled;
@@ -14417,9 +14518,9 @@ bindChange('useTeleportsEq', (e) => { botSettings.exp.useTeleportsEq = e.target.
 
             try {
                 if (typeof Engine !== 'undefined' && Engine.settings && Engine.settings.d) {
-                    Engine.settings.d.fight_auto_solo = b.enabled ? 1 : 0;
-                    Engine.settings.d.fight_auto_elites = b.e1 ? 1 : 0;
-                    Engine.settings.d.fight_auto_elites2 = (b.e2 || b.hero) ? 1 : 0;
+                    Engine.settings.d.fight_auto_solo = 0;
+                    Engine.settings.d.fight_auto_elites = 0;
+                    Engine.settings.d.fight_auto_elites2 = 0;
 
                     let npcs = Engine.npcs.check ? Engine.npcs.check() : Engine.npcs.d;
                     for(let id in npcs) {
@@ -17957,7 +18058,7 @@ const RouteCombatFSM = {
     },
     syncFromSettings() {
         this.state.berserkCheckbox = !!(botSettings?.berserk?.userEnabled);
-        this.state.berserkActive = !!(botSettings?.berserk?.enabled || Engine?.settings?.d?.fight_auto_solo);
+        this.state.berserkActive = false;
     },
     syncRuntimeContext(reason = 'runtime_sync') {
         const currMap = Engine?.map?.d?.name || '';
@@ -17976,11 +18077,23 @@ const RouteCombatFSM = {
         this.evaluate(reason);
     },
     shouldBerserkBeOn(ctx = this.state) {
-        const st = String(window.expMachineState?.state || '');
-        const combatState = ['CLEARING_CURRENT_MAP', 'MOVING_TO_MOB', 'WAITING_AFTER_KILL', 'VERIFYING_REMEMBERED_MOBS'].includes(st);
-        return !!(ctx.running && ctx.currentTask === 'EXP' && ctx.inRouteMap && ctx.berserkCheckbox && combatState);
+        return false;
     },
     evaluate(reason = 'sync') {
+        if (botSettings?.berserk) botSettings.berserk.enabled = false;
+        try {
+            if (Engine?.settings?.d) {
+                Engine.settings.d.fight_auto_solo = 0;
+                Engine.settings.d.fight_auto_elites = 0;
+                Engine.settings.d.fight_auto_elites2 = 0;
+            }
+        } catch (e) {}
+        this.state.berserkActive = false;
+        this._disableRequestedAt = 0;
+        if (reason !== 'poll') {
+            HeroLogger.emit('DEBUG', 'QUICK_ATTACK_EVAL', `Quick attack mode reason=${reason}`, "#a99a75", { category: 'COMBAT', dedupeMs: 20000 });
+        }
+        return;
         const shouldEnable = this.shouldBerserkBeOn();
         const currentlyActive = !!(botSettings?.berserk?.enabled || Engine?.settings?.d?.fight_auto_solo);
         this.state.berserkActive = currentlyActive;
@@ -18016,11 +18129,6 @@ const RouteCombatFSM = {
     canAutoAttack() {
         if (window.expPvpEscapeActive || window.__pvpEscapeActive || window.__pvpFleeActive) {
             HeroLogger.emit('DEBUG', 'ATTACK_SUPPRESSED_PVP_ESCAPE', 'Zablokowano auto-atak, bo trwa ucieczka PvP.', "#ff5252", { category: 'COMBAT', dedupeMs: 1500 });
-            return false;
-        }
-        const berserkOn = !!(botSettings?.berserk?.enabled || Engine?.settings?.d?.fight_auto_solo);
-        if (!berserkOn) {
-            HeroLogger.emit('DEBUG', 'ATTACK_SUPPRESSED', 'Zablokowano auto-atak, bo berserk jest OFF.', "#ffb74d", { category: 'COMBAT', dedupeMs: 30000 });
             return false;
         }
         return true;
@@ -18125,27 +18233,18 @@ const BerserkController = {
     onSupplyRun(reason = 'supply_run') { this.disable(reason); },
     onPvPEscape(reason = 'pvp_escape') { this.disable(reason); },
     setBotBerserkState(nextState, reason = 'fsm') {
-        const isOn = !!nextState;
-        const active = !!(Engine?.settings?.d?.fight_auto_solo || botSettings?.berserk?.enabled);
-        if (isOn === active) return false;
-        return ActionExecutor.runWithRetry('TOGGLE_BERSERK', { state: isOn }, () => {
-            botSettings.berserk.userEnabled = isOn ? true : !!botSettings.berserk.userEnabled;
-            botSettings.berserk.enabled = isOn;
-            const chk = document.getElementById('berserkEnabled');
-            if (chk) chk.checked = !!botSettings.berserk.userEnabled;
-            if (typeof window._g === 'function') {
-                window._g(`settings&action=update&id=34&v=${isOn ? 1 : 0}`);
-                this._log(`native setting id=34 v=${isOn ? 1 : 0} sent`, reason, isOn ? "#81c784" : "#ffb74d", 1500);
-                if (isOn) {
-                    window._g(`settings&action=update&id=34&key=elite&v=${botSettings?.berserk?.e1 ? 1 : 0}`);
-                    const strong = !!(botSettings?.berserk?.e2 || botSettings?.berserk?.hero);
-                    window._g(`settings&action=update&id=34&key=elite2&v=${strong ? 1 : 0}`);
-                }
+        if (botSettings?.berserk) botSettings.berserk.enabled = false;
+        try {
+            if (Engine?.settings?.d) {
+                Engine.settings.d.fight_auto_solo = 0;
+                Engine.settings.d.fight_auto_elites = 0;
+                Engine.settings.d.fight_auto_elites2 = 0;
             }
-            if (typeof saveSettings === 'function') saveSettings();
-            if (window.updateServerBerserk) window.updateServerBerserk();
-            this._log(isOn ? 'enabled' : 'disabled', reason, isOn ? "#81c784" : "#ffb74d");
-        }, { retries: 2, baseDelay: 250 });
+        } catch (e) {}
+        if (typeof saveSettings === 'function') saveSettings();
+        this.syncUiFromState();
+        this._log('server berserk skipped; quick attack mode active', reason, "#00e5ff", 5000);
+        return false;
     },
     syncObservedState(reason = 'observe') {
         const observedActive = !!Engine?.settings?.d?.fight_auto_solo;
@@ -18175,7 +18274,7 @@ window.BerserkController = BerserkController;
 
 function getBerserkDecisionMessage(decision) {
     if (!decision) return "Brak decyzji";
-    if (decision.reason === 'auto_berserk_option_off') return "Auto-Berserk wyłączony w ustawieniach";
+    if (decision.reason === 'auto_berserk_option_off') return "Szybki atak PPM wyłączony w ustawieniach";
     if (decision.reason === 'ok_exp_map') return "Mapa expowiska - włączam";
     if (decision.reason === 'map_not_in_exp_route') return "Poza expowiskiem - wyłączam";
     if (decision.reason === 'bot_not_running') return "STOP EXP - wyłączam";
@@ -19913,7 +20012,7 @@ window.logHero = function(msg, color="#a99a75") {
 
 
 
-                Engine.settings.d.fight_auto_solo = state ? 1 : 0;
+                Engine.settings.d.fight_auto_solo = 0;
 
 
 
@@ -19933,11 +20032,11 @@ window.logHero = function(msg, color="#a99a75") {
 
 
 
-                Engine.settings.d.fight_auto_elites = (botSettings.exp.aggroE1 !== false) ? 1 : 0;
+                Engine.settings.d.fight_auto_elites = 0;
 
 
 
-                Engine.settings.d.fight_auto_elites2 = (botSettings.exp.aggroE2 === true) ? 1 : 0;
+                Engine.settings.d.fight_auto_elites2 = 0;
 
 
 
@@ -20306,8 +20405,7 @@ function setExpBerserkState(shouldEnable) {
     const now = Date.now();
     window.__expBerserkDesiredCache = window.__expBerserkDesiredCache || { value: null, at: 0 };
     const cache = window.__expBerserkDesiredCache;
-    const activeNow = !!(botSettings?.berserk?.enabled || Engine?.settings?.d?.fight_auto_solo);
-    if (cache.value === shouldEnable && activeNow === shouldEnable && now - Number(cache.at || 0) < 5000) return;
+    if (cache.value === shouldEnable && now - Number(cache.at || 0) < 5000) return;
     cache.value = shouldEnable;
     cache.at = now;
     window.RouteCombatFSM.update({ inRouteMap: !!shouldEnable }, shouldEnable ? 'exp_map_enter' : 'exp_map_leave');
@@ -23687,14 +23785,12 @@ function pokeExpAdjacentTarget(mob, reason = 'adjacent_target') {
     last.at = now;
     let sent = false;
     try {
-        if (Engine?.npcs && typeof Engine.npcs.clickNpc === 'function') {
-            Engine.npcs.clickNpc(id);
-            sent = true;
-        }
+        sent = typeof window.tryMargoneuroQuickFight === 'function'
+            ? window.tryMargoneuroQuickFight(id, { reason, checkLevelRange: true })
+            : false;
     } catch (e) {}
     try {
-        // Avoid double-poking the server: clickNpc usually sends the attack intent.
-        // Raw command is only a fallback when clickNpc is unavailable or failed.
+        // Raw command is only a fallback when PPM/quickFight is unavailable or failed.
         if (!sent && typeof sendGameCommand === 'function' && (!window.RouteCombatFSM || window.RouteCombatFSM.canAutoAttack())) {
             const attackCommand = typeof buildMargoneuroFightAttackCommand === 'function'
                 ? buildMargoneuroFightAttackCommand(id)
@@ -23707,6 +23803,7 @@ function pokeExpAdjacentTarget(mob, reason = 'adjacent_target') {
         startExpKillSignalWatcher(mob, { reason, baselineSnapshot: expBeforeAttack });
     }
     if (sent && typeof window.ExpMovementGuard?.noteAttack === 'function') window.ExpMovementGuard.noteAttack(id, { reason });
+    if (sent && typeof window.requestExpLogicSoon === 'function') window.requestExpLogicSoon(220, `${reason}_quick_fight`);
     return sent;
 }
 window.pokeExpAdjacentTarget = pokeExpAdjacentTarget;
@@ -26886,9 +26983,8 @@ function runExpLogic() {
     expCurrentTargetId = target ? (target.id || null) : null;
     window.expCurrentTargetId = expCurrentTargetId;
 
-    const berserkEnabledNow = !!(botSettings?.berserk?.enabled || Engine?.settings?.d?.fight_auto_solo);
     // Transit maps are travel-only by default; fighting there must be explicitly enabled.
-    const allowTransitFight = !!(botSettings?.exp?.fightTransitMobs === true && botSettings?.berserk?.userEnabled && berserkEnabledNow);
+    const allowTransitFight = !!(botSettings?.exp?.fightTransitMobs === true);
     if (!isExpMap) {
         temporaryExpMode = allowTransitFight && hasNearbyReachableMobsForExp(10);
         if (temporaryExpMode) {
