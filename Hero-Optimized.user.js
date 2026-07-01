@@ -42,6 +42,54 @@
         waitTimer: null,
         passiveWaitTimer: null
     };
+
+    const HERO_LEVELS = {
+        "Domina Ecclesiae": 21,
+        "Mroczny Patryk": 35,
+        "Karmazynowy Mściciel": 45,
+        "Złodziej": 51,
+        "Zły Przewodnik": 63,
+        "Opętany Paladyn": 74,
+        "Piekielny Kościej": 85,
+        "Koziec Mściciel Ścieżek": 94,
+        "Kochanka Nocy": 102,
+        "Książę Kasim": 116,
+        "Święty Braciszek": 123,
+        "Złoty Roger": 135,
+        "Baca bez Łowiec": 144,
+        "Czarująca Atalia": 157,
+        "Obłąkany Łowca Orków": 165,
+        "Lichwiarz Grauhaz": 177,
+        "Viviana Nandin": 185,
+        "Przeraza": 194,
+        "Demonis Pan Nicości": 205,
+        "Mulher Ma": 214,
+        "Vapor Veneno": 231,
+        "Dęborożec": 244,
+        "Tepeyollotl": 258,
+        "Widmo Triady": 265,
+        "Negthotep Czarny Kapłan": 271,
+        "Młody Smok": 282
+    };
+
+    function normalizeHeroBossName(value) {
+        return String(value || '')
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .toLowerCase();
+    }
+
+    const HERO_LEVELS_BY_NORMALIZED_NAME = Object.fromEntries(
+        Object.entries(HERO_LEVELS).map(([name, level]) => [normalizeHeroBossName(name), level])
+    );
+
+    function getHeroBossLevel(heroName) {
+        return HERO_LEVELS[heroName] || HERO_LEVELS_BY_NORMALIZED_NAME[normalizeHeroBossName(heroName)] || null;
+    }
+
+    window.getHeroBossLevel = getHeroBossLevel;
     const margoneuroBootLoggerState = {
         active: false,
         lastSnapshot: null,
@@ -2351,6 +2399,232 @@ setTimeout(function initDatabasesWhenGameIsStable(attempt = 0) {
 
     });
 
+    const E2_AUTOMATION_STORAGE_KEY = 'margoneuro_e2_automation_state_v1';
+
+    function readE2AutomationState() {
+        try {
+            return JSON.parse(localStorage.getItem(E2_AUTOMATION_STORAGE_KEY) || '{}') || {};
+        } catch (e) {
+            return {};
+        }
+    }
+
+    function writeE2AutomationState(patch = {}) {
+        const state = { ...readE2AutomationState(), ...patch, updatedAt: Date.now() };
+        localStorage.setItem(E2_AUTOMATION_STORAGE_KEY, JSON.stringify(state));
+        return state;
+    }
+
+    function normalizeBossLookupName(value) {
+        return String(value || '')
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .toLowerCase();
+    }
+
+    function findE2DefinitionByName(name) {
+        const key = normalizeBossLookupName(name);
+        if (!key) return null;
+        return (elityIIData || []).find(e => normalizeBossLookupName(e.name) === key) || null;
+    }
+
+    function findE2DefinitionForTarget(targetRef = {}) {
+        const rawName = targetRef.nick || targetRef.name || '';
+        const key = normalizeBossLookupName(rawName);
+        if (!key) return null;
+        return (elityIIData || []).find(e => {
+            const bossKey = normalizeBossLookupName(e.name);
+            return bossKey && (key === bossKey || key.includes(bossKey) || bossKey.includes(key));
+        }) || null;
+    }
+
+    function formatE2Countdown(ms) {
+        const total = Math.max(0, Math.floor(Number(ms || 0) / 1000));
+        const h = Math.floor(total / 3600);
+        const m = Math.floor((total % 3600) / 60);
+        const s = total % 60;
+        return h > 0
+            ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+            : `${m}:${String(s).padStart(2, '0')}`;
+    }
+
+    function getE2EntryLeadMs(settings = botSettings?.e2 || {}) {
+        const min = Math.max(0, Number(settings.minEntryMinutes ?? 10));
+        const max = Math.max(min, Number(settings.maxEntryMinutes ?? 35));
+        const saved = readE2AutomationState();
+        if (Number.isFinite(Number(saved.entryLeadMs)) && Number(saved.entryLeadMs) >= min * 60000 && Number(saved.entryLeadMs) <= max * 60000) {
+            return Number(saved.entryLeadMs);
+        }
+        const lead = (min + Math.random() * Math.max(0, max - min)) * 60000;
+        writeE2AutomationState({ entryLeadMs: Math.round(lead) });
+        return Math.round(lead);
+    }
+
+    function logE2Automation(message, color = '#ba68c8') {
+        const text = `[E2] ${message}`;
+        if (typeof window.logHero === 'function') window.logHero(text, color);
+        else console.log(text);
+        const box = document.getElementById('e2AutomationConsole');
+        if (box) {
+            const line = document.createElement('div');
+            line.textContent = `${new Date().toLocaleTimeString('pl-PL', { hour12: false })} ${message}`;
+            line.style.color = color;
+            box.appendChild(line);
+            box.scrollTop = box.scrollHeight;
+        }
+    }
+
+    function tryClickByText(patterns = []) {
+        const lower = patterns.map(p => String(p).toLowerCase());
+        const nodes = Array.from(document.querySelectorAll('button, .button, a, div, span'))
+            .filter(el => {
+                const text = String(el.textContent || '').trim().toLowerCase();
+                return text && lower.some(p => text.includes(p));
+            });
+        const node = nodes[0];
+        if (!node) return false;
+        node.click();
+        return true;
+    }
+
+    function e2LeaveToLobby(reason = 'timer_wait') {
+        writeE2AutomationState({ inLobby: true, lobbyReason: reason, manualEntryUntil: 0 });
+        try {
+            if (typeof stopExpRuntime === 'function') stopExpRuntime(`e2_lobby:${reason}`);
+            window.isExping = false;
+            window.expRunning = false;
+            window.botRunning = false;
+        } catch (e) {}
+        const attempts = [
+            () => typeof Engine?.logout === 'function' && Engine.logout(),
+            () => typeof Engine?.interface?.logout === 'function' && Engine.interface.logout(),
+            () => tryClickByText(['wyloguj', 'zmien postac', 'zmień postać', 'wyjdz z gry', 'wyjdź z gry'])
+        ];
+        const used = attempts.some(fn => {
+            try { return !!fn(); } catch (e) { return false; }
+        });
+        logE2Automation(used ? `Poczekalnia aktywna (${reason}).` : `Poczekalnia aktywna (${reason}), ale nie znaleziono adaptera wylogowania.`, used ? '#80deea' : '#ffb74d');
+        if (typeof window.renderE2AutomationStatus === 'function') window.renderE2AutomationStatus();
+        return used;
+    }
+
+    function e2EnterGameWindow(reason = 'manual_entry') {
+        const graceMs = Math.max(1000, Number(botSettings?.e2?.manualEntryGraceSeconds ?? 5) * 1000);
+        const until = Date.now() + graceMs;
+        writeE2AutomationState({ inLobby: false, manualEntryUntil: until, lobbyReason: reason });
+        logE2Automation(`Wejscie do gry: masz ${Math.round(graceMs / 1000)}s na wylaczenie bota.`, '#ffd54f');
+        setTimeout(() => {
+            const state = readE2AutomationState();
+            const nextAt = Number(state.nextAt || 0);
+            if (!botSettings?.e2?.enabled || Date.now() > Number(state.manualEntryUntil || 0)) return;
+            const farFromResp = nextAt && nextAt - Date.now() > Math.max(60000, Number(botSettings.e2.minEntryMinutes || 10) * 60000);
+            if (farFromResp) e2LeaveToLobby('manual_entry_grace_expired');
+        }, graceMs + 250);
+        if (typeof window.renderE2AutomationStatus === 'function') window.renderE2AutomationStatus();
+    }
+
+    function runE2PostKillPartyActions() {
+        const settings = botSettings?.e2 || {};
+        const actions = [];
+        if (settings.breakGroupAfterKill) {
+            actions.push({
+                name: 'rozbijanie grupy',
+                run: () => (
+                    (typeof Engine?.party?.leave === 'function' && Engine.party.leave()) ||
+                    (typeof Engine?.team?.leave === 'function' && Engine.team.leave()) ||
+                    tryClickByText(['opusc druzyne', 'opuść drużynę', 'rozbij grupe', 'rozbij grupę'])
+                )
+            });
+        }
+        if (settings.inviteNicks) {
+            const nicks = String(settings.inviteNicks).split(',').map(v => v.trim()).filter(Boolean);
+            actions.push({
+                name: `zapraszanie wpisanych nickow (${nicks.length})`,
+                run: () => {
+                    let ok = false;
+                    for (const nick of nicks) {
+                        if (typeof Engine?.party?.invite === 'function') ok = Engine.party.invite(nick) !== false || ok;
+                        else if (typeof Engine?.team?.invite === 'function') ok = Engine.team.invite(nick) !== false || ok;
+                    }
+                    return ok;
+                }
+            });
+        }
+        if (settings.addClan || settings.addFriends || settings.addClanAllies) {
+            actions.push({
+                name: 'zapraszanie list relacji',
+                run: () => {
+                    const rel = Engine?.relations || Engine?.friends || null;
+                    if (!rel) return false;
+                    const invite = Engine?.party?.invite || Engine?.team?.invite;
+                    if (typeof invite !== 'function') return false;
+                    let ok = false;
+                    const lists = [];
+                    if (settings.addClan) lists.push(rel.clan || rel.clanMembers || []);
+                    if (settings.addFriends) lists.push(rel.friends || []);
+                    if (settings.addClanAllies) lists.push(rel.allies || rel.clanAllies || []);
+                    for (const list of lists.flat()) {
+                        const nick = list?.nick || list?.name || list;
+                        if (nick) ok = invite(String(nick)) !== false || ok;
+                    }
+                    return ok;
+                }
+            });
+        }
+        for (const action of actions) {
+            const ok = (() => { try { return !!action.run(); } catch (e) { return false; } })();
+            logE2Automation(`${action.name}: ${ok ? 'OK' : 'brak adaptera'}`, ok ? '#a5d6a7' : '#ffb74d');
+        }
+    }
+
+    function recordE2Kill(e2Name, targetRef = {}, reason = 'kill') {
+        const settings = botSettings?.e2 || {};
+        const boss = findE2DefinitionByName(e2Name) || findE2DefinitionForTarget(targetRef);
+        const name = boss?.name || e2Name || targetRef.nick || targetRef.name || settings.selectedName || 'E2';
+        const respawnMinutes = Math.max(1, Number(settings.respawnMinutes || 180));
+        const prev = readE2AutomationState();
+        if (prev.lastKilledName === name && Date.now() - Number(prev.lastKilledAt || 0) < 60000) {
+            return false;
+        }
+        const nextAt = Date.now() + respawnMinutes * 60000;
+        writeE2AutomationState({
+            selectedName: name,
+            lastKilledName: name,
+            lastKilledAt: Date.now(),
+            nextAt,
+            inLobby: false,
+            entryLeadMs: 0
+        });
+        runE2PostKillPartyActions();
+        logE2Automation(`Zbity ${name}. Nastepne okno za ${formatE2Countdown(nextAt - Date.now())}.`, '#a5d6a7');
+        if (settings.logoutAfterKill && Math.random() * 100 < Number(settings.logoutChanceAfterKill ?? 100)) {
+            e2LeaveToLobby('e2_killed');
+        }
+        if (typeof window.renderE2AutomationStatus === 'function') window.renderE2AutomationStatus();
+        return true;
+    }
+
+    function recordE2KillIfTarget(targetRef = {}, reason = 'kill_signal') {
+        if (!botSettings?.e2?.enabled) return false;
+        const boss = findE2DefinitionForTarget(targetRef) || findE2DefinitionByName(botSettings.e2.selectedName);
+        if (!boss) return false;
+        const nameKey = normalizeBossLookupName(targetRef.nick || targetRef.name || '');
+        const selectedOnly = normalizeBossLookupName(botSettings.e2.selectedName || boss.name);
+        if (selectedOnly && nameKey && selectedOnly !== normalizeBossLookupName(boss.name) && !nameKey.includes(selectedOnly)) return false;
+        return recordE2Kill(boss.name, targetRef, reason);
+    }
+
+    window.MargoneuroE2Automation = {
+        readState: readE2AutomationState,
+        writeState: writeE2AutomationState,
+        recordKill: recordE2Kill,
+        recordKillIfTarget: recordE2KillIfTarget,
+        enterLobby: e2LeaveToLobby,
+        enterGameWindow: e2EnterGameWindow
+    };
+
 
 
     // ==========================================
@@ -2780,6 +3054,22 @@ let opacityValue = 0.95;
 
             mapOrder: JSON.parse(localStorage.getItem('exp_map_order_v64') || '[]')
 
+        },
+        e2: {
+            enabled: false,
+            selectedName: '',
+            respawnMinutes: 180,
+            logoutAfterKill: true,
+            breakGroupAfterKill: true,
+            addClan: true,
+            addFriends: true,
+            addClanAllies: true,
+            straightenChance: 30,
+            logoutChanceAfterKill: 100,
+            minEntryMinutes: 10,
+            maxEntryMinutes: 35,
+            manualEntryGraceSeconds: 5,
+            inviteNicks: ''
         },
         bridge: {
             enabled: false,
@@ -13139,6 +13429,38 @@ function initGUI() {
                 </div>
                 <div id="e2Container" style="display:none; flex-direction:column; flex:1; min-height:0;">
                     <div id="e2SuitableContainer" style="background:rgba(156,39,176,0.1); border:1px solid #9c27b0; padding:6px; margin-bottom:8px; border-radius:2px;"><span style="color:#777; font-size:10px;">Ładowanie podpowiedzi levelowych...</span></div>
+                    <div id="e2AutomationPanel" style="background:rgba(10,10,10,0.82); border:1px solid #00bcd4; padding:6px; margin-bottom:8px; border-radius:2px; color:#d7c4ff; font-size:10px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; gap:6px; margin-bottom:5px;">
+                            <label style="font-weight:bold; color:#00e5ff; display:flex; align-items:center; gap:4px;"><input type="checkbox" id="e2AutoEnabled" ${botSettings.e2?.enabled ? 'checked' : ''}> System E2</label>
+                            <span id="e2AutomationStatus" style="color:#ffd54f;">Timer nieaktywny</span>
+                        </div>
+                        <div style="display:grid; grid-template-columns:1fr 62px 62px; gap:5px; align-items:end; margin-bottom:5px;">
+                            <label>Cel E2:<select id="e2SelectedName" style="width:100%; background:#111; color:#fff; border:1px solid #555; padding:3px;"></select></label>
+                            <label>Resp min:<input type="number" id="e2RespawnMinutes" min="1" max="1440" value="${botSettings.e2?.respawnMinutes ?? 180}" style="width:100%; background:#000; color:#00e5ff; border:1px solid #555; padding:3px;"></label>
+                            <label>Grace s:<input type="number" id="e2ManualGrace" min="1" max="60" value="${botSettings.e2?.manualEntryGraceSeconds ?? 5}" style="width:100%; background:#000; color:#00e5ff; border:1px solid #555; padding:3px;"></label>
+                        </div>
+                        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:4px; margin-bottom:5px;">
+                            <label><input type="checkbox" id="e2LogoutAfterKill" ${botSettings.e2?.logoutAfterKill ? 'checked' : ''}> Logaj po zbiciu</label>
+                            <label><input type="checkbox" id="e2BreakGroupAfterKill" ${botSettings.e2?.breakGroupAfterKill ? 'checked' : ''}> Rozbij grupe</label>
+                            <label><input type="checkbox" id="e2AddClan" ${botSettings.e2?.addClan ? 'checked' : ''}> Dodawaj klan</label>
+                            <label><input type="checkbox" id="e2AddFriends" ${botSettings.e2?.addFriends ? 'checked' : ''}> Dodawaj fr</label>
+                            <label><input type="checkbox" id="e2AddClanAllies" ${botSettings.e2?.addClanAllies ? 'checked' : ''}> Dodawaj soj</label>
+                        </div>
+                        <div style="display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:5px; align-items:end; margin-bottom:5px;">
+                            <label>Prost. %<input type="number" id="e2StraightenChance" min="0" max="100" value="${botSettings.e2?.straightenChance ?? 30}" style="width:100%; background:#000; color:#00e5ff; border:1px solid #555; padding:3px;"></label>
+                            <label>Logout %<input type="number" id="e2LogoutChanceAfterKill" min="0" max="100" value="${botSettings.e2?.logoutChanceAfterKill ?? 100}" style="width:100%; background:#000; color:#00e5ff; border:1px solid #555; padding:3px;"></label>
+                            <label>Min wej.<input type="number" id="e2MinEntryMinutes" min="0" max="240" value="${botSettings.e2?.minEntryMinutes ?? 10}" style="width:100%; background:#000; color:#00e5ff; border:1px solid #555; padding:3px;"></label>
+                            <label>Max wej.<input type="number" id="e2MaxEntryMinutes" min="0" max="240" value="${botSettings.e2?.maxEntryMinutes ?? 35}" style="width:100%; background:#000; color:#00e5ff; border:1px solid #555; padding:3px;"></label>
+                        </div>
+                        <label style="display:block; margin-bottom:5px;">Zapraszaj nicki:<input type="text" id="e2InviteNicks" value="${botSettings.e2?.inviteNicks || ''}" placeholder="nicki oddzielone przecinkiem" style="width:100%; box-sizing:border-box; background:#111; color:#fff; border:1px solid #555; padding:3px;"></label>
+                        <div style="display:flex; gap:4px; margin-bottom:5px;">
+                            <button id="btnE2StartTimer" class="btn-sepia" style="flex:1; padding:4px; background:#006064;">Start E2</button>
+                            <button id="btnE2Lobby" class="btn-sepia" style="flex:1; padding:4px; background:#263238;">Poczekalnia</button>
+                            <button id="btnE2EnterGame" class="btn-sepia" style="flex:1; padding:4px; background:#4a148c;">Wejdz do gry</button>
+                            <button id="btnE2MarkKill" class="btn-sepia" style="flex:1; padding:4px; background:#1b5e20;">Zbity teraz</button>
+                        </div>
+                        <div id="e2AutomationConsole" style="height:42px; overflow-y:auto; border-top:1px solid #263238; padding-top:3px; color:#90caf9; font-family:monospace;"></div>
+                    </div>
                     <div style="display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:5px;">
                         <label style="color:#9c27b0; font-weight:bold;">Baza Elit II (Spis tras):</label>
                         <input type="text" id="e2Search" placeholder="Szukaj..." style="width:100px; padding:2px; font-size:10px; background:#0f0f0f; border:1px solid #4a3f2b; color:#fff;">
@@ -14314,6 +14636,8 @@ bindChange('useTeleportsEq', (e) => { botSettings.exp.useTeleportsEq = e.target.
                 button: 2,
                 which: 3,
                 type: 'contextmenu',
+                bubbles: true,
+                cancelable: true,
                 stopPropagation() {},
                 preventDefault() {}
             };
@@ -14321,8 +14645,9 @@ bindChange('useTeleportsEq', (e) => { botSettings.exp.useTeleportsEq = e.target.
         function getMargoneuroNpcMap() {
             try {
                 if (typeof Engine === 'undefined' || !Engine?.npcs) return {};
-                if (typeof Engine.npcs.check === 'function') return Engine.npcs.check() || {};
-                return Engine.npcs.d || {};
+                const checked = typeof Engine.npcs.check === 'function' ? (Engine.npcs.check() || {}) : {};
+                const cached = Engine.npcs.d || {};
+                return { ...cached, ...checked };
             } catch (e) {
                 return Engine?.npcs?.d || {};
             }
@@ -14352,7 +14677,7 @@ bindChange('useTeleportsEq', (e) => { botSettings.exp.useTeleportsEq = e.target.
         function isMargoneuroQuickFightCandidate(npcData, options = {}) {
             const src = npcData?.d || npcData || {};
             if (!src || src.dead || src.del || src.delete) return false;
-            if (![1, 2, 3].includes(Number(src.type))) return false;
+            if (![1, 2, 3, 11].includes(Number(src.type))) return false;
             if (options.checkLevelRange === false) return true;
             const level = typeof getMobLevelValue === 'function'
                 ? getMobLevelValue(src)
@@ -14364,12 +14689,29 @@ bindChange('useTeleportsEq', (e) => { botSettings.exp.useTeleportsEq = e.target.
         }
         function executeMargoneuroQuickFight(entry, reason = 'quick_fight') {
             if (!entry?.npc || !entry?.data) return false;
-            if (typeof entry.npc.oncontextmenu === 'function') {
-                entry.npc.oncontextmenu(createMargoneuroContextMenuEvent());
-                return true;
+            const event = createMargoneuroContextMenuEvent();
+            const handlers = [
+                entry.npc.oncontextmenu,
+                entry.npc.d?.oncontextmenu,
+                entry.npc.sprite?.oncontextmenu,
+                entry.data.oncontextmenu
+            ].filter(fn => typeof fn === 'function');
+            for (const handler of handlers) {
+                try {
+                    handler.call(entry.npc, event);
+                    console.log("[QUICK ATTACK] PPM na:", entry.data.nick || entry.data.name || entry.id);
+                    return true;
+                } catch (e) {
+                    window.__lastMargoneuroQuickFightError = String(e?.message || e);
+                }
             }
             if (Engine?.interactions && typeof Engine.interactions.quickFight === 'function') {
                 Engine.interactions.quickFight(entry.id);
+                console.log("[QUICK ATTACK] quickFight na:", entry.data.nick || entry.data.name || entry.id);
+                return true;
+            }
+            if (Engine?.npcs && typeof Engine.npcs.interact === 'function') {
+                Engine.npcs.interact(entry.id);
                 return true;
             }
             if (Engine?.npcs && typeof Engine.npcs.clickNpc === 'function') {
@@ -14387,6 +14729,15 @@ bindChange('useTeleportsEq', (e) => { botSettings.exp.useTeleportsEq = e.target.
             if (targetId !== null && targetId !== undefined) {
                 const entry = getMargoneuroNpcEntry(targetId, npcs);
                 if (entry) candidates.push(entry);
+                if (options.fallbackToAnyAdjacent !== false) {
+                    for (const key in (npcs || {})) {
+                        const npc = npcs[key];
+                        const data = npc?.d || npc || {};
+                        if (String(data.id ?? key) !== String(targetId)) {
+                            candidates.push({ id: normalizeMargoneuroRuntimeId(data.id ?? key), npc, data });
+                        }
+                    }
+                }
             } else {
                 for (const key in (npcs || {})) {
                     const npc = npcs[key];
@@ -14606,11 +14957,133 @@ if (document.getElementById('expAggro')) {
 bindInput('e2Search', () => renderBossList('e2ListContainer', elityIIData, 'e2Search', '#ba68c8'));
 bindInput('kolosySearch', () => renderBossList('kolosyListContainer', kolosyData, 'kolosySearch', '#e64a19'));
 
+function ensureE2Settings() {
+    const defaults = {
+        enabled: false,
+        selectedName: '',
+        respawnMinutes: 180,
+        logoutAfterKill: true,
+        breakGroupAfterKill: true,
+        addClan: true,
+        addFriends: true,
+        addClanAllies: true,
+        straightenChance: 30,
+        logoutChanceAfterKill: 100,
+        minEntryMinutes: 10,
+        maxEntryMinutes: 35,
+        manualEntryGraceSeconds: 5,
+        inviteNicks: ''
+    };
+    botSettings.e2 = { ...defaults, ...(botSettings.e2 || {}) };
+    return botSettings.e2;
+}
+
+function renderE2AutomationStatus() {
+    const status = document.getElementById('e2AutomationStatus');
+    if (!status) return;
+    const state = typeof readE2AutomationState === 'function' ? readE2AutomationState() : {};
+    const nextAt = Number(state.nextAt || 0);
+    const now = Date.now();
+    if (!botSettings?.e2?.enabled) {
+        status.textContent = 'System OFF';
+        status.style.color = '#999';
+        return;
+    }
+    if (!nextAt) {
+        status.textContent = 'Timer nieaktywny';
+        status.style.color = '#ffd54f';
+        return;
+    }
+    const leadMs = typeof getE2EntryLeadMs === 'function' ? getE2EntryLeadMs(botSettings.e2) : 0;
+    const entryAt = nextAt - leadMs;
+    if (state.inLobby) {
+        status.textContent = now >= entryAt
+            ? `Wejscie gotowe: ${state.lastKilledName || botSettings.e2.selectedName || 'E2'}`
+            : `Poczekalnia: ${formatE2Countdown(entryAt - now)} do wejscia`;
+        status.style.color = now >= entryAt ? '#a5d6a7' : '#80deea';
+    } else if (Number(state.manualEntryUntil || 0) > now) {
+        status.textContent = `W grze: ${formatE2Countdown(Number(state.manualEntryUntil) - now)} na STOP`;
+        status.style.color = '#ffd54f';
+    } else {
+        status.textContent = `Resp: ${formatE2Countdown(nextAt - now)}`;
+        status.style.color = '#ffd54f';
+    }
+}
+window.renderE2AutomationStatus = renderE2AutomationStatus;
+
+function initE2AutomationUI() {
+    const settings = ensureE2Settings();
+    const select = document.getElementById('e2SelectedName');
+    if (select && !select.__margoneuroFilled) {
+        select.__margoneuroFilled = true;
+        select.innerHTML = '<option value="">Auto / wybierz</option>' + (elityIIData || []).map(e => {
+            const selected = settings.selectedName === e.name ? 'selected' : '';
+            return `<option value="${String(e.name).replace(/"/g, '&quot;')}" ${selected}>${e.name} (${e.level} lvl)</option>`;
+        }).join('');
+    }
+    bindChange('e2AutoEnabled', (e) => { settings.enabled = e.target.checked; saveSettings(); renderE2AutomationStatus(); });
+    bindChange('e2SelectedName', (e) => { settings.selectedName = e.target.value; saveSettings(); renderE2AutomationStatus(); });
+    bindChange('e2RespawnMinutes', (e) => { settings.respawnMinutes = Math.max(1, parseInt(e.target.value, 10) || 180); e.target.value = settings.respawnMinutes; saveSettings(); });
+    bindChange('e2ManualGrace', (e) => { settings.manualEntryGraceSeconds = Math.max(1, parseInt(e.target.value, 10) || 5); e.target.value = settings.manualEntryGraceSeconds; saveSettings(); });
+    bindChange('e2LogoutAfterKill', (e) => { settings.logoutAfterKill = e.target.checked; saveSettings(); });
+    bindChange('e2BreakGroupAfterKill', (e) => { settings.breakGroupAfterKill = e.target.checked; saveSettings(); });
+    bindChange('e2AddClan', (e) => { settings.addClan = e.target.checked; saveSettings(); });
+    bindChange('e2AddFriends', (e) => { settings.addFriends = e.target.checked; saveSettings(); });
+    bindChange('e2AddClanAllies', (e) => { settings.addClanAllies = e.target.checked; saveSettings(); });
+    bindChange('e2StraightenChance', (e) => { settings.straightenChance = Math.max(0, Math.min(100, parseInt(e.target.value, 10) || 0)); e.target.value = settings.straightenChance; saveSettings(); });
+    bindChange('e2LogoutChanceAfterKill', (e) => { settings.logoutChanceAfterKill = Math.max(0, Math.min(100, parseInt(e.target.value, 10) || 0)); e.target.value = settings.logoutChanceAfterKill; saveSettings(); });
+    bindChange('e2MinEntryMinutes', (e) => { settings.minEntryMinutes = Math.max(0, parseInt(e.target.value, 10) || 0); e.target.value = settings.minEntryMinutes; saveSettings(); writeE2AutomationState({ entryLeadMs: 0 }); renderE2AutomationStatus(); });
+    bindChange('e2MaxEntryMinutes', (e) => { settings.maxEntryMinutes = Math.max(settings.minEntryMinutes || 0, parseInt(e.target.value, 10) || 0); e.target.value = settings.maxEntryMinutes; saveSettings(); writeE2AutomationState({ entryLeadMs: 0 }); renderE2AutomationStatus(); });
+    bindChange('e2InviteNicks', (e) => { settings.inviteNicks = e.target.value; saveSettings(); });
+    bindClick('btnE2StartTimer', () => {
+        settings.enabled = true;
+        const chk = document.getElementById('e2AutoEnabled');
+        if (chk) chk.checked = true;
+        const name = settings.selectedName || document.getElementById('e2SelectedName')?.value || '';
+        const nextAt = Date.now() + Math.max(1, Number(settings.respawnMinutes || 180)) * 60000;
+        writeE2AutomationState({ selectedName: name, nextAt, lastKilledName: name || 'E2', inLobby: false, entryLeadMs: 0 });
+        saveSettings();
+        logE2Automation(`Timer uruchomiony: ${name || 'E2'} resp za ${settings.respawnMinutes} min.`, '#a5d6a7');
+        renderE2AutomationStatus();
+    });
+    bindClick('btnE2Lobby', () => window.MargoneuroE2Automation?.enterLobby?.('manual'));
+    bindClick('btnE2EnterGame', () => window.MargoneuroE2Automation?.enterGameWindow?.('manual'));
+    bindClick('btnE2MarkKill', () => {
+        settings.enabled = true;
+        const chk = document.getElementById('e2AutoEnabled');
+        if (chk) chk.checked = true;
+        const name = settings.selectedName || document.getElementById('e2SelectedName')?.value || '';
+        window.MargoneuroE2Automation?.recordKill?.(name || 'E2', {}, 'manual_mark_kill');
+        saveSettings();
+    });
+    renderE2AutomationStatus();
+    if (!window.__e2AutomationStatusTimer) {
+        window.__e2AutomationStatusTimer = setInterval(() => {
+            renderE2AutomationStatus();
+            const state = readE2AutomationState();
+            if (!botSettings?.e2?.enabled || !state.inLobby || !state.nextAt) return;
+            const entryAt = Number(state.nextAt) - getE2EntryLeadMs(botSettings.e2);
+            if (Date.now() >= entryAt && !state.entryReadyLoggedAt) {
+                writeE2AutomationState({ entryReadyLoggedAt: Date.now() });
+                logE2Automation('Czas wejsc do gry na E2.', '#a5d6a7');
+            }
+        }, 1000);
+    }
+}
+
+initE2AutomationUI();
+
 
 
         const selHero = document.getElementById('selHero');
 
-        for (const hero in heroData) { let opt = document.createElement('option'); opt.value = hero; opt.innerText = hero; selHero.appendChild(opt); }
+        for (const hero in heroData) {
+            let opt = document.createElement('option');
+            const heroLevel = typeof getHeroBossLevel === 'function' ? getHeroBossLevel(hero) : null;
+            opt.value = hero;
+            opt.innerText = heroLevel ? `${hero} (${heroLevel} lvl)` : hero;
+            selHero.appendChild(opt);
+        }
 
 
 
@@ -19243,6 +19716,9 @@ function confirmExpKillSignal(reason = 'kill_signal', details = {}) {
             || (typeof getExpTargetLock === 'function' ? getExpTargetLock() : null)
             || window.expFocusTarget
             || null;
+        if (typeof window.MargoneuroE2Automation?.recordKillIfTarget === 'function') {
+            window.MargoneuroE2Automation.recordKillIfTarget(targetForZakon, reason);
+        }
         if (typeof window.recordZakonMobKill === 'function') window.recordZakonMobKill(targetForZakon, reason);
     } catch (e) {
         try { console.warn('[ZAKON] kill counter failed', e); } catch (_) {}
@@ -19657,6 +20133,11 @@ function forgetLastExpCombatTargets(reason = 'battle_ended', options = {}) {
     let changed = false;
     for (const target of targets) {
         if (!target) continue;
+        try {
+            if (typeof window.MargoneuroE2Automation?.recordKillIfTarget === 'function') {
+                window.MargoneuroE2Automation.recordKillIfTarget(target, reason);
+            }
+        } catch (e) {}
         const key = `${cleanMobName(target.nick || target.name || '')}:${Number(target.x)},${Number(target.y)}:${target.id ?? ''}`;
         if (seen.has(key)) continue;
         seen.add(key);
@@ -23763,9 +24244,19 @@ function pokeExpAdjacentTarget(mob, reason = 'adjacent_target') {
     if (Engine?.battle && (Engine.battle.show || Engine.battle.d)) return false;
     const now = Date.now();
     const expBeforeAttack = typeof getHeroExpKillSnapshot === 'function' ? getHeroExpKillSnapshot() : null;
-    const localNpcs = Engine?.npcs?.d || {};
+    const localNpcs = typeof getMargoneuroNpcMap === 'function'
+        ? getMargoneuroNpcMap()
+        : (Engine?.npcs?.d || {});
     const liveTarget = (localNpcs[id]?.d || localNpcs[id]) || Object.values(localNpcs).map(v => v?.d || v || {}).find(n => String(n.id) === String(id));
-    if ((!liveTarget || liveTarget.dead || liveTarget.del || liveTarget.delete) && !mob?.memoryOnly) return false;
+    if ((!liveTarget || liveTarget.dead || liveTarget.del || liveTarget.delete) && !mob?.memoryOnly) {
+        const fallbackSent = typeof window.tryMargoneuroQuickFight === 'function'
+            ? window.tryMargoneuroQuickFight(null, { reason: `${reason}_live_scan`, checkLevelRange: true })
+            : false;
+        if (!fallbackSent) return false;
+        if (typeof window.ExpMovementGuard?.noteAttack === 'function') window.ExpMovementGuard.noteAttack(id, { reason: `${reason}_live_scan` });
+        if (typeof window.requestExpLogicSoon === 'function') window.requestExpLogicSoon(220, `${reason}_live_scan_quick_fight`);
+        return true;
+    }
     const hx = Number(Engine?.hero?.d?.x);
     const hy = Number(Engine?.hero?.d?.y);
     const targetDist = Math.max(Math.abs(hx - Number(mob?.x ?? liveTarget?.x)), Math.abs(hy - Number(mob?.y ?? liveTarget?.y)));
@@ -23777,7 +24268,13 @@ function pokeExpAdjacentTarget(mob, reason = 'adjacent_target') {
             cooldownMs: EXP_ATTACK_SAME_TARGET_COOLDOWN_MS
         })
         : { ok: true };
-    if (!attackGuard.ok) return false;
+    if (!attackGuard.ok) {
+        const guardReason = String(attackGuard.reason || '');
+        const lastPathAt = Number(window.ExpMovementGuard?.state?.lastPathCommandAt || 0);
+        const residueWait = /arrival_buffer|autoPath|stepsToSend|visualOffset|not_ready_for_attack/.test(guardReason);
+        const forceAdjacentAttack = targetDist <= 1 && residueWait && now - lastPathAt > 250;
+        if (!forceAdjacentAttack) return false;
+    }
     window.__expLastAdjacentAttackPoke = window.__expLastAdjacentAttackPoke || { id: null, at: 0 };
     const last = window.__expLastAdjacentAttackPoke;
     if (String(last.id) === String(id) && now - Number(last.at || 0) < EXP_ADJACENT_ATTACK_POKE_MS) return false;
@@ -23786,7 +24283,7 @@ function pokeExpAdjacentTarget(mob, reason = 'adjacent_target') {
     let sent = false;
     try {
         sent = typeof window.tryMargoneuroQuickFight === 'function'
-            ? window.tryMargoneuroQuickFight(id, { reason, checkLevelRange: true })
+            ? window.tryMargoneuroQuickFight(id, { reason, checkLevelRange: true, fallbackToAnyAdjacent: true })
             : false;
     } catch (e) {}
     try {
