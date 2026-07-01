@@ -2477,10 +2477,12 @@ setTimeout(function initDatabasesWhenGameIsStable(attempt = 0) {
     }
 
     function tryClickByText(patterns = []) {
-        const lower = patterns.map(p => String(p).toLowerCase());
+        const lower = patterns.map(p => typeof normalizeBossLookupName === 'function' ? normalizeBossLookupName(p) : String(p).toLowerCase());
         const nodes = Array.from(document.querySelectorAll('button, .button, a, div, span'))
             .filter(el => {
-                const text = String(el.textContent || '').trim().toLowerCase();
+                const text = typeof normalizeBossLookupName === 'function'
+                    ? normalizeBossLookupName(el.textContent || '')
+                    : String(el.textContent || '').trim().toLowerCase();
                 return text && lower.some(p => text.includes(p));
             });
         const node = nodes[0];
@@ -2489,17 +2491,134 @@ setTimeout(function initDatabasesWhenGameIsStable(attempt = 0) {
         return true;
     }
 
+    function getCurrentHeroNickForE2() {
+        try {
+            return String(Engine?.hero?.d?.nick || Engine?.hero?.nick || '').trim();
+        } catch (e) {
+            return '';
+        }
+    }
+
+    function showE2LobbyOverlay(reason = '') {
+        let overlay = document.getElementById('margoneuroE2LobbyOverlay');
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'margoneuroE2LobbyOverlay';
+            overlay.style.cssText = 'position:fixed;inset:0;z-index:2147483646;background:rgba(0,0,0,0.72);display:flex;align-items:center;justify-content:center;font-family:Tahoma,Arial,sans-serif;color:#e0f7fa;text-align:center;pointer-events:none;';
+            overlay.innerHTML = `
+                <div style="padding:24px 34px; border:1px solid #00bcd4; background:rgba(8,14,18,0.92); box-shadow:0 0 24px rgba(0,188,212,0.22);">
+                    <div style="font-size:28px; letter-spacing:0; font-weight:900; color:#00e5ff; margin-bottom:8px;">POCZEKALNIA</div>
+                    <div id="margoneuroE2LobbyInfo" style="font-size:12px; color:#b2ebf2;">Czekam na okno E2...</div>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+        }
+        overlay.style.display = 'flex';
+        const info = document.getElementById('margoneuroE2LobbyInfo');
+        if (info) {
+            const state = readE2AutomationState();
+            const target = state.selectedName || state.lastKilledName || botSettings?.e2?.selectedName || 'E2';
+            const nextAt = Number(state.nextAt || 0);
+            const countdown = nextAt ? ` | wejscie za ${formatE2Countdown(Math.max(0, nextAt - getE2EntryLeadMs(botSettings?.e2 || {}) - Date.now()))}` : '';
+            info.textContent = `${target}${reason ? ` | ${reason}` : ''}${countdown}`;
+        }
+    }
+
+    function hideE2LobbyOverlay() {
+        const overlay = document.getElementById('margoneuroE2LobbyOverlay');
+        if (overlay) overlay.style.display = 'none';
+    }
+
+    function getClickableCharacterNode(node) {
+        if (!node) return null;
+        return node.closest?.('button, a, [role="button"], .character, .char, .select-character, .choose-character, .world-character') || node;
+    }
+
+    function e2ClickCharacterByName(characterName) {
+        const name = normalizeBossLookupName(characterName);
+        if (!name) return false;
+        const candidates = Array.from(document.querySelectorAll('button, a, [role="button"], .character, .char, .select-character, .choose-character, .world-character, div, li'))
+            .filter(el => {
+                const text = normalizeBossLookupName(el.textContent || '');
+                return text && text.length < 220 && text.includes(name);
+            });
+        const node = getClickableCharacterNode(candidates[0]);
+        if (!node) return false;
+        node.click();
+        return true;
+    }
+
+    function e2ClickEnterGameButton() {
+        return tryClickByText(['wejdz do gry', 'wejsc do gry', 'graj']);
+    }
+
+    function e2SwitchToCharacter(characterName, reason = 'switch') {
+        const clickedCharacter = characterName ? e2ClickCharacterByName(characterName) : false;
+        const clickEnter = () => {
+            const entered = e2ClickEnterGameButton();
+            logE2Automation(`${reason}: ${characterName || 'wybrana postac'} -> ${entered ? 'kliknieto wejscie' : 'nie znaleziono przycisku wejscia'}`, entered ? '#a5d6a7' : '#ffb74d');
+            if (entered) hideE2LobbyOverlay();
+            return entered;
+        };
+        if (clickedCharacter) {
+            setTimeout(clickEnter, 450);
+            return true;
+        }
+        return clickEnter();
+    }
+
+    function rememberE2CurrentCharacter(role) {
+        const nick = getCurrentHeroNickForE2();
+        if (!nick) return '';
+        const key = role === 'e2' ? 'e2CharacterName' : 'expCharacterName';
+        botSettings.e2 = botSettings.e2 || {};
+        botSettings.e2[key] = nick;
+        writeE2AutomationState({ [key]: nick });
+        if (typeof saveSettings === 'function') saveSettings();
+        return nick;
+    }
+
+    function scheduleE2ReturnToExpCharacter(characterName) {
+        const name = String(characterName || '').trim();
+        if (!name) return false;
+        writeE2AutomationState({ pendingReturnToExp: true, returnCharacterName: name });
+        logE2Automation(`Po E2 wracam na postac EXP: ${name}.`, '#80deea');
+        setTimeout(() => {
+            e2LeaveToLobby('return_to_exp_after_e2');
+            setTimeout(() => {
+                e2SwitchToCharacter(name, 'powrot_exp');
+                writeE2AutomationState({ pendingReturnToExp: false, inLobby: false });
+            }, 1800);
+        }, 650);
+        return true;
+    }
+
     function e2LeaveToLobby(reason = 'timer_wait') {
-        writeE2AutomationState({ inLobby: true, lobbyReason: reason, manualEntryUntil: 0 });
+        const settings = botSettings?.e2 || {};
+        const currentNick = getCurrentHeroNickForE2();
+        const patch = { inLobby: true, lobbyReason: reason, manualEntryUntil: 0 };
+        if (currentNick && reason !== 'e2_killed' && normalizeBossLookupName(currentNick) !== normalizeBossLookupName(settings.e2CharacterName || '')) {
+            patch.expCharacterName = settings.expCharacterName || currentNick;
+            botSettings.e2.expCharacterName = patch.expCharacterName;
+        }
+        writeE2AutomationState(patch);
         try {
             if (typeof stopExpRuntime === 'function') stopExpRuntime(`e2_lobby:${reason}`);
             window.isExping = false;
             window.expRunning = false;
             window.botRunning = false;
         } catch (e) {}
+        showE2LobbyOverlay(reason);
         const attempts = [
             () => typeof Engine?.logout === 'function' && Engine.logout(),
             () => typeof Engine?.interface?.logout === 'function' && Engine.interface.logout(),
+            () => tryClickByText(['wyloguj', 'zmien postac', 'wyjdz z gry', 'profil']),
+            () => {
+                if (!/margonem\.pl$/i.test(String(location.hostname || ''))) return false;
+                if (location.pathname === '/' || location.pathname === '') return false;
+                location.href = 'https://www.margonem.pl/';
+                return true;
+            },
             () => tryClickByText(['wyloguj', 'zmien postac', 'zmień postać', 'wyjdz z gry', 'wyjdź z gry'])
         ];
         const used = attempts.some(fn => {
@@ -2514,7 +2633,11 @@ setTimeout(function initDatabasesWhenGameIsStable(attempt = 0) {
         const graceMs = Math.max(1000, Number(botSettings?.e2?.manualEntryGraceSeconds ?? 5) * 1000);
         const until = Date.now() + graceMs;
         writeE2AutomationState({ inLobby: false, manualEntryUntil: until, lobbyReason: reason });
+        hideE2LobbyOverlay();
         logE2Automation(`Wejscie do gry: masz ${Math.round(graceMs / 1000)}s na wylaczenie bota.`, '#ffd54f');
+        const entryState = readE2AutomationState();
+        const targetCharacter = botSettings?.e2?.e2CharacterName || entryState.e2CharacterName || '';
+        setTimeout(() => e2SwitchToCharacter(targetCharacter, reason), 100);
         setTimeout(() => {
             const state = readE2AutomationState();
             const nextAt = Number(state.nextAt || 0);
@@ -2583,6 +2706,7 @@ setTimeout(function initDatabasesWhenGameIsStable(attempt = 0) {
         const settings = botSettings?.e2 || {};
         const boss = findE2DefinitionByName(e2Name) || findE2DefinitionForTarget(targetRef);
         const name = boss?.name || e2Name || targetRef.nick || targetRef.name || settings.selectedName || 'E2';
+        if (!settings.e2CharacterName && getCurrentHeroNickForE2()) rememberE2CurrentCharacter('e2');
         const respawnMinutes = Math.max(1, Number(settings.respawnMinutes || 180));
         const prev = readE2AutomationState();
         if (prev.lastKilledName === name && Date.now() - Number(prev.lastKilledAt || 0) < 60000) {
@@ -2595,11 +2719,15 @@ setTimeout(function initDatabasesWhenGameIsStable(attempt = 0) {
             lastKilledAt: Date.now(),
             nextAt,
             inLobby: false,
-            entryLeadMs: 0
+            entryLeadMs: 0,
+            entryReadyLoggedAt: 0
         });
         runE2PostKillPartyActions();
         logE2Automation(`Zbity ${name}. Nastepne okno za ${formatE2Countdown(nextAt - Date.now())}.`, '#a5d6a7');
-        if (settings.logoutAfterKill && Math.random() * 100 < Number(settings.logoutChanceAfterKill ?? 100)) {
+        const returnCharacter = settings.expCharacterName || prev.expCharacterName || '';
+        if (settings.returnToExpAfterKill && returnCharacter) {
+            scheduleE2ReturnToExpCharacter(returnCharacter);
+        } else if (settings.logoutAfterKill && Math.random() * 100 < Number(settings.logoutChanceAfterKill ?? 100)) {
             e2LeaveToLobby('e2_killed');
         }
         if (typeof window.renderE2AutomationStatus === 'function') window.renderE2AutomationStatus();
@@ -2622,7 +2750,12 @@ setTimeout(function initDatabasesWhenGameIsStable(attempt = 0) {
         recordKill: recordE2Kill,
         recordKillIfTarget: recordE2KillIfTarget,
         enterLobby: e2LeaveToLobby,
-        enterGameWindow: e2EnterGameWindow
+        enterGameWindow: e2EnterGameWindow,
+        switchToCharacter: e2SwitchToCharacter,
+        rememberCurrentAsE2: () => rememberE2CurrentCharacter('e2'),
+        rememberCurrentAsExp: () => rememberE2CurrentCharacter('exp'),
+        showLobbyOverlay: showE2LobbyOverlay,
+        hideLobbyOverlay: hideE2LobbyOverlay
     };
 
 
@@ -3060,6 +3193,10 @@ let opacityValue = 0.95;
             selectedName: '',
             respawnMinutes: 180,
             logoutAfterKill: true,
+            returnToExpAfterKill: true,
+            e2CharacterName: '',
+            expCharacterName: '',
+            resumeExpAfterReturn: true,
             breakGroupAfterKill: true,
             addClan: true,
             addFriends: true,
@@ -3086,6 +3223,19 @@ let opacityValue = 0.95;
         },
         eventHeroes: {
             dwellMs: 1600
+        },
+        heroAutoRoute: {
+            enabled: true,
+            hideManualEditor: true
+        },
+        equipmentBuyer: {
+            enabled: false,
+            weaponsOnly: false,
+            tasks: [],
+            done: {},
+            skipped: {},
+            activeTaskKey: '',
+            lastRunAt: 0
         },
 
         expProfiles: loadedProfiles,
@@ -6237,6 +6387,20 @@ function loadData() {
             ...(botSettings.performance || {})
         };
         botSettings.eventHeroes = { dwellMs: 1600, ...(botSettings.eventHeroes || {}) };
+        botSettings.heroAutoRoute = { enabled: true, hideManualEditor: true, ...(botSettings.heroAutoRoute || {}) };
+        botSettings.equipmentBuyer = {
+            enabled: false,
+            weaponsOnly: false,
+            tasks: [],
+            done: {},
+            skipped: {},
+            activeTaskKey: '',
+            lastRunAt: 0,
+            ...(botSettings.equipmentBuyer || {})
+        };
+        if (!Array.isArray(botSettings.equipmentBuyer.tasks)) botSettings.equipmentBuyer.tasks = [];
+        botSettings.equipmentBuyer.done = botSettings.equipmentBuyer.done || {};
+        botSettings.equipmentBuyer.skipped = botSettings.equipmentBuyer.skipped || {};
         if (Array.isArray(botSettings?.expProfiles)) deduplicateExpProfiles(botSettings.expProfiles, 'load_settings');
         if (Array.isArray(botSettings?.exp?.mapOrder)) setExpMapOrder(botSettings.exp.mapOrder, 'load_settings', { deferRouteState: true, deferPersist: true });
         if (typeof restoreCurrentHeroExpRoute === 'function') restoreCurrentHeroExpRoute('load_settings');
@@ -12174,6 +12338,28 @@ window.executeRushStep = function() {
         }
     };
 
+    function tryIssueGatewayWalk(reason = 'gateway') {
+        if (Date.now() - Number(window.__margoneuroLastWalkCommandAt || 0) < 900) return false;
+        const runners = [
+            () => typeof window._g === 'function' && window._g('walk'),
+            () => typeof pageWindow !== 'undefined' && pageWindow && pageWindow !== window && typeof pageWindow._g === 'function' && pageWindow._g('walk')
+        ];
+        for (const run of runners) {
+            try {
+                if (run() !== false) {
+                    window.__margoneuroLastWalkCommandAt = Date.now();
+                    if (window.logExp && Date.now() - Number(window.__margoneuroLastWalkLogAt || 0) > 2500) {
+                        window.__margoneuroLastWalkLogAt = Date.now();
+                        window.logExp(`[WALK] _g('walk') przy przejsciu (${reason})`, '#80deea');
+                    }
+                    return true;
+                }
+            } catch (e) {}
+        }
+        return false;
+    }
+    window.tryIssueGatewayWalk = tryIssueGatewayWalk;
+
     window.checkRushArrival = function() {
         restoreRushLocalStateFromWindow('rush_arrival');
         if (!isRushing && window.isRushing && rushTarget) isRushing = true;
@@ -12344,6 +12530,7 @@ window.executeRushStep = function() {
                     source: gateCoordSource === 'static' ? 'gate-retry-static' : 'gate-retry'
                 };
             }
+            if (dist === 0 && typeof tryIssueGatewayWalk === 'function') tryIssueGatewayWalk('rush_on_gate');
             ActionExecutor.runWithRetry('PASS_GATE', { x: exactX, y: exactY, targetMap: nextMap }, () => {
                 return window.isExping && typeof issueExpGuardedSafeGoTo === 'function'
                     ? issueExpGuardedSafeGoTo(exactX, exactY, 'pass_gate', nextMap)
@@ -12374,6 +12561,7 @@ window.executeRushStep = function() {
                     window._lastGateForceLog = `${currentSysMap}:${nextMap}`;
                 }
                 if (typeof window.safeGoTo === 'function') {
+                    if (typeof tryIssueGatewayWalk === 'function') tryIssueGatewayWalk('rush_gate_stall');
                     // Nie wymuszamy obchodzenia throttle w bramie — bywa to odrzucane przez serwer.
                     if (typeof beginExpGatewayTransition === 'function') {
                         beginExpGatewayTransition(currentSysMap, nextMap, exactX, exactY, gateCoordSource === 'static' ? 'gate-force-static' : 'gate-force');
@@ -13645,8 +13833,9 @@ function getCreatorShortestPath(start, end) {
 
 window.getCreatorShortestPath = getCreatorShortestPath;
 
-window.runRoutingAlgorithm = function(hero, targets, startMap) {
+window.runRoutingAlgorithm = function(hero, targets, startMap, options = {}) {
         targets = normalizeHeroMapOrder(hero).filter(Boolean);
+        if (!targets.length && options.silent) return [];
         if (!targets.length) return heroAlert("Brak map respów dla wybranego herosa.");
         if (!targets.some(m => normMapName(m) === normMapName(startMap))) startMap = targets[0];
 
@@ -13809,6 +13998,7 @@ window.runRoutingAlgorithm = function(hero, targets, startMap) {
         heroMapOrder[hero] = cleanRoute;
         saveMapOrder();
         currentRouteIndex = -1; sessionStorage.removeItem('hero_route_index'); checkedMapsThisSession.clear(); saveCheckedMaps(); updateUI();
+        if (options.silent) return cleanRoute;
 
         heroAlert("🧠 Zainstalowano MargoNeuro Smart-Route V2!\n\nTrasa obejmuje wszystkie znane mapy respów wybranego herosa. Mapy z nieznanymi przejściami zostały dopięte do listy, więc nie znikną z patrolu - po nagraniu brakujących bram kreator ułoży je jeszcze dokładniej.");
     };
@@ -13819,6 +14009,31 @@ window.runRoutingAlgorithm = function(hero, targets, startMap) {
     // INTERFEJS UŻYTKOWNIKA (UI)
 
     // ==========================================
+
+    function setHeroAutoRouteStatus(message, color = '#80deea') {
+        const el = document.getElementById('heroAutoRouteStatus');
+        if (!el) return;
+        el.textContent = message;
+        el.style.color = color;
+    }
+
+    function autoOptimizeHeroRoute(hero, options = {}) {
+        if (!hero || !heroData?.[hero]) {
+            setHeroAutoRouteStatus('Wybierz herosa, a trasa zostanie ulozona automatycznie.', '#777');
+            return [];
+        }
+        const targets = normalizeHeroMapOrder(hero).filter(Boolean);
+        if (!targets.length) {
+            setHeroAutoRouteStatus('Brak znanych map respow dla tego herosa.', '#ffb74d');
+            return [];
+        }
+        const currentMap = (typeof getCurrentMapName === 'function' ? getCurrentMapName() : '') || lastMapName || targets[0];
+        const startMap = targets.find(m => normMapName(m) === normMapName(currentMap)) || targets[0];
+        const route = window.runRoutingAlgorithm(hero, targets, startMap, { silent: true, reason: options.reason || 'auto' }) || targets;
+        setHeroAutoRouteStatus(`Auto-trasa: ${route.length} map, start: ${startMap}`, '#a5d6a7');
+        return route;
+    }
+    window.autoOptimizeHeroRoute = autoOptimizeHeroRoute;
 
 function initGUI() {
         console.log('[Margoneuro UI] Renderuję panel');
@@ -13963,10 +14178,20 @@ function initGUI() {
                             <label style="font-weight:bold; color:#00e5ff; display:flex; align-items:center; gap:4px;"><input type="checkbox" id="e2AutoEnabled" ${botSettings.e2?.enabled ? 'checked' : ''}> System E2</label>
                             <span id="e2AutomationStatus" style="color:#ffd54f;">Timer nieaktywny</span>
                         </div>
+                        <div id="e2CurrentTargetInfo" style="margin-bottom:5px; padding:4px; border:1px solid rgba(0,188,212,0.35); color:#80deea; background:rgba(0,188,212,0.08);">Bita E2: ${botSettings.e2?.selectedName || '-'}</div>
                         <div style="display:grid; grid-template-columns:1fr 62px 62px; gap:5px; align-items:end; margin-bottom:5px;">
                             <label>Cel E2:<select id="e2SelectedName" style="width:100%; background:#111; color:#fff; border:1px solid #555; padding:3px;"></select></label>
                             <label>Resp min:<input type="number" id="e2RespawnMinutes" min="1" max="1440" value="${botSettings.e2?.respawnMinutes ?? 180}" style="width:100%; background:#000; color:#00e5ff; border:1px solid #555; padding:3px;"></label>
                             <label>Grace s:<input type="number" id="e2ManualGrace" min="1" max="60" value="${botSettings.e2?.manualEntryGraceSeconds ?? 5}" style="width:100%; background:#000; color:#00e5ff; border:1px solid #555; padding:3px;"></label>
+                        </div>
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:5px; align-items:end; margin-bottom:5px;">
+                            <label>Postac E2:<input type="text" id="e2CharacterName" value="${botSettings.e2?.e2CharacterName || ''}" placeholder="nick postaci do E2" style="width:100%; background:#000; color:#00e5ff; border:1px solid #555; padding:3px;"></label>
+                            <label>Postac EXP:<input type="text" id="e2ExpCharacterName" value="${botSettings.e2?.expCharacterName || ''}" placeholder="nick postaci exp" style="width:100%; background:#000; color:#00e5ff; border:1px solid #555; padding:3px;"></label>
+                        </div>
+                        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:4px; margin-bottom:5px;">
+                            <button id="btnE2RememberE2Char" class="btn-sepia" style="padding:3px; background:#006064;">Ta jako E2</button>
+                            <button id="btnE2RememberExpChar" class="btn-sepia" style="padding:3px; background:#33691e;">Ta jako EXP</button>
+                            <label style="font-size:10px;"><input type="checkbox" id="e2ReturnToExpAfterKill" ${botSettings.e2?.returnToExpAfterKill !== false ? 'checked' : ''}> Wroc do EXP</label>
                         </div>
                         <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:4px; margin-bottom:5px;">
                             <label><input type="checkbox" id="e2LogoutAfterKill" ${botSettings.e2?.logoutAfterKill ? 'checked' : ''}> Logaj po zbiciu</label>
@@ -14053,6 +14278,20 @@ function initGUI() {
                                 <button id="btnForceSell" class="btn-sepia" style="background:#e65100; font-weight:bold; padding:2px 6px; border-color:#bf360c;">Opróżnij teraz</button>
                             </div>
                         </div>
+                    </div>
+                 <div class="accordion-header" id="accEqBuyer" data-exp-section="eqbuyer" onclick="toggleSettingsAcc('accEqBuyer')" style="background: rgba(123, 31, 162, 0.2); border-color: #ab47bc; color: #ce93d8; margin-top: 5px; margin-bottom: 0;">Kupowanie ekwipunku</div>
+                    <div id="accEqBuyerContent" style="display:none; padding: 8px; background: rgba(0,0,0,0.3); border: 1px solid #ab47bc; border-top: none; margin-bottom: 5px;">
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:5px; margin-bottom:6px;">
+                            <label style="color:#ce93d8; font-weight:bold;"><input type="checkbox" id="eqBuyerEnabled" ${botSettings.equipmentBuyer?.enabled ? 'checked' : ''}> Wlacznik</label>
+                            <label style="color:#ce93d8; font-weight:bold;"><input type="checkbox" id="eqBuyerWeaponsOnly" ${botSettings.equipmentBuyer?.weaponsOnly ? 'checked' : ''}> Tylko bronie</label>
+                        </div>
+                        <textarea id="eqBuyerImportRaw" rows="4" placeholder="Wklej liste: lvl npcId mapId" style="width:100%; box-sizing:border-box; background:#080808; color:#e1bee7; border:1px solid #6a1b9a; padding:5px; font-size:10px; resize:vertical;"></textarea>
+                        <div style="display:flex; gap:4px; margin:5px 0;">
+                            <button id="btnEqBuyerImport" class="btn-sepia" style="flex:1; padding:4px; background:#6a1b9a;">Importuj liste</button>
+                            <button id="btnEqBuyerClearDone" class="btn-sepia" style="flex:1; padding:4px; background:#4a148c;">Reset wykonanych</button>
+                        </div>
+                        <div id="eqBuyerStatus" style="font-size:10px; color:#b39ddb; margin-bottom:4px;">Brak aktywnego zadania.</div>
+                        <div id="eqBuyerTasksList" style="max-height:145px; overflow:auto; border:1px solid #4a148c; background:#080808; padding:3px;"></div>
                     </div>
                  <div class="accordion-header" id="accAlerts" data-exp-section="alarms" onclick="toggleSettingsAcc('accAlerts')" style="background: rgba(33, 150, 243, 0.2); border-color: #2196f3; color: #2196f3; margin-top: 5px; margin-bottom: 0;">Alarmy i powiadomienia</div>
                     <div id="accAlertsContent" style="display:none; padding: 8px; background: rgba(0,0,0,0.3); border: 1px solid #2196f3; border-top: none; margin-bottom: 5px;">
@@ -14176,6 +14415,27 @@ function initGUI() {
             </div>
         `;
         document.body.appendChild(mainGui);
+        if (botSettings?.heroAutoRoute?.hideManualEditor !== false) {
+            const heroContainer = document.getElementById('heroContainer');
+            const eventButton = document.getElementById('btnToggleEventHeroes');
+            const eventPanel = document.getElementById('eventHeroesPanel');
+            const routeBlock = document.getElementById('heroMapListContainer')?.closest?.('.nav-row');
+            const coordsBlock = document.getElementById('cordsListContainer')?.closest?.('.nav-row');
+            if (eventButton && eventPanel && heroContainer) {
+                eventButton.style.width = '100%';
+                eventButton.style.marginBottom = '5px';
+                heroContainer.insertBefore(eventButton, eventPanel);
+            }
+            if (!document.getElementById('heroAutoRouteStatus') && heroContainer && eventPanel) {
+                const status = document.createElement('div');
+                status.id = 'heroAutoRouteStatus';
+                status.style.cssText = 'padding:5px; margin-bottom:5px; border:1px solid #263238; background:#101820; color:#80deea; font-size:10px; text-align:center;';
+                status.textContent = 'Wybierz herosa, a trasa zostanie ulozona automatycznie.';
+                heroContainer.insertBefore(status, eventPanel);
+            }
+            if (routeBlock) routeBlock.style.display = 'none';
+            if (coordsBlock) coordsBlock.style.display = 'none';
+        }
         if (hideConsoles) {
             const heroConsoleEl = document.getElementById('heroConsole');
             const expConsoleEl = document.getElementById('expConsole');
@@ -15566,6 +15826,10 @@ function ensureE2Settings() {
         selectedName: '',
         respawnMinutes: 180,
         logoutAfterKill: true,
+        returnToExpAfterKill: true,
+        e2CharacterName: '',
+        expCharacterName: '',
+        resumeExpAfterReturn: true,
         breakGroupAfterKill: true,
         addClan: true,
         addFriends: true,
@@ -15587,6 +15851,14 @@ function renderE2AutomationStatus() {
     const state = typeof readE2AutomationState === 'function' ? readE2AutomationState() : {};
     const nextAt = Number(state.nextAt || 0);
     const now = Date.now();
+    const targetInfo = document.getElementById('e2CurrentTargetInfo');
+    if (targetInfo) {
+        const targetName = state.selectedName || state.lastKilledName || botSettings?.e2?.selectedName || '-';
+        const e2Char = botSettings?.e2?.e2CharacterName || state.e2CharacterName || '-';
+        const expChar = botSettings?.e2?.expCharacterName || state.expCharacterName || '-';
+        targetInfo.textContent = `Bita E2: ${targetName} | E2: ${e2Char} | EXP: ${expChar}`;
+    }
+    if (state.inLobby && typeof showE2LobbyOverlay === 'function') showE2LobbyOverlay(state.lobbyReason || 'timer');
     if (!botSettings?.e2?.enabled) {
         status.textContent = 'System OFF';
         status.style.color = '#999';
@@ -15626,6 +15898,9 @@ function initE2AutomationUI() {
     }
     bindChange('e2AutoEnabled', (e) => { settings.enabled = e.target.checked; saveSettings(); renderE2AutomationStatus(); });
     bindChange('e2SelectedName', (e) => { settings.selectedName = e.target.value; saveSettings(); renderE2AutomationStatus(); });
+    bindChange('e2CharacterName', (e) => { settings.e2CharacterName = e.target.value.trim(); saveSettings(); writeE2AutomationState({ e2CharacterName: settings.e2CharacterName }); renderE2AutomationStatus(); });
+    bindChange('e2ExpCharacterName', (e) => { settings.expCharacterName = e.target.value.trim(); saveSettings(); writeE2AutomationState({ expCharacterName: settings.expCharacterName }); renderE2AutomationStatus(); });
+    bindChange('e2ReturnToExpAfterKill', (e) => { settings.returnToExpAfterKill = e.target.checked; saveSettings(); });
     bindChange('e2RespawnMinutes', (e) => { settings.respawnMinutes = Math.max(1, parseInt(e.target.value, 10) || 180); e.target.value = settings.respawnMinutes; saveSettings(); });
     bindChange('e2ManualGrace', (e) => { settings.manualEntryGraceSeconds = Math.max(1, parseInt(e.target.value, 10) || 5); e.target.value = settings.manualEntryGraceSeconds; saveSettings(); });
     bindChange('e2LogoutAfterKill', (e) => { settings.logoutAfterKill = e.target.checked; saveSettings(); });
@@ -15644,13 +15919,25 @@ function initE2AutomationUI() {
         if (chk) chk.checked = true;
         const name = settings.selectedName || document.getElementById('e2SelectedName')?.value || '';
         const nextAt = Date.now() + Math.max(1, Number(settings.respawnMinutes || 180)) * 60000;
-        writeE2AutomationState({ selectedName: name, nextAt, lastKilledName: name || 'E2', inLobby: false, entryLeadMs: 0 });
+        writeE2AutomationState({ selectedName: name, nextAt, lastKilledName: name || 'E2', inLobby: false, entryLeadMs: 0, entryReadyLoggedAt: 0 });
         saveSettings();
         logE2Automation(`Timer uruchomiony: ${name || 'E2'} resp za ${settings.respawnMinutes} min.`, '#a5d6a7');
         renderE2AutomationStatus();
     });
     bindClick('btnE2Lobby', () => window.MargoneuroE2Automation?.enterLobby?.('manual'));
     bindClick('btnE2EnterGame', () => window.MargoneuroE2Automation?.enterGameWindow?.('manual'));
+    bindClick('btnE2RememberE2Char', () => {
+        const nick = window.MargoneuroE2Automation?.rememberCurrentAsE2?.() || '';
+        const input = document.getElementById('e2CharacterName');
+        if (input && nick) input.value = nick;
+        renderE2AutomationStatus();
+    });
+    bindClick('btnE2RememberExpChar', () => {
+        const nick = window.MargoneuroE2Automation?.rememberCurrentAsExp?.() || '';
+        const input = document.getElementById('e2ExpCharacterName');
+        if (input && nick) input.value = nick;
+        renderE2AutomationStatus();
+    });
     bindClick('btnE2MarkKill', () => {
         settings.enabled = true;
         const chk = document.getElementById('e2AutoEnabled');
@@ -15669,6 +15956,7 @@ function initE2AutomationUI() {
             if (Date.now() >= entryAt && !state.entryReadyLoggedAt) {
                 writeE2AutomationState({ entryReadyLoggedAt: Date.now() });
                 logE2Automation('Czas wejsc do gry na E2.', '#a5d6a7');
+                window.MargoneuroE2Automation?.enterGameWindow?.('timer_ready');
             }
         }, 1000);
     }
@@ -15772,6 +16060,305 @@ function initEventHeroesUI() {
 initEventHeroesUI();
 
 
+function ensureEqBuyerSettings() {
+    const defaults = { enabled: false, weaponsOnly: false, tasks: [], done: {}, skipped: {}, activeTaskKey: '', lastRunAt: 0 };
+    botSettings.equipmentBuyer = { ...defaults, ...(botSettings.equipmentBuyer || {}) };
+    if (!Array.isArray(botSettings.equipmentBuyer.tasks)) botSettings.equipmentBuyer.tasks = [];
+    botSettings.equipmentBuyer.done = botSettings.equipmentBuyer.done || {};
+    botSettings.equipmentBuyer.skipped = botSettings.equipmentBuyer.skipped || {};
+    return botSettings.equipmentBuyer;
+}
+
+function getEqBuyerTaskKey(task) {
+    return `${Number(task?.level || 0)}|${String(task?.npcId || '')}|${String(task?.mapId || task?.mapName || '')}`;
+}
+
+function parseEqBuyerTasks(raw) {
+    const tasks = [];
+    const seen = new Set();
+    String(raw || '').split(/\r?\n/).forEach(line => {
+        const clean = line.replace(/[|,;]/g, ' ').trim();
+        if (!clean || /lvl\s+npc/i.test(clean)) return;
+        const nums = clean.match(/\d+/g);
+        if (!nums || nums.length < 3) return;
+        const task = {
+            level: Number(nums[0]),
+            npcId: String(nums[1]),
+            mapId: String(nums[2]),
+            enabled: true,
+            source: clean
+        };
+        if (!Number.isFinite(task.level) || task.level <= 0 || !task.npcId || !task.mapId) return;
+        const key = getEqBuyerTaskKey(task);
+        if (seen.has(key)) return;
+        seen.add(key);
+        tasks.push(task);
+    });
+    return tasks.sort((a, b) => a.level - b.level || Number(a.mapId) - Number(b.mapId));
+}
+
+function getEqBuyerMapName(task) {
+    const staticMap = typeof findStaticMap === 'function' ? findStaticMap(task.mapId || task.mapName) : null;
+    return staticMap?.mapName || staticMap?.name || task.mapName || String(task.mapId || '');
+}
+
+function isOnEqBuyerTaskMap(task) {
+    const currentId = typeof getCurrentRuntimeMapId === 'function' ? getCurrentRuntimeMapId() : null;
+    if (currentId !== null && currentId !== undefined && String(currentId) === String(task.mapId)) return true;
+    const currentName = typeof getCurrentMapName === 'function' ? getCurrentMapName() : '';
+    const targetName = getEqBuyerMapName(task);
+    return currentName && targetName && normMapName(currentName) === normMapName(targetName);
+}
+
+function findEqBuyerNpc(task) {
+    try {
+        const npcs = typeof Engine?.npcs?.check === 'function' ? Engine.npcs.check() : (Engine?.npcs?.d || {});
+        return Object.entries(npcs || {}).map(([id, npc]) => {
+            const d = npc?.d || npc || {};
+            return { raw: npc, id: String(d.id || id), x: Number(d.x), y: Number(d.y), nick: d.nick || d.name || '' };
+        }).find(n => String(n.id) === String(task.npcId)) || null;
+    } catch (e) {
+        return null;
+    }
+}
+
+function clickEqBuyerShopDialogOption() {
+    const options = Array.from(document.querySelectorAll('.dialog-item, .dialog-choice, .option, .answer, .dialog-answer, #dialog li, .dialog-options li, .dialog-texts li, [data-option]'));
+    const node = options.find(el => {
+        const txt = String(el.innerText || el.textContent || '').toLowerCase();
+        return /sklep|handl|towar|sprzedaj|kup|asortyment|pokaz|poka/.test(txt);
+    });
+    if (!node) return false;
+    node.click();
+    return true;
+}
+
+function getShopItemData(item) {
+    const d = item?.d || item || {};
+    return {
+        raw: item,
+        id: d.id ?? item?.id ?? '',
+        name: d.name || item?._cachedStats?.name || item?.name || '',
+        cl: Number(d.cl ?? item?.cl ?? 0),
+        level: Number(d.lvl ?? d.level ?? item?.level ?? (String(d.stat || item?.stat || '').match(/(?:lvl|level|reqp_lvl)=([0-9]+)/)?.[1] || 0)),
+        stat: String(d.stat || item?.stat || item?._cachedStats?.stat || ''),
+        prof: String(d.prof || item?.prof || '')
+    };
+}
+
+function isEqBuyerItemForHero(data, settings) {
+    const hero = Engine?.hero?.d || {};
+    const heroLvl = Number(hero.lvl || hero.level || 1);
+    const heroProf = String(hero.prof || '').toLowerCase();
+    const cl = Number(data.cl || 0);
+    if (![4, 8, 9, 10, 11, 12, 13, 15, 22, 29].includes(cl)) return false;
+    if (settings.weaponsOnly && ![4, 29].includes(cl)) return false;
+    if (data.level && data.level > heroLvl) return false;
+    const stat = `${data.stat};${data.prof}`.toLowerCase();
+    const reqProf = stat.match(/(?:reqp|prof)=([^;]+)/)?.[1] || '';
+    if (reqProf && heroProf && !reqProf.includes(heroProf) && !/all|wsz|kazd|ka/.test(reqProf)) return false;
+    return true;
+}
+
+function scoreEqBuyerItem(data) {
+    const stat = String(data.stat || '').toLowerCase();
+    const bonus = ['dmg', 'pdmg', 'mdmg', 'acdmg', 'sa', 'crit', 'hp', 'ac', 'all']
+        .reduce((sum, key) => sum + (stat.includes(`${key}=`) ? 10 : 0), 0);
+    return Number(data.level || 0) * 100 + Number(data.cl || 0) + bonus;
+}
+
+function equipEqBuyerPurchasedItems(names = []) {
+    if (!names.length || typeof Engine?.heroEquipment?.getHItems !== 'function') return;
+    const wanted = new Set(names.map(n => String(n || '').toLowerCase()));
+    const items = Object.values(Engine.heroEquipment.getHItems() || {});
+    items.forEach(item => {
+        const name = String(item?._cachedStats?.name || item?.name || item?.d?.name || '').toLowerCase();
+        const inBag = Number(item?.st ?? item?.d?.st ?? 0) === 0 || item?.loc === 'g';
+        if (!inBag || !wanted.has(name)) return;
+        try {
+            if (typeof Engine.heroEquipment.sendUseRequest === 'function') Engine.heroEquipment.sendUseRequest(item);
+            else if (typeof window._g === 'function' && item.id) window._g(`moveitem&id=${item.id}&st=1`);
+        } catch (e) {}
+    });
+}
+
+function tryBuyEqBuyerItems(task) {
+    const settings = ensureEqBuyerSettings();
+    if (!(Engine?.shop?.items && Engine?.shop?.basket)) {
+        clickEqBuyerShopDialogOption();
+        return false;
+    }
+    const items = Object.values(Engine.shop.items || {}).map(getShopItemData).filter(d => isEqBuyerItemForHero(d, settings));
+    if (!items.length) {
+        const status = document.getElementById('eqBuyerStatus');
+        if (status) status.textContent = `Sklep NPC ${task.npcId}: brak pasujacego EQ dla profesji/poziomu.`;
+        return false;
+    }
+    const bestByClass = new Map();
+    for (const item of items) {
+        const prev = bestByClass.get(item.cl);
+        if (!prev || scoreEqBuyerItem(item) > scoreEqBuyerItem(prev)) bestByClass.set(item.cl, item);
+    }
+    const toBuy = Array.from(bestByClass.values()).sort((a, b) => scoreEqBuyerItem(b) - scoreEqBuyerItem(a)).slice(0, settings.weaponsOnly ? 2 : 7);
+    toBuy.forEach(item => {
+        try { Engine.shop.basket.buyItem(item.raw); } catch (e) {}
+    });
+    setTimeout(() => {
+        try { Engine.shop.basket.finalize?.(); } catch (e) {}
+        const names = toBuy.map(i => i.name).filter(Boolean);
+        setTimeout(() => equipEqBuyerPurchasedItems(names), 1200);
+        const key = getEqBuyerTaskKey(task);
+        settings.done[key] = Date.now();
+        settings.activeTaskKey = '';
+        if (typeof saveSettings === 'function') saveSettings();
+        renderEqBuyerPanel();
+        if (window.logExp) window.logExp(`[EQ] Kupiono/zalozono: ${names.join(', ') || 'EQ'} (lvl ${task.level})`, '#ce93d8');
+        try { Engine.shop.close?.(); } catch (e) {}
+    }, 650);
+    return true;
+}
+
+function runEqBuyerTask(task) {
+    if (!task || !Engine?.hero?.d) return false;
+    const settings = ensureEqBuyerSettings();
+    const key = getEqBuyerTaskKey(task);
+    settings.activeTaskKey = key;
+    if (!isOnEqBuyerTaskMap(task)) {
+        const targetMap = getEqBuyerMapName(task);
+        const status = document.getElementById('eqBuyerStatus');
+        if (status) status.textContent = `Ide po EQ lvl ${task.level}: mapa ${targetMap || task.mapId}.`;
+        if (targetMap && typeof window.rushToMap === 'function') window.rushToMap(targetMap);
+        else if (targetMap) {
+            window.rushTarget = targetMap;
+            window.isRushing = true;
+            if (typeof window.executeRushStep === 'function') window.executeRushStep();
+        }
+        return true;
+    }
+    const npc = findEqBuyerNpc(task);
+    if (!npc) {
+        const status = document.getElementById('eqBuyerStatus');
+        if (status) status.textContent = `Mapa OK, ale nie widze NPC ${task.npcId}.`;
+        return false;
+    }
+    const dist = Math.max(Math.abs(Number(Engine.hero.d.x) - npc.x), Math.abs(Number(Engine.hero.d.y) - npc.y));
+    if (dist > 2) {
+        Engine.hero.autoGoTo?.({ x: npc.x, y: npc.y });
+        const status = document.getElementById('eqBuyerStatus');
+        if (status) status.textContent = `Podchodze do NPC ${npc.nick || npc.id} (${dist} kratek).`;
+        return true;
+    }
+    if (!(Engine?.shop?.items && Engine?.shop?.basket)) {
+        const dialogNpc = { ...(npc.raw?.d || npc.raw || {}), id: npc.id, x: npc.x, y: npc.y, nick: npc.nick };
+        if (typeof startNpcDialogRobust === 'function') startNpcDialogRobust(dialogNpc, 'eq_buyer');
+        else if (typeof window._g === 'function') window._g(`talk&id=${npc.id}`);
+        setTimeout(clickEqBuyerShopDialogOption, 450);
+        return true;
+    }
+    return tryBuyEqBuyerItems(task);
+}
+
+function getDueEqBuyerTask() {
+    const settings = ensureEqBuyerSettings();
+    if (!settings.enabled || !Engine?.hero?.d) return null;
+    const heroLvl = Number(Engine.hero.d.lvl || Engine.hero.d.level || 1);
+    return settings.tasks
+        .filter(task => task && task.enabled !== false && Number(task.level) <= heroLvl)
+        .filter(task => !settings.done[getEqBuyerTaskKey(task)] && !settings.skipped[getEqBuyerTaskKey(task)])
+        .sort((a, b) => Number(b.level) - Number(a.level))[0] || null;
+}
+
+function renderEqBuyerPanel() {
+    const settings = ensureEqBuyerSettings();
+    const list = document.getElementById('eqBuyerTasksList');
+    const status = document.getElementById('eqBuyerStatus');
+    if (status) {
+        const due = getDueEqBuyerTask();
+        status.textContent = due ? `Najblizsze zadanie: lvl ${due.level}, NPC ${due.npcId}, mapa ${due.mapId}.` : 'Brak aktywnego zadania EQ.';
+    }
+    if (!list) return;
+    if (!settings.tasks.length) {
+        list.innerHTML = '<div style="padding:6px; color:#777; text-align:center;">Brak listy. Wklej: lvl npcId mapId.</div>';
+        return;
+    }
+    list.innerHTML = settings.tasks.map((task, idx) => {
+        const key = getEqBuyerTaskKey(task);
+        const done = !!settings.done[key];
+        const skipped = !!settings.skipped[key];
+        return `
+            <div class="eq-buyer-task" data-index="${idx}" style="display:grid; grid-template-columns:34px 1fr 1fr 52px 42px 42px; gap:4px; align-items:center; font-size:10px; color:#e1bee7; padding:2px 0; border-bottom:1px solid #22102c;">
+                <span>${task.level}</span>
+                <span>${task.npcId}</span>
+                <span>${task.mapId}</span>
+                <label><input type="checkbox" class="eqbuyer-enabled" ${task.enabled !== false ? 'checked' : ''}> ON</label>
+                <label title="oznacz jako kupione"><input type="checkbox" class="eqbuyer-done" ${done ? 'checked' : ''}> ok</label>
+                <label title="pomin ten poziom"><input type="checkbox" class="eqbuyer-skip" ${skipped ? 'checked' : ''}> skip</label>
+            </div>
+        `;
+    }).join('');
+}
+window.renderEqBuyerPanel = renderEqBuyerPanel;
+
+function initEqBuyerUI() {
+    const settings = ensureEqBuyerSettings();
+    bindChange('eqBuyerEnabled', e => { settings.enabled = e.target.checked; saveSettings(); renderEqBuyerPanel(); });
+    bindChange('eqBuyerWeaponsOnly', e => { settings.weaponsOnly = e.target.checked; saveSettings(); renderEqBuyerPanel(); });
+    bindClick('btnEqBuyerImport', () => {
+        const raw = document.getElementById('eqBuyerImportRaw')?.value || '';
+        const parsed = parseEqBuyerTasks(raw);
+        if (!parsed.length) return heroAlert('Nie rozpoznalem listy EQ. Uzyj formatu: lvl npcId mapId.');
+        settings.tasks = parsed;
+        settings.done = settings.done || {};
+        settings.skipped = settings.skipped || {};
+        saveSettings();
+        renderEqBuyerPanel();
+    });
+    bindClick('btnEqBuyerClearDone', () => {
+        settings.done = {};
+        settings.skipped = {};
+        settings.activeTaskKey = '';
+        saveSettings();
+        renderEqBuyerPanel();
+    });
+    const list = document.getElementById('eqBuyerTasksList');
+    if (list && !list.__eqBuyerBound) {
+        list.__eqBuyerBound = true;
+        list.addEventListener('change', e => {
+            const row = e.target?.closest?.('.eq-buyer-task');
+            if (!row) return;
+            const task = settings.tasks[Number(row.dataset.index)];
+            if (!task) return;
+            const key = getEqBuyerTaskKey(task);
+            if (e.target.classList.contains('eqbuyer-enabled')) task.enabled = e.target.checked;
+            if (e.target.classList.contains('eqbuyer-done')) {
+                if (e.target.checked) settings.done[key] = Date.now();
+                else delete settings.done[key];
+            }
+            if (e.target.classList.contains('eqbuyer-skip')) {
+                if (e.target.checked) settings.skipped[key] = Date.now();
+                else delete settings.skipped[key];
+            }
+            saveSettings();
+            renderEqBuyerPanel();
+        });
+    }
+    renderEqBuyerPanel();
+    if (!window.__eqBuyerDaemon) {
+        window.__eqBuyerDaemon = setInterval(() => {
+            const s = ensureEqBuyerSettings();
+            if (!s.enabled || Date.now() - Number(s.lastRunAt || 0) < 2200) return;
+            if (window.autoSellState?.active || window.autoPotState?.active) return;
+            const task = getDueEqBuyerTask();
+            if (!task) return;
+            s.lastRunAt = Date.now();
+            runEqBuyerTask(task);
+        }, 1200);
+    }
+}
+
+initEqBuyerUI();
+
+
 
         const selHero = document.getElementById('selHero');
 
@@ -15795,7 +16382,11 @@ selHero.addEventListener('change', (e) => {
 
             if (hero && heroData[hero]) {
 
-                normalizeHeroMapOrder(hero);
+                if (botSettings?.heroAutoRoute?.enabled !== false && typeof window.autoOptimizeHeroRoute === 'function') {
+                    window.autoOptimizeHeroRoute(hero, { reason: 'hero_select' });
+                } else {
+                    normalizeHeroMapOrder(hero);
+                }
 
                 currentRouteIndex = -1;
 
