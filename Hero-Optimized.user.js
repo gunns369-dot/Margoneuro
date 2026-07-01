@@ -2594,6 +2594,11 @@ setTimeout(function initDatabasesWhenGameIsStable(attempt = 0) {
     }
 
     function e2LeaveToLobby(reason = 'timer_wait') {
+        hideE2LobbyOverlay();
+        writeE2AutomationState({ inLobby: false, lobbyReason: 'disabled', manualEntryUntil: 0 });
+        logE2Automation(`Poczekalnia usunieta - pomijam akcje lobby (${reason}).`, '#ffb74d');
+        if (typeof window.renderE2AutomationStatus === 'function') window.renderE2AutomationStatus();
+        return false;
         const settings = botSettings?.e2 || {};
         const currentNick = getCurrentHeroNickForE2();
         const patch = { inLobby: true, lobbyReason: reason, manualEntryUntil: 0 };
@@ -3155,6 +3160,35 @@ let opacityValue = 0.95;
 
 
 
+    const EQUIPMENT_BUYER_DEFAULT_ROWS = [
+        [20, 9502, 2], [20, 9545, 2], [25, 9545, 2], [27, 9502, 2], [27, 9545, 2],
+        [28, 9502, 2], [30, 9545, 2], [34, 10997, 33], [34, 255397, 33], [35, 255397, 33],
+        [36, 10997, 33], [40, 255397, 33], [41, 10997, 33], [41, 255397, 33], [44, 10997, 33],
+        [45, 255397, 33], [48, 10997, 33], [48, 255397, 33], [50, 5553, 1], [52, 66, 1],
+        [55, 66, 1], [55, 5553, 1], [60, 5553, 1], [62, 66, 1], [65, 66, 1],
+        [65, 5553, 1], [70, 5553, 1], [72, 66, 1], [75, 66, 1], [75, 5553, 1],
+        [80, 13617, 257], [82, 14144, 257], [85, 14144, 257], [85, 13617, 257], [90, 13617, 257],
+        [92, 14144, 257], [95, 14144, 257], [95, 13617, 257], [100, 13617, 257], [107, 24703, 589],
+        [110, 24703, 589], [110, 298088, 589], [122, 24703, 589], [125, 24703, 589], [125, 298088, 589],
+        [137, 24703, 589], [140, 24703, 589], [140, 298088, 589], [152, 348438, 9], [155, 348438, 9],
+        [155, 348437, 9], [167, 348438, 9], [170, 348438, 9], [170, 348437, 9], [170, 54054, 114],
+        [170, 57804, 114], [182, 57804, 114], [185, 54054, 114], [185, 57804, 114], [197, 57804, 114],
+        [200, 54054, 114], [200, 57804, 114], [217, 57804, 114], [220, 54054, 114], [220, 57804, 114],
+        [237, 18853, 574], [240, 387102, 574], [240, 18853, 574], [257, 18853, 574], [260, 387102, 574],
+        [260, 18853, 574], [277, 18853, 574], [280, 387102, 574], [280, 18853, 574], [297, 18853, 574],
+        [300, 387102, 574], [300, 18853, 574]
+    ];
+
+    function cloneEquipmentBuyerDefaultTasks() {
+        return EQUIPMENT_BUYER_DEFAULT_ROWS.map(([level, npcId, mapId]) => ({
+            level,
+            npcId: String(npcId),
+            mapId: String(mapId),
+            enabled: true,
+            source: 'screen_default'
+        }));
+    }
+
     let botSettings = {
 
         radarEnabled: true, autoAttack: false,
@@ -3192,8 +3226,8 @@ let opacityValue = 0.95;
             enabled: false,
             selectedName: '',
             respawnMinutes: 180,
-            logoutAfterKill: true,
-            returnToExpAfterKill: true,
+            logoutAfterKill: false,
+            returnToExpAfterKill: false,
             e2CharacterName: '',
             expCharacterName: '',
             resumeExpAfterReturn: true,
@@ -3231,11 +3265,12 @@ let opacityValue = 0.95;
         equipmentBuyer: {
             enabled: false,
             weaponsOnly: false,
-            tasks: [],
+            tasks: cloneEquipmentBuyerDefaultTasks(),
             done: {},
             skipped: {},
             activeTaskKey: '',
-            lastRunAt: 0
+            lastRunAt: 0,
+            defaultSeeded: true
         },
 
         expProfiles: loadedProfiles,
@@ -6396,9 +6431,14 @@ function loadData() {
             skipped: {},
             activeTaskKey: '',
             lastRunAt: 0,
+            defaultSeeded: false,
             ...(botSettings.equipmentBuyer || {})
         };
         if (!Array.isArray(botSettings.equipmentBuyer.tasks)) botSettings.equipmentBuyer.tasks = [];
+        if (!botSettings.equipmentBuyer.defaultSeeded && botSettings.equipmentBuyer.tasks.length === 0) {
+            botSettings.equipmentBuyer.tasks = cloneEquipmentBuyerDefaultTasks();
+            botSettings.equipmentBuyer.defaultSeeded = true;
+        }
         botSettings.equipmentBuyer.done = botSettings.equipmentBuyer.done || {};
         botSettings.equipmentBuyer.skipped = botSettings.equipmentBuyer.skipped || {};
         if (Array.isArray(botSettings?.expProfiles)) deduplicateExpProfiles(botSettings.expProfiles, 'load_settings');
@@ -14209,8 +14249,6 @@ function initGUI() {
                         <label style="display:block; margin-bottom:5px;">Zapraszaj nicki:<input type="text" id="e2InviteNicks" value="${botSettings.e2?.inviteNicks || ''}" placeholder="nicki oddzielone przecinkiem" style="width:100%; box-sizing:border-box; background:#111; color:#fff; border:1px solid #555; padding:3px;"></label>
                         <div style="display:flex; gap:4px; margin-bottom:5px;">
                             <button id="btnE2StartTimer" class="btn-sepia" style="flex:1; padding:4px; background:#006064;">Start E2</button>
-                            <button id="btnE2Lobby" class="btn-sepia" style="flex:1; padding:4px; background:#263238;">Poczekalnia</button>
-                            <button id="btnE2EnterGame" class="btn-sepia" style="flex:1; padding:4px; background:#4a148c;">Wejdz do gry</button>
                             <button id="btnE2MarkKill" class="btn-sepia" style="flex:1; padding:4px; background:#1b5e20;">Zbity teraz</button>
                         </div>
                         <div id="e2AutomationConsole" style="height:42px; overflow-y:auto; border-top:1px solid #263238; padding-top:3px; color:#90caf9; font-family:monospace;"></div>
@@ -14436,6 +14474,17 @@ function initGUI() {
             if (routeBlock) routeBlock.style.display = 'none';
             if (coordsBlock) coordsBlock.style.display = 'none';
         }
+        ['btnE2Lobby', 'btnE2EnterGame', 'btnE2RememberE2Char', 'btnE2RememberExpChar'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.style.display = 'none';
+        });
+        const e2CharacterRow = document.getElementById('e2CharacterName')?.closest?.('div');
+        const e2ReturnRow = document.getElementById('e2ReturnToExpAfterKill')?.closest?.('div');
+        const e2LogoutLabel = document.getElementById('e2LogoutAfterKill')?.closest?.('label');
+        if (e2CharacterRow) e2CharacterRow.style.display = 'none';
+        if (e2ReturnRow) e2ReturnRow.style.display = 'none';
+        if (e2LogoutLabel) e2LogoutLabel.style.display = 'none';
+        hideE2LobbyOverlay();
         if (hideConsoles) {
             const heroConsoleEl = document.getElementById('heroConsole');
             const expConsoleEl = document.getElementById('expConsole');
@@ -15825,8 +15874,8 @@ function ensureE2Settings() {
         enabled: false,
         selectedName: '',
         respawnMinutes: 180,
-        logoutAfterKill: true,
-        returnToExpAfterKill: true,
+        logoutAfterKill: false,
+        returnToExpAfterKill: false,
         e2CharacterName: '',
         expCharacterName: '',
         resumeExpAfterReturn: true,
@@ -15842,6 +15891,8 @@ function ensureE2Settings() {
         inviteNicks: ''
     };
     botSettings.e2 = { ...defaults, ...(botSettings.e2 || {}) };
+    botSettings.e2.logoutAfterKill = false;
+    botSettings.e2.returnToExpAfterKill = false;
     return botSettings.e2;
 }
 
@@ -15854,11 +15905,12 @@ function renderE2AutomationStatus() {
     const targetInfo = document.getElementById('e2CurrentTargetInfo');
     if (targetInfo) {
         const targetName = state.selectedName || state.lastKilledName || botSettings?.e2?.selectedName || '-';
-        const e2Char = botSettings?.e2?.e2CharacterName || state.e2CharacterName || '-';
-        const expChar = botSettings?.e2?.expCharacterName || state.expCharacterName || '-';
-        targetInfo.textContent = `Bita E2: ${targetName} | E2: ${e2Char} | EXP: ${expChar}`;
+        targetInfo.textContent = `Bita E2: ${targetName}`;
     }
-    if (state.inLobby && typeof showE2LobbyOverlay === 'function') showE2LobbyOverlay(state.lobbyReason || 'timer');
+    if (state.inLobby) {
+        hideE2LobbyOverlay();
+        writeE2AutomationState({ inLobby: false, lobbyReason: 'disabled', manualEntryUntil: 0 });
+    }
     if (!botSettings?.e2?.enabled) {
         status.textContent = 'System OFF';
         status.style.color = '#999';
