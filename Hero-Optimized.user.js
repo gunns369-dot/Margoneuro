@@ -3272,6 +3272,7 @@ let opacityValue = 0.95;
             lastRunAt: 0,
             defaultSeeded: true
         },
+        auctionSeller: getAuctionSellerDefaultSettings(),
 
         expProfiles: loadedProfiles,
 
@@ -6441,6 +6442,11 @@ function loadData() {
         }
         botSettings.equipmentBuyer.done = botSettings.equipmentBuyer.done || {};
         botSettings.equipmentBuyer.skipped = botSettings.equipmentBuyer.skipped || {};
+        botSettings.auctionSeller = {
+            ...getAuctionSellerDefaultSettings(),
+            ...(botSettings.auctionSeller || {})
+        };
+        if (!Array.isArray(botSettings.auctionSeller.individualPrices)) botSettings.auctionSeller.individualPrices = [];
         if (Array.isArray(botSettings?.expProfiles)) deduplicateExpProfiles(botSettings.expProfiles, 'load_settings');
         if (Array.isArray(botSettings?.exp?.mapOrder)) setExpMapOrder(botSettings.exp.mapOrder, 'load_settings', { deferRouteState: true, deferPersist: true });
         if (typeof restoreCurrentHeroExpRoute === 'function') restoreCurrentHeroExpRoute('load_settings');
@@ -14317,7 +14323,46 @@ function initGUI() {
                             </div>
                         </div>
                     </div>
-                 <div class="accordion-header" id="accEqBuyer" data-exp-section="eqbuyer" onclick="toggleSettingsAcc('accEqBuyer')" style="background: rgba(123, 31, 162, 0.2); border-color: #ab47bc; color: #ce93d8; margin-top: 5px; margin-bottom: 0;">Kupowanie ekwipunku</div>
+                  <div class="accordion-header" id="accAuctionSeller" data-exp-section="auction" onclick="toggleSettingsAcc('accAuctionSeller')" style="background: rgba(0, 188, 212, 0.18); border-color: #00bcd4; color: #4dd0e1; margin-top: 5px; margin-bottom: 0;">Sprzedawanie przedmiotow</div>
+                    <div id="accAuctionSellerContent" style="display:none; padding: 8px; background: rgba(0,0,0,0.3); border: 1px solid #00bcd4; border-top: none; margin-bottom: 5px;">
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:5px; margin-bottom:6px;">
+                            <label style="color:#4dd0e1; font-weight:bold;"><input type="checkbox" id="auctionSellerEnabled" ${botSettings.auctionSeller?.enabled ? 'checked' : ''}> Wlacznik</label>
+                            <label style="color:#b2ebf2;"><input type="checkbox" id="auctionSellerRenew" ${botSettings.auctionSeller?.renewAuctions ? 'checked' : ''}> Odnawiaj aukcje</label>
+                            <label style="color:#b2ebf2;"><input type="checkbox" id="auctionSellerUnique" ${botSettings.auctionSeller?.listUnique ? 'checked' : ''}> Unikatowe</label>
+                            <label style="color:#b2ebf2;"><input type="checkbox" id="auctionSellerHeroic" ${botSettings.auctionSeller?.listHeroic ? 'checked' : ''}> Heroiczne</label>
+                            <label style="color:#b2ebf2;"><input type="checkbox" id="auctionSellerLegendary" ${botSettings.auctionSeller?.listLegendary ? 'checked' : ''}> Legendarne</label>
+                            <label style="color:#b2ebf2;"><input type="checkbox" id="auctionSellerSkipTp" ${botSettings.auctionSeller?.skipTeleportItems !== false ? 'checked' : ''}> Nie wystawiaj tpkow</label>
+                            <label style="color:#b2ebf2;"><input type="checkbox" id="auctionSellerCollectMail" ${botSettings.auctionSeller?.collectMail ? 'checked' : ''}> Odbieraj poczte</label>
+                            <label style="color:#b2ebf2;"><input type="checkbox" id="auctionSellerUseSummons" ${botSettings.auctionSeller?.useSummons ? 'checked' : ''}> Uzywaj wywolan</label>
+                        </div>
+                        <label style="color:#a7ffeb; font-size:10px; display:block; margin-bottom:2px;">Nigdy nie wystawiaj:</label>
+                        <textarea id="auctionSellerNeverList" rows="2" style="width:100%; box-sizing:border-box; background:#080808; color:#80deea; border:1px solid #00838f; padding:4px; font-size:10px; resize:vertical;">${escapeHtml(botSettings.auctionSeller?.neverList || '')}</textarea>
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:5px; margin-top:6px;">
+                            <label style="color:#b2ebf2; font-size:10px;">Czas aukcji (h)<input type="number" id="auctionSellerDuration" value="${botSettings.auctionSeller?.durationHours ?? 168}" min="1" style="width:100%; background:#050505; color:#e0f7fa; border:1px solid #006064; text-align:center;"></label>
+                            <label style="color:#b2ebf2; font-size:10px;">Odnawiaj przed (h)<input type="number" id="auctionSellerRenewBefore" value="${botSettings.auctionSeller?.renewBeforeHours ?? 24}" min="0" style="width:100%; background:#050505; color:#e0f7fa; border:1px solid #006064; text-align:center;"></label>
+                            <label style="color:#b2ebf2; font-size:10px;">Min czas (ms)<input type="number" id="auctionSellerMinDelay" value="${botSettings.auctionSeller?.minDelayMs ?? 500}" min="100" style="width:100%; background:#050505; color:#e0f7fa; border:1px solid #006064; text-align:center;"></label>
+                            <label style="color:#b2ebf2; font-size:10px;">Max czas (ms)<input type="number" id="auctionSellerMaxDelay" value="${botSettings.auctionSeller?.maxDelayMs ?? 1500}" min="100" style="width:100%; background:#050505; color:#e0f7fa; border:1px solid #006064; text-align:center;"></label>
+                        </div>
+                        <div style="color:#ce93d8; font-weight:bold; text-align:center; margin:8px 0 4px;">Ceny bazowe</div>
+                        <div style="display:grid; grid-template-columns:62px 1fr 1fr; gap:4px; align-items:center; font-size:10px; color:#b2ebf2;">
+                            <span></span><span>Licytacja</span><span>Kup teraz</span>
+                            <span>Unikat</span><input type="number" id="auctionSellerUniqueBid" value="${botSettings.auctionSeller?.uniqueBidPrice ?? 0}" min="0" style="background:#050505; color:#e0f7fa; border:1px solid #006064;"><input type="number" id="auctionSellerUniqueBuy" value="${botSettings.auctionSeller?.uniqueBuyNowPrice ?? 3000000}" min="0" style="background:#050505; color:#e0f7fa; border:1px solid #006064;">
+                            <span>Heroik</span><input type="number" id="auctionSellerHeroicBid" value="${botSettings.auctionSeller?.heroicBidPrice ?? 0}" min="0" style="background:#050505; color:#e0f7fa; border:1px solid #006064;"><input type="number" id="auctionSellerHeroicBuy" value="${botSettings.auctionSeller?.heroicBuyNowPrice ?? 3000000}" min="0" style="background:#050505; color:#e0f7fa; border:1px solid #006064;">
+                        </div>
+                        <div style="color:#ce93d8; font-weight:bold; text-align:center; margin:8px 0 4px;">Indywidualne ceny</div>
+                        <div style="display:grid; grid-template-columns:1.4fr 1fr 1fr 28px; gap:3px; margin-bottom:4px;">
+                            <input id="auctionItemName" placeholder="Nazwa przedmiotu" style="background:#050505; color:#e0f7fa; border:1px solid #006064; font-size:10px;">
+                            <input type="number" id="auctionItemBid" placeholder="Licytacja" min="0" style="background:#050505; color:#e0f7fa; border:1px solid #006064; font-size:10px;">
+                            <input type="number" id="auctionItemBuy" placeholder="Kup teraz" min="0" style="background:#050505; color:#e0f7fa; border:1px solid #006064; font-size:10px;">
+                            <button id="btnAuctionItemAdd" class="btn-sepia" style="padding:1px; background:#00838f;">+</button>
+                        </div>
+                        <div id="auctionIndividualList" style="max-height:70px; overflow:auto; border:1px solid #004d40; background:#050505; color:#80deea; font-size:10px; padding:3px; margin-bottom:6px;"></div>
+                        <div style="display:flex; gap:5px; align-items:center;">
+                            <button id="btnAuctionSellNow" class="btn-sepia" style="flex:1; padding:4px; background:#00838f; border-color:#00bcd4; font-weight:bold;">Sprzedaj teraz</button>
+                            <div id="auctionSellerStatus" style="flex:1.4; color:#80deea; font-size:10px;">Aukcje: czekam.</div>
+                        </div>
+                    </div>
+                  <div class="accordion-header" id="accEqBuyer" data-exp-section="eqbuyer" onclick="toggleSettingsAcc('accEqBuyer')" style="background: rgba(123, 31, 162, 0.2); border-color: #ab47bc; color: #ce93d8; margin-top: 5px; margin-bottom: 0;">Kupowanie ekwipunku</div>
                     <div id="accEqBuyerContent" style="display:none; padding: 8px; background: rgba(0,0,0,0.3); border: 1px solid #ab47bc; border-top: none; margin-bottom: 5px;">
                         <div style="display:grid; grid-template-columns:1fr 1fr; gap:5px; margin-bottom:6px;">
                             <label style="color:#ce93d8; font-weight:bold;"><input type="checkbox" id="eqBuyerEnabled" ${botSettings.equipmentBuyer?.enabled ? 'checked' : ''}> Wlacznik</label>
@@ -16408,6 +16453,7 @@ function initEqBuyerUI() {
     }
 }
 
+initAuctionSellerUI();
 initEqBuyerUI();
 
 
@@ -30912,6 +30958,10 @@ window.toggleTeleportLock = function(city, isChecked) {
             if (window.logExp) window.logExp("🏃 Ręcznie wymuszono opróżnienie plecaka! Zatrzymuję akcje i wyruszam...", "#ff5252");
 
             sessionStorage.removeItem('hero_autosell_ignore'); // Ściągnięcie blokady przy ręcznym wywołaniu
+            if (typeof window.startAutoSellSession === 'function') {
+                const started = window.startAutoSellSession('manual_force_sell', { force: true });
+                if (started?.ok) return;
+            }
             window.autoSellState.ignoreUntil = 0;
             window.autoSellState.active = true;
             window.autoSellState.step = 1;
@@ -32939,6 +32989,692 @@ if (isDead) {
         }, 500);
     }
 
+function getAuctionSellerDefaultSettings() {
+    return {
+        enabled: false,
+        listUnique: true,
+        listHeroic: true,
+        listLegendary: false,
+        listCommon: false,
+        renewAuctions: false,
+        collectMail: false,
+        skipTeleportItems: true,
+        useSummons: false,
+        durationHours: 168,
+        minDelayMs: 500,
+        maxDelayMs: 1500,
+        renewBeforeHours: 24,
+        uniqueBidPrice: 0,
+        uniqueBuyNowPrice: 3000000,
+        heroicBidPrice: 0,
+        heroicBuyNowPrice: 3000000,
+        legendaryBidPrice: 0,
+        legendaryBuyNowPrice: 0,
+        neverList: 'mocne feromony nokturni, skrzydla sepa',
+        individualPrices: []
+    };
+}
+
+function ensureAuctionSellerSettings() {
+    botSettings.auctionSeller = {
+        ...getAuctionSellerDefaultSettings(),
+        ...(botSettings.auctionSeller || {})
+    };
+    if (!Array.isArray(botSettings.auctionSeller.individualPrices)) botSettings.auctionSeller.individualPrices = [];
+    return botSettings.auctionSeller;
+}
+window.ensureAuctionSellerSettings = ensureAuctionSellerSettings;
+
+function auctionNorm(value) {
+    try {
+        if (typeof normalizeDialogText === 'function') return normalizeDialogText(value || '');
+    } catch (e) {}
+    return String(value || '')
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function auctionLog(message, color = '#4dd0e1', throttleMs = 4000, key = message) {
+    if (typeof logEvent === 'function') return logEvent('AUKCJE', message, throttleMs, color, { key });
+    if (window.logExp) window.logExp(`[AUKCJE] ${message}`, color);
+    if (window.logHero) window.logHero(`[AUKCJE] ${message}`, color);
+    return true;
+}
+
+function setAuctionSellerStatus(message, color = '#80deea') {
+    const el = document.getElementById('auctionSellerStatus');
+    if (el) {
+        el.textContent = message;
+        el.style.color = color;
+    }
+    window.__lastAuctionSellerStatus = { message, color, at: Date.now() };
+}
+window.setAuctionSellerStatus = setAuctionSellerStatus;
+
+function getAuctionHeroItems() {
+    try {
+        if (Engine?.items && typeof Engine.items.testMyItems === 'function') {
+            return Object.values(Engine.items.testMyItems()).filter(Boolean);
+        }
+        if (Engine?.heroEquipment && typeof Engine.heroEquipment.getHItems === 'function') {
+            return Object.values(Engine.heroEquipment.getHItems()).filter(Boolean);
+        }
+        if (Engine?.items?.d) return Object.values(Engine.items.d).filter(Boolean);
+    } catch (e) {}
+    return [];
+}
+
+function getAuctionItemData(item) {
+    const d = item?.d || item || {};
+    const cached = item?._cachedStats || d?._cachedStats || {};
+    const stat = String(d.stat || cached.stat || item?.stat || '');
+    const name = String(d.name || cached.name || item?.name || item?.nick || '');
+    const loc = String(d.loc ?? d.location ?? item?.loc ?? item?.location ?? '').toLowerCase();
+    const st = Number(d.st ?? item?.st ?? 0);
+    const text = auctionNorm([
+        name,
+        stat,
+        d.rarity,
+        d.rank,
+        d.tip,
+        d.pr,
+        d.quality,
+        cached.rarity,
+        cached.rank,
+        cached.tip
+    ].filter(Boolean).join(' '));
+    return {
+        raw: item,
+        data: d,
+        id: d.id ?? item?.id ?? cached.id ?? '',
+        name,
+        stat,
+        loc,
+        st,
+        cl: Number(d.cl ?? item?.cl ?? cached.cl ?? 0),
+        text
+    };
+}
+
+function detectAuctionItemRarity(itemData) {
+    const t = itemData?.text || '';
+    if (/legend|legendarn/.test(t)) return 'legendary';
+    if (/heroic|heroik|heroiczn|heroicz/.test(t)) return 'heroic';
+    if (/unikat|unique/.test(t)) return 'unique';
+    const raw = itemData?.data || {};
+    const numeric = Number(raw.rarity ?? raw.rank ?? raw.pr ?? raw.quality);
+    if (numeric >= 5) return 'legendary';
+    if (numeric === 4) return 'heroic';
+    if (numeric === 3) return 'unique';
+    return '';
+}
+
+function isAuctionItemBoundOrBlocked(itemData, settings = ensureAuctionSellerSettings()) {
+    const text = itemData?.text || '';
+    const never = String(settings.neverList || '')
+        .split(/[\n,;]/)
+        .map(auctionNorm)
+        .filter(Boolean);
+    if (never.some(pattern => text.includes(pattern))) return true;
+    if (/quest|questitem|zadani|zwiaz|zwi[a-z]*zan|bind|bound|soulbound|owner|przypisan|nie mozna sprzedac|niesprzedawaln|unid/.test(text)) return true;
+    if (settings.skipTeleportItems !== false && /teleport|zwoj|zw[oó]j|przenosi|przenies/.test(text)) return true;
+    return false;
+}
+
+function getAuctionPriceForItem(itemData, rarity, settings = ensureAuctionSellerSettings()) {
+    const nameNorm = auctionNorm(itemData?.name || '');
+    const individual = (settings.individualPrices || []).find(row => {
+        const rowName = auctionNorm(row?.name || '');
+        return rowName && (nameNorm === rowName || nameNorm.includes(rowName) || rowName.includes(nameNorm));
+    });
+    if (individual) {
+        return {
+            bid: Math.max(0, Number(individual.bid || individual.licytacja || 0)),
+            buyNow: Math.max(0, Number(individual.buyNow || individual.buy || individual.kupTeraz || 0)),
+            source: 'individual'
+        };
+    }
+    if (rarity === 'legendary') {
+        return {
+            bid: Math.max(0, Number(settings.legendaryBidPrice || settings.heroicBidPrice || settings.uniqueBidPrice || 0)),
+            buyNow: Math.max(0, Number(settings.legendaryBuyNowPrice || settings.heroicBuyNowPrice || settings.uniqueBuyNowPrice || 0)),
+            source: 'legendary'
+        };
+    }
+    if (rarity === 'heroic') {
+        return {
+            bid: Math.max(0, Number(settings.heroicBidPrice || settings.uniqueBidPrice || 0)),
+            buyNow: Math.max(0, Number(settings.heroicBuyNowPrice || settings.uniqueBuyNowPrice || 0)),
+            source: 'heroic'
+        };
+    }
+    return {
+        bid: Math.max(0, Number(settings.uniqueBidPrice || 0)),
+        buyNow: Math.max(0, Number(settings.uniqueBuyNowPrice || 0)),
+        source: 'unique'
+    };
+}
+
+function isAuctionSellerCandidateItem(item, options = {}) {
+    const settings = ensureAuctionSellerSettings();
+    if (!options.includeDisabled && !options.force && !settings.enabled) return false;
+    const data = getAuctionItemData(item);
+    if (!data || !data.id || data.cl === 24 || data.st > 0) return false;
+    if (/shop|sklep|basket|kosz|sell|sprzed|trade|merchant|auction/.test(data.loc)) return false;
+    const inBag = data.st === 0 || data.loc === 'g' || data.loc === 'bag' || data.loc === '';
+    if (!inBag) return false;
+    if (isAuctionItemBoundOrBlocked(data, settings)) return false;
+    const rarity = detectAuctionItemRarity(data);
+    if (rarity === 'legendary' && !settings.listLegendary) return false;
+    if (rarity === 'heroic' && !settings.listHeroic) return false;
+    if (rarity === 'unique' && !settings.listUnique) return false;
+    if (!rarity && !settings.listCommon) return false;
+    const price = getAuctionPriceForItem(data, rarity || 'common', settings);
+    if (Number(price.bid || 0) <= 0 && Number(price.buyNow || 0) <= 0) return false;
+    return { ...data, rarity: rarity || 'common', price };
+}
+window.isAuctionSellerCandidateItem = isAuctionSellerCandidateItem;
+
+function getAuctionSellerCandidates(options = {}) {
+    const items = getAuctionHeroItems();
+    const candidates = [];
+    const seen = new Set();
+    for (const item of items) {
+        const candidate = isAuctionSellerCandidateItem(item, options);
+        if (!candidate) continue;
+        const key = String(candidate.id || candidate.name);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        candidates.push(candidate);
+    }
+    candidates.sort((a, b) => {
+        const weight = { legendary: 4, heroic: 3, unique: 2, common: 1 };
+        return (weight[b.rarity] || 0) - (weight[a.rarity] || 0) || String(a.name).localeCompare(String(b.name));
+    });
+    return { count: candidates.length, items: candidates, settings: ensureAuctionSellerSettings() };
+}
+window.getAuctionSellerCandidates = getAuctionSellerCandidates;
+
+function renderAuctionSellerPanel() {
+    const settings = ensureAuctionSellerSettings();
+    const list = document.getElementById('auctionIndividualList');
+    const report = getAuctionSellerCandidates({ includeDisabled: true, force: true });
+    setAuctionSellerStatus(`Do aukcji: ${report.count} itemow.`, report.count ? '#4dd0e1' : '#90a4ae');
+    if (list) {
+        if (!settings.individualPrices.length) {
+            list.innerHTML = '<div style="color:#607d8b; text-align:center;">Brak indywidualnych cen.</div>';
+        } else {
+            list.innerHTML = settings.individualPrices.map((row, idx) => `
+                <div class="auction-price-row" data-index="${idx}" style="display:grid; grid-template-columns:1.4fr 1fr 1fr 22px; gap:3px; align-items:center; border-bottom:1px solid #003c40; padding:2px 0;">
+                    <span>${escapeHtml(row.name || '')}</span>
+                    <span>${Number(row.bid || 0)}</span>
+                    <span>${Number(row.buyNow || 0)}</span>
+                    <button class="auction-price-remove btn-sepia" style="padding:0; background:#b71c1c;">x</button>
+                </div>
+            `).join('');
+        }
+    }
+    return report;
+}
+window.renderAuctionSellerPanel = renderAuctionSellerPanel;
+
+function bindAuctionSellerNumber(id, key) {
+    bindInput(id, e => {
+        const settings = ensureAuctionSellerSettings();
+        settings[key] = Math.max(0, Number(e.target.value || 0));
+        saveSettings();
+        renderAuctionSellerPanel();
+    });
+}
+
+function initAuctionSellerUI() {
+    const settings = ensureAuctionSellerSettings();
+    bindChange('auctionSellerEnabled', e => { settings.enabled = e.target.checked; saveSettings(); renderAuctionSellerPanel(); });
+    bindChange('auctionSellerRenew', e => { settings.renewAuctions = e.target.checked; saveSettings(); });
+    bindChange('auctionSellerUnique', e => { settings.listUnique = e.target.checked; saveSettings(); renderAuctionSellerPanel(); });
+    bindChange('auctionSellerHeroic', e => { settings.listHeroic = e.target.checked; saveSettings(); renderAuctionSellerPanel(); });
+    bindChange('auctionSellerLegendary', e => { settings.listLegendary = e.target.checked; saveSettings(); renderAuctionSellerPanel(); });
+    bindChange('auctionSellerSkipTp', e => { settings.skipTeleportItems = e.target.checked; saveSettings(); renderAuctionSellerPanel(); });
+    bindChange('auctionSellerCollectMail', e => { settings.collectMail = e.target.checked; saveSettings(); });
+    bindChange('auctionSellerUseSummons', e => { settings.useSummons = e.target.checked; saveSettings(); });
+    bindInput('auctionSellerNeverList', e => { settings.neverList = e.target.value || ''; saveSettings(); renderAuctionSellerPanel(); });
+    bindAuctionSellerNumber('auctionSellerDuration', 'durationHours');
+    bindAuctionSellerNumber('auctionSellerRenewBefore', 'renewBeforeHours');
+    bindAuctionSellerNumber('auctionSellerMinDelay', 'minDelayMs');
+    bindAuctionSellerNumber('auctionSellerMaxDelay', 'maxDelayMs');
+    bindAuctionSellerNumber('auctionSellerUniqueBid', 'uniqueBidPrice');
+    bindAuctionSellerNumber('auctionSellerUniqueBuy', 'uniqueBuyNowPrice');
+    bindAuctionSellerNumber('auctionSellerHeroicBid', 'heroicBidPrice');
+    bindAuctionSellerNumber('auctionSellerHeroicBuy', 'heroicBuyNowPrice');
+    bindClick('btnAuctionItemAdd', () => {
+        const name = String(document.getElementById('auctionItemName')?.value || '').trim();
+        const bid = Math.max(0, Number(document.getElementById('auctionItemBid')?.value || 0));
+        const buyNow = Math.max(0, Number(document.getElementById('auctionItemBuy')?.value || 0));
+        if (!name) return heroAlert('Podaj nazwe przedmiotu.');
+        settings.individualPrices = settings.individualPrices || [];
+        const existing = settings.individualPrices.find(row => auctionNorm(row.name) === auctionNorm(name));
+        if (existing) {
+            existing.bid = bid;
+            existing.buyNow = buyNow;
+        } else {
+            settings.individualPrices.push({ name, bid, buyNow });
+        }
+        ['auctionItemName', 'auctionItemBid', 'auctionItemBuy'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+        saveSettings();
+        renderAuctionSellerPanel();
+    });
+    const list = document.getElementById('auctionIndividualList');
+    if (list && !list.__auctionBound) {
+        list.__auctionBound = true;
+        list.addEventListener('click', e => {
+            const row = e.target?.closest?.('.auction-price-row');
+            if (!row || !e.target.classList.contains('auction-price-remove')) return;
+            settings.individualPrices.splice(Number(row.dataset.index), 1);
+            saveSettings();
+            renderAuctionSellerPanel();
+        });
+    }
+    bindClick('btnAuctionSellNow', () => {
+        const started = window.startAuctionSeller?.('manual_force', { force: true });
+        if (!started?.ok && window.heroAlert) heroAlert(`Aukcjoner: ${started?.reason || 'brak itemow do wystawienia'}`);
+    });
+    renderAuctionSellerPanel();
+}
+window.initAuctionSellerUI = initAuctionSellerUI;
+
+function isAuctionWindowOpen() {
+    const txt = auctionNorm(document.body?.innerText || document.body?.textContent || '');
+    if (/aukcje graczy|twoje aukcje|wystaw przedmiot|licytowane|obserwowane/.test(txt)) return true;
+    return !!(Engine?.auction || Engine?.auctions || Engine?.auctionHouse || Engine?.ah);
+}
+
+function getVisibleElementsByText(pattern) {
+    const rx = pattern instanceof RegExp ? pattern : new RegExp(pattern, 'i');
+    return [...document.querySelectorAll('button, .button, a, div, span, li, input[type="button"], input[type="submit"]')]
+        .filter(el => {
+            const text = auctionNorm(`${el.textContent || ''} ${el.value || ''} ${el.title || ''}`);
+            if (!text || !rx.test(text)) return false;
+            try {
+                const style = window.getComputedStyle(el);
+                const rect = el.getBoundingClientRect();
+                return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 3 && rect.height > 3;
+            } catch (e) {
+                return true;
+            }
+        });
+}
+
+function clickAuctionDialogOption() {
+    const options = [...document.querySelectorAll('.dialogue-window-answer, .dialog-item, .dialog-choice, .option, .answer, .dialog-answer, #dialog li, .dialog-options li, .dialog-texts li, [data-option]')];
+    let best = null;
+    for (const el of options) {
+        const text = auctionNorm(el.innerText || el.textContent || '');
+        if (!/aukcj/.test(text)) continue;
+        let score = 1;
+        if (/pokaz|poka|aukcje graczy|no aukcje/.test(text)) score += 6;
+        if (/kim jestes|czym|polegaj|milego|dnia/.test(text)) score -= 5;
+        if (!best || score > best.score) best = { el, score, text };
+    }
+    if (!best || best.score <= 0) return false;
+    dispatchHumanMouseClick(best.el);
+    return true;
+}
+
+function findAuctioneerTarget() {
+    const current = typeof Engine !== 'undefined' ? Engine?.map?.d?.name : '';
+    const liveNpc = typeof findNearestNpcByNick === 'function' ? findNearestNpcByNick(['aukcjoner', 'auctioneer'], null, 0) : null;
+    if (liveNpc) return { npc_name: liveNpc.nick || 'Aukcjoner', map_name: current, x: liveNpc.x, y: liveNpc.y, live: liveNpc };
+    const db = [
+        ...(window.DatabaseModule?.kupcy || []),
+        ...(window.DatabaseModule?.npcs || []),
+        ...(window.DatabaseModule?.npc || [])
+    ];
+    let candidates = db.filter(n => /aukcjoner|auctioneer/i.test(String(n.npc_name || n.nick || n.name || '')));
+    if (!candidates.length) candidates = [{ npc_name: 'Aukcjoner', map_name: 'Thuzal' }];
+    let best = candidates.find(n => auctionNorm(n.map_name || n.map || '') === auctionNorm(current)) || null;
+    if (!best && current) {
+        let bestLen = Infinity;
+        for (const n of candidates) {
+            const targetMap = n.map_name || n.map;
+            const path = targetMap && typeof getShortestPath === 'function' ? getShortestPath(current, targetMap, routePathOptions()) : null;
+            const len = Array.isArray(path) ? path.length : Infinity;
+            if (len < bestLen) {
+                bestLen = len;
+                best = n;
+            }
+        }
+    }
+    return best || candidates[0] || null;
+}
+
+function getAuctionRoot() {
+    const roots = [...document.querySelectorAll('.auction-window, .auction, [class*="auction"], .window, .dialog-window, .margo-window')];
+    return roots.find(el => /licytacja|kup teraz|czas trwania|wystaw przedmiot/i.test(el.textContent || '')) || document;
+}
+
+function setAuctionInputValue(input, value) {
+    if (!input) return false;
+    const str = String(Math.max(0, Number(value || 0)));
+    try {
+        const proto = Object.getPrototypeOf(input);
+        const descriptor = Object.getOwnPropertyDescriptor(proto, 'value');
+        if (descriptor?.set) descriptor.set.call(input, str);
+        else input.value = str;
+    } catch (e) {
+        input.value = str;
+    }
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+}
+
+function fillAuctionListingForm(item, price, settings) {
+    const root = getAuctionRoot();
+    const inputs = [...root.querySelectorAll('input')]
+        .filter(input => !/checkbox|radio|button|submit/i.test(input.type || ''))
+        .filter(input => {
+            try {
+                const rect = input.getBoundingClientRect();
+                const style = window.getComputedStyle(input);
+                return rect.width > 10 && rect.height > 8 && style.display !== 'none' && style.visibility !== 'hidden';
+            } catch (e) {
+                return true;
+            }
+        });
+    if (!inputs.length) return false;
+    const findByText = (rx) => inputs.find(input => {
+        let node = input;
+        for (let i = 0; i < 4 && node; i++, node = node.parentElement) {
+            if (rx.test(auctionNorm(node.textContent || ''))) return true;
+        }
+        return false;
+    });
+    const bidInput = findByText(/licytacja|min cena|min/) || inputs[0];
+    const buyInput = findByText(/kup teraz|kwota/) || inputs[1] || bidInput;
+    const durationInput = findByText(/czas trwania|czas/) || inputs[2] || null;
+    const minBid = Math.max(500, Number(price.bid || 0) || 500);
+    const buyNow = Math.max(minBid, Number(price.buyNow || 0) || minBid);
+    setAuctionInputValue(bidInput, minBid);
+    if (buyInput && buyInput !== bidInput) setAuctionInputValue(buyInput, buyNow);
+    if (durationInput && durationInput !== bidInput && durationInput !== buyInput) setAuctionInputValue(durationInput, settings.durationHours || 168);
+    return true;
+}
+
+function clickAuctionItemInDom(item) {
+    const id = String(item?.id || '');
+    const name = auctionNorm(item?.name || '');
+    const selectors = id ? [
+        `[data-id="${id}"]`,
+        `[data-item-id="${id}"]`,
+        `[item-id="${id}"]`,
+        `#item${id}`,
+        `.item-id-${id}`,
+        `.item-${id}`
+    ] : [];
+    for (const selector of selectors) {
+        const el = document.querySelector(selector);
+        if (el) {
+            dispatchHumanMouseClick(el);
+            return true;
+        }
+    }
+    const candidates = [...document.querySelectorAll('.item, .inventory-item, [class*="item"], img, canvas, div')]
+        .filter(el => {
+            const text = auctionNorm(`${el.textContent || ''} ${el.title || ''} ${el.getAttribute?.('tip') || ''} ${el.getAttribute?.('data-name') || ''}`);
+            return name && text.includes(name);
+        });
+    if (candidates[0]) {
+        dispatchHumanMouseClick(candidates[0]);
+        return true;
+    }
+    return false;
+}
+
+function tryAuctionApiListItem(item, price, settings) {
+    const id = item?.id;
+    const roots = [
+        Engine?.auction,
+        Engine?.auctions,
+        Engine?.auctionHouse,
+        Engine?.ah,
+        window.auction,
+        window.auctions,
+        window.auctionHouse
+    ].filter(Boolean);
+    const payload = {
+        itemId: id,
+        id,
+        bid: Math.max(500, Number(price.bid || 0) || 500),
+        price: Math.max(500, Number(price.buyNow || price.bid || 0) || 500),
+        buyNow: Math.max(500, Number(price.buyNow || price.bid || 0) || 500),
+        duration: Number(settings.durationHours || 168)
+    };
+    const names = ['createAuction', 'addAuction', 'sellItem', 'listItem', 'putItem', 'auctionItem', 'addOffer', 'createOffer'];
+    for (const root of roots) {
+        for (const name of names) {
+            if (typeof root?.[name] !== 'function') continue;
+            try {
+                root[name](payload);
+                return { ok: true, method: name, payload: true };
+            } catch (e1) {
+                try {
+                    root[name](id, payload.bid, payload.buyNow, payload.duration);
+                    return { ok: true, method: name, payload: false };
+                } catch (e2) {}
+            }
+        }
+    }
+    return { ok: false, reason: 'api_not_found' };
+}
+
+async function waitForAuctionItemGone(item, beforeStats, timeout = 4500) {
+    const start = Date.now();
+    const id = String(item?.id || '');
+    while (Date.now() - start < timeout) {
+        await new Promise(r => setTimeout(r, 220));
+        const stillThere = getAuctionSellerCandidates({ includeDisabled: true, force: true }).items.some(x => String(x.id) === id);
+        const stats = typeof window.getBagStats === 'function' ? window.getBagStats() : beforeStats;
+        if (!stillThere) return { ok: true, reason: 'item_missing', stats };
+        if (Number(stats?.freeSlots || 0) > Number(beforeStats?.freeSlots || 0)) return { ok: true, reason: 'slot_freed', stats };
+    }
+    return { ok: false, reason: 'timeout' };
+}
+
+async function listOneAuctionItem(item) {
+    const settings = ensureAuctionSellerSettings();
+    const price = item.price || getAuctionPriceForItem(item, item.rarity, settings);
+    const beforeStats = typeof window.getBagStats === 'function' ? window.getBagStats() : { freeSlots: 0 };
+    const api = tryAuctionApiListItem(item, price, settings);
+    if (api.ok) {
+        const result = await waitForAuctionItemGone(item, beforeStats, 3500);
+        return { ok: result.ok, reason: result.ok ? `api_${api.method}` : `api_${api.method}_${result.reason}` };
+    }
+    const openBtn = getVisibleElementsByText(/wystaw przedmiot/)[0];
+    if (openBtn) {
+        dispatchHumanMouseClick(openBtn);
+        await new Promise(r => setTimeout(r, 350));
+    }
+    clickAuctionItemInDom(item);
+    await new Promise(r => setTimeout(r, 250));
+    if (!fillAuctionListingForm(item, price, settings)) return { ok: false, reason: 'form_not_found' };
+    await new Promise(r => setTimeout(r, 180));
+    const submit = getVisibleElementsByText(/^wystaw|wystaw \[/)[0] || getVisibleElementsByText(/wystaw/)[0];
+    if (!submit) return { ok: false, reason: 'submit_not_found' };
+    dispatchHumanMouseClick(submit);
+    const result = await waitForAuctionItemGone(item, beforeStats, 4500);
+    return { ok: result.ok, reason: result.ok ? 'dom_submit' : result.reason };
+}
+
+function finishAuctionSeller(reason = 'done') {
+    const state = window.auctionSellerState || {};
+    const shouldResumeExp = !!state.wasExpingBeforeAuction;
+    const shouldStartAutoSell = !!state.afterAuctionStartAutoSell;
+    auctionLog(`koniec: ${reason}`, reason === 'done' ? '#4dd0e1' : '#ffcc80', 6000, `finish:${reason}`);
+    window.auctionSellerState = { active: false, step: 'IDLE', nextActionTime: 0, itemIndex: 0, items: [], listed: 0, failed: 0, lastReason: reason };
+    window.isRushingToAuctioneer = false;
+    window.isRushing = false;
+    window.isExpSuspended = false;
+    setAuctionSellerStatus(`Aukcje zakonczone: ${reason}.`, reason === 'done' ? '#4dd0e1' : '#ffcc80');
+    if (shouldStartAutoSell) {
+        setTimeout(() => {
+            const sellable = typeof window.getSellableItemsReport === 'function' ? window.getSellableItemsReport() : null;
+            if (Number(sellable?.sellableCount || 0) > 0 && typeof window.startAutoSellSession === 'function') {
+                window.startAutoSellSession(state.autosellReason || 'after_auction', { force: true, skipAuction: true });
+            } else if (shouldResumeExp && typeof window.resumeExpAfterAutoSell === 'function') {
+                window.resumeExpAfterAutoSell();
+            }
+        }, 700);
+    } else if (shouldResumeExp && typeof window.resumeExpAfterAutoSell === 'function') {
+        setTimeout(() => window.resumeExpAfterAutoSell(), 700);
+    }
+    return { ok: true, reason };
+}
+window.finishAuctionSeller = finishAuctionSeller;
+
+function startAuctionSeller(reason = 'manual', options = {}) {
+    const settings = ensureAuctionSellerSettings();
+    if (!settings.enabled && !options.force) return { ok: false, reason: 'disabled' };
+    window.auctionSellerState = window.auctionSellerState || { active: false };
+    if (window.auctionSellerState.active) return { ok: true, alreadyActive: true, state: window.auctionSellerState };
+    const report = getAuctionSellerCandidates({ force: !!options.force, includeDisabled: !!options.force });
+    if (!report.count) return { ok: false, reason: 'no_auction_items', report };
+    const wasExpingBeforeAuction = !!(window.isExping || window.expRunning);
+    if (typeof stopPatrol === 'function') stopPatrol(true);
+    if (wasExpingBeforeAuction && typeof rememberExpShopReturnTarget === 'function') {
+        rememberExpShopReturnTarget(`auction_start:${reason}`, { currentMap: typeof Engine !== 'undefined' ? Engine?.map?.d?.name : '' });
+    }
+    window.auctionSellerState = {
+        active: true,
+        step: 'ROUTE',
+        reason,
+        nextActionTime: 0,
+        targetNpc: null,
+        itemIndex: 0,
+        items: report.items,
+        listed: 0,
+        failed: 0,
+        lastError: '',
+        wasExpingBeforeAuction,
+        afterAuctionStartAutoSell: !!options.afterAuctionStartAutoSell,
+        autosellReason: options.autosellReason || '',
+        startedAt: Date.now()
+    };
+    window.isExpSuspended = true;
+    window.isRushing = true;
+    window.isRushingToAuctioneer = false;
+    auctionLog(`start (${reason}) itemy=${report.count}`, '#4dd0e1', 5000, `start:${reason}:${report.count}`);
+    setAuctionSellerStatus(`Ide do Aukcjonera: ${report.count} itemow.`, '#4dd0e1');
+    return { ok: true, report, state: window.auctionSellerState };
+}
+window.startAuctionSeller = startAuctionSeller;
+
+function tickAuctionSeller() {
+    const state = window.auctionSellerState;
+    if (!state?.active || Date.now() < Number(state.nextActionTime || 0)) return;
+    if (typeof Engine === 'undefined' || !Engine?.hero?.d) return;
+    if (Engine.battle && Engine.battle.show) return;
+    const settings = ensureAuctionSellerSettings();
+    const delay = Math.max(250, Math.floor(Math.random() * (Math.max(settings.maxDelayMs, settings.minDelayMs) - Math.min(settings.maxDelayMs, settings.minDelayMs) + 1)) + Math.min(settings.maxDelayMs, settings.minDelayMs));
+    const currentMap = Engine?.map?.d?.name || '';
+
+    if (state.step === 'ROUTE') {
+        const target = state.targetNpc || findAuctioneerTarget();
+        if (!target) return finishAuctionSeller('auctioneer_not_found');
+        state.targetNpc = target;
+        const targetMap = target.map_name || target.map || 'Thuzal';
+        if (targetMap && auctionNorm(currentMap) !== auctionNorm(targetMap)) {
+            if (!window.isRushingToAuctioneer && typeof window.rushToMap === 'function') {
+                window.isRushingToAuctioneer = true;
+                window.rushToMap(targetMap, target.x, target.y);
+                setAuctionSellerStatus(`Biegne do Aukcjonera: ${targetMap}.`, '#4dd0e1');
+            }
+            state.nextActionTime = Date.now() + 900;
+            return;
+        }
+        window.isRushingToAuctioneer = false;
+        const liveNpc = findNearestNpcByNick(['aukcjoner', 'auctioneer'], null, 0);
+        if (!liveNpc) {
+            state.nextActionTime = Date.now() + 1000;
+            state.missingNpcCount = Number(state.missingNpcCount || 0) + 1;
+            if (state.missingNpcCount > 20) return finishAuctionSeller('auctioneer_missing_on_map');
+            setAuctionSellerStatus('Czekam az zobacze Aukcjonera na mapie.', '#ffcc80');
+            return;
+        }
+        state.liveNpc = liveNpc;
+        const dist = Math.max(Math.abs(Number(Engine.hero.d.x) - liveNpc.x), Math.abs(Number(Engine.hero.d.y) - liveNpc.y));
+        if (dist > 1) {
+            try { Engine.hero.autoGoTo?.({ x: liveNpc.x, y: liveNpc.y }); } catch (e) {}
+            setAuctionSellerStatus(`Podchodze do Aukcjonera (${dist}).`, '#4dd0e1');
+            state.nextActionTime = Date.now() + 450;
+            return;
+        }
+        startNpcDialogRobust({ id: liveNpc.id, x: liveNpc.x, y: liveNpc.y, nick: liveNpc.nick }, 'auction_seller');
+        state.step = 'DIALOG';
+        state.nextActionTime = Date.now() + 700;
+        return;
+    }
+
+    if (state.step === 'DIALOG') {
+        if (isAuctionWindowOpen()) {
+            state.step = 'LIST';
+            state.nextActionTime = Date.now() + 400;
+            return;
+        }
+        if (clickAuctionDialogOption()) {
+            state.nextActionTime = Date.now() + 850;
+            return;
+        }
+        startNpcDialogRobust({ id: state.liveNpc?.id || state.targetNpc?.id, x: state.liveNpc?.x, y: state.liveNpc?.y, nick: state.liveNpc?.nick || 'Aukcjoner' }, 'auction_seller_retry');
+        state.dialogRetries = Number(state.dialogRetries || 0) + 1;
+        if (state.dialogRetries > 8) return finishAuctionSeller('auction_dialog_failed');
+        state.nextActionTime = Date.now() + 900;
+        return;
+    }
+
+    if (state.step === 'LIST') {
+        if (state.itemIndex >= state.items.length) return finishAuctionSeller('done');
+        if (state.listingNow) return;
+        const fresh = getAuctionSellerCandidates({ includeDisabled: true, force: true });
+        const current = fresh.items.find(x => String(x.id) === String(state.items[state.itemIndex]?.id)) || fresh.items[0];
+        if (!current) return finishAuctionSeller('no_items_left');
+        state.items = fresh.items;
+        state.itemIndex = Math.max(0, fresh.items.findIndex(x => String(x.id) === String(current.id)));
+        state.listingNow = true;
+        setAuctionSellerStatus(`Wystawiam: ${current.name}`, '#4dd0e1');
+        listOneAuctionItem(current)
+            .then(result => {
+                if (result?.ok) {
+                    state.listed += 1;
+                    auctionLog(`wystawiono: ${current.name}`, '#4dd0e1', 5000, `listed:${current.id}`);
+                } else {
+                    state.failed += 1;
+                    state.lastError = result?.reason || 'unknown';
+                    auctionLog(`nie udalo sie wystawic ${current.name}: ${state.lastError}`, '#ffcc80', 8000, `failed:${current.id}:${state.lastError}`);
+                    state.itemIndex += 1;
+                }
+            })
+            .catch(err => {
+                state.failed += 1;
+                state.lastError = String(err?.message || err || 'listing_error');
+                state.itemIndex += 1;
+            })
+            .finally(() => {
+                state.listingNow = false;
+                state.nextActionTime = Date.now() + delay;
+                setAuctionSellerStatus(`Wystawiono ${state.listed}, bledy ${state.failed}.`, state.failed ? '#ffcc80' : '#4dd0e1');
+            });
+    }
+}
+
+if (!window.__auctionSellerDaemonInstalled) {
+    window.__auctionSellerDaemonInstalled = true;
+    window.auctionSellerState = window.auctionSellerState || { active: false, step: 'IDLE', nextActionTime: 0 };
+    setInterval(tickAuctionSeller, 450);
+}
+
    // --- DAEMON: AUTO-SPRZEDAŻ Z LUDZKĄ MECHANIKĄ SPRZEDAŻY TOREB ---
     if (!window.autoSellDaemonInstalled) {
         window.autoSellDaemonInstalled = true;
@@ -33110,6 +33846,7 @@ if (isDead) {
             if (st > 0) return true; // equipped
             if (cl === 24) return true; // bags
             if (cl === 16) return true; // potions/heal items are kept by default
+            if (typeof isAuctionSellerCandidateItem === 'function' && isAuctionSellerCandidateItem(item, { includeDisabled: true, force: true })) return true;
             if (/quest|questitem|zadani|zwiaz|bind|soulbound|nie mozna sprzedac|niesprzedawaln|unid/.test(stat)) return true;
             if (/legend|heroic|unikat|unique|artefakt/.test(stat) || /legend|heroic|unikat|unique|artefakt/.test(rarity)) return true;
             if (/mikstur|eliksir|potka|zwój|zwoj|teleport/.test(name)) return true;
@@ -33199,6 +33936,7 @@ if (isDead) {
                 shopOpen: isShopOpenSafe(),
                 expWasPausedForShop: !!window.autoSellState?.wasExpingBeforeSell,
                 currentShopState: window.autoSellState?.phase || 'IDLE',
+                auctionCount: typeof window.getAuctionSellerCandidates === 'function' ? Number(window.getAuctionSellerCandidates({ includeDisabled: true, force: true })?.count || 0) : 0,
                 stats
             };
         }
@@ -33281,6 +34019,20 @@ if (isDead) {
                 return { ok: false, reason: 'bot_idle' };
             }
             if (options.force) sessionStorage.removeItem('hero_autosell_ignore');
+            if (!options.skipAuction && typeof window.getAuctionSellerCandidates === 'function' && typeof window.startAuctionSeller === 'function') {
+                const auctionReport = window.getAuctionSellerCandidates({ includeDisabled: false });
+                if (Number(auctionReport?.count || 0) > 0) {
+                    const auctionStarted = window.startAuctionSeller(`before_autosell:${reason}`, {
+                        afterAuctionStartAutoSell: true,
+                        autosellReason: reason,
+                        autosellOptions: { ...options, skipAuction: true },
+                        force: false
+                    });
+                    if (auctionStarted?.ok) {
+                        return { ok: true, reason: 'auction_before_autosell', auction: auctionStarted, state: window.auctionSellerState };
+                    }
+                }
+            }
             const wasExpingBeforeSell = !!(window.isExping || window.expRunning);
             const wasBerserkOnBeforeSell = !!(botSettings.berserk && botSettings.berserk.enabled);
             if (typeof stopPatrol === 'function') stopPatrol(true);
@@ -33739,6 +34491,17 @@ if (isDead) {
 
                 const s = typeof window.getBagStats === 'function' ? window.getBagStats() : { freeSlots: 99, totalCapacity: 0 };
                 if (s.freeSlots <= 0 && s.totalCapacity > 0) {
+                    if (typeof window.startAutoSellSession === 'function') {
+                        const started = window.startAutoSellSession('full_inventory', { stats: s, trigger: triggerInfo });
+                        if (started?.ok) {
+                            const msg = started.reason === 'auction_before_autosell'
+                                ? `AUKCJE -> najpierw wystawiam cenne itemy, potem sprzedam reszte.`
+                                : `đźŽ’ TORBA PEĹNA â†’ przerywam inne akcje i idÄ™ sprzedaÄ‡!`;
+                            if (window.logHero) window.logHero(msg, "#ffb300");
+                            if (window.logExp) window.logExp(msg, "#ffb300");
+                            return;
+                        }
+                    }
                     const wasExpingBeforeSell = !!window.isExping;
                     const wasBerserkOnBeforeSell = !!(botSettings.berserk && botSettings.berserk.enabled);
 
