@@ -3078,6 +3078,15 @@ let opacityValue = 0.95;
             minIntervalMs: 2000
         },
         logging: { level: 'INFO', dedupeWindowMs: 6000, verbose: false },
+        performance: {
+            hideConsoles: true,
+            disableFloatingRadar: true,
+            disableInternalMapPreview: true,
+            preferMapIds: true
+        },
+        eventHeroes: {
+            dwellMs: 1600
+        },
 
         expProfiles: loadedProfiles,
 
@@ -3129,6 +3138,488 @@ let opacityValue = 0.95;
     }
     window.getCurrentMapName = getCurrentMapName;
     window.getCurrentMapKey = getCurrentMapKey;
+
+    const MARGONEURO_MAP_ID_CACHE_KEY = 'margoneuro_map_identity_cache_v1';
+    const EVENT_HERO_ROUTES_KEY = 'margoneuro_event_hero_routes_v1';
+
+    function readJsonObjectStore(key, fallback = {}) {
+        try {
+            const parsed = JSON.parse(localStorage.getItem(key) || '');
+            return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : fallback;
+        } catch (e) {
+            return fallback;
+        }
+    }
+
+    function writeJsonObjectStore(key, value) {
+        try {
+            localStorage.setItem(key, JSON.stringify(value && typeof value === 'object' ? value : {}));
+            return true;
+        } catch (e) {
+            return false;
+        }
+    }
+
+    function getCurrentRuntimeMapId() {
+        if (typeof Engine === 'undefined') return null;
+        const mapData = Engine.map?.d || Engine.map || {};
+        const raw = mapData.id ?? mapData.mapId ?? mapData.map_id ?? Engine.map?.id ?? null;
+        const num = Number(raw);
+        return Number.isFinite(num) ? num : (raw !== null && raw !== undefined && raw !== '' ? String(raw) : null);
+    }
+    window.getCurrentRuntimeMapId = getCurrentRuntimeMapId;
+
+    function readMapIdentityCache() {
+        return readJsonObjectStore(MARGONEURO_MAP_ID_CACHE_KEY, {});
+    }
+    window.readMapIdentityCache = readMapIdentityCache;
+
+    function writeMapIdentityCache(cache) {
+        return writeJsonObjectStore(MARGONEURO_MAP_ID_CACHE_KEY, cache || {});
+    }
+
+    function rememberMapIdentity(mapName, mapId = null, source = 'runtime') {
+        const name = String(mapName || '').replace(/\s+/g, ' ').trim();
+        const key = normalizeMapName(name);
+        if (!key) return null;
+        const cache = readMapIdentityCache();
+        const previous = cache[key] || {};
+        const normalizedId = mapId !== null && mapId !== undefined && mapId !== '' ? mapId : previous.mapId ?? null;
+        cache[key] = {
+            ...previous,
+            mapKey: key,
+            mapName: previous.mapName || name,
+            name: previous.name || name,
+            mapId: normalizedId,
+            source,
+            updatedAt: Date.now()
+        };
+        writeMapIdentityCache(cache);
+        return cache[key];
+    }
+    window.rememberMapIdentity = rememberMapIdentity;
+
+    function rememberCurrentMapIdentity(reason = 'runtime') {
+        const currentName = getCurrentMapName();
+        if (!currentName) return null;
+        return rememberMapIdentity(currentName, getCurrentRuntimeMapId(), reason);
+    }
+    window.rememberCurrentMapIdentity = rememberCurrentMapIdentity;
+
+    function safeStaticMapRecord(nameOrId) {
+        try {
+            if (typeof findStaticMap === 'function') return findStaticMap(nameOrId) || null;
+        } catch (e) {}
+        return null;
+    }
+
+    function eventMapRecordFromName(mapName, source = 'manual') {
+        const name = String(mapName || '').replace(/\s+/g, ' ').trim();
+        if (!name) return null;
+        const staticMap = safeStaticMapRecord(name);
+        const cached = readMapIdentityCache()[normalizeMapName(name)] || null;
+        const mapKey = staticMap?.mapKey || staticMap?.normalizedKey || cached?.mapKey || normalizeMapName(name);
+        const mapId = staticMap?.mapId ?? staticMap?.id ?? cached?.mapId ?? null;
+        const mapLabel = staticMap?.mapName || staticMap?.name || cached?.mapName || name;
+        return {
+            mapName: mapLabel,
+            name: mapLabel,
+            mapKey,
+            normalizedKey: mapKey,
+            mapId,
+            source
+        };
+    }
+
+    function collectKnownEventMapRecords() {
+        const byKey = new Map();
+        const add = (name, meta = {}) => {
+            const rec = eventMapRecordFromName(name, meta.source || 'known');
+            if (!rec?.mapKey) return;
+            const existing = byKey.get(rec.mapKey) || {};
+            byKey.set(rec.mapKey, {
+                ...existing,
+                ...rec,
+                mapName: existing.mapName || rec.mapName,
+                mapId: existing.mapId ?? rec.mapId ?? null,
+                aliases: [...new Set([...(existing.aliases || []), rec.mapName, name].filter(Boolean))]
+            });
+        };
+
+        try {
+            const staticDb = window.margoworldStaticKnowledge || {};
+            for (const map of [...Object.values(staticDb.maps || {}), ...Object.values(staticDb.nodes || {})]) {
+                if (map?.mapName || map?.name) add(map.mapName || map.name, { source: 'static' });
+            }
+            const earlyStore = window.__margoneuroEarlyStaticStore || {};
+            for (const map of Object.values(earlyStore.maps || {})) {
+                if (map?.mapName || map?.name) add(map.mapName || map.name, { source: 'early-static' });
+            }
+        } catch (e) {}
+
+        try {
+            for (const hero in heroData || {}) {
+                for (const mapName of Object.keys(heroData[hero] || {})) add(mapName, { source: 'hero' });
+            }
+        } catch (e) {}
+        try {
+            for (const entry of (elityIIData || [])) for (const mapName of (entry?.path || [])) add(mapName, { source: 'e2' });
+            for (const entry of (kolosyData || [])) for (const mapName of (entry?.path || [])) add(mapName, { source: 'kolos' });
+            for (const profile of (botSettings?.expProfiles || [])) for (const mapName of (profile?.maps || [])) add(mapName, { source: 'exp' });
+        } catch (e) {}
+        try {
+            for (const [src, edges] of Object.entries(globalGateways || {})) {
+                add(src, { source: 'gateway' });
+                for (const target of Object.keys(edges || {})) add(target, { source: 'gateway' });
+            }
+        } catch (e) {}
+        try {
+            for (const rec of Object.values(readMapIdentityCache())) {
+                if (rec?.mapName || rec?.name) add(rec.mapName || rec.name, { source: 'id-cache' });
+            }
+        } catch (e) {}
+
+        return [...byKey.values()].sort((a, b) => String(a.mapName).localeCompare(String(b.mapName), 'pl'));
+    }
+    window.collectKnownEventMapRecords = collectKnownEventMapRecords;
+
+    function parseEventHeroMapLines(rawText = '') {
+        return String(rawText || '')
+            .split(/\r?\n/)
+            .map(line => line
+                .replace(/^[\s>*\-•\u2022]+/g, '')
+                .replace(/\s+/g, ' ')
+                .trim())
+            .filter(line => line && !/^respy:?$/i.test(line) && !/^resp:?$/i.test(line) && !/:$/.test(line));
+    }
+
+    function looseEventMapKey(value) {
+        return normalizeMapName(value).replace(/[^a-z0-9]+/g, '');
+    }
+
+    function matchEventMapLine(line, knownMaps = null) {
+        const clean = String(line || '').replace(/\s+/g, ' ').trim();
+        if (!clean) return null;
+        const known = knownMaps || collectKnownEventMapRecords();
+        const key = normalizeMapName(clean);
+        const exact = known.find(map => map.mapKey === key || normalizeMapName(map.mapName) === key || (map.aliases || []).some(a => normalizeMapName(a) === key));
+        if (exact) return { ...exact, input: clean, match: 'exact' };
+
+        const staticMap = safeStaticMapRecord(clean);
+        if (staticMap?.mapName || staticMap?.name) {
+            return {
+                mapName: staticMap.mapName || staticMap.name,
+                name: staticMap.mapName || staticMap.name,
+                mapKey: staticMap.mapKey || normalizeMapName(staticMap.mapName || staticMap.name),
+                normalizedKey: staticMap.mapKey || normalizeMapName(staticMap.mapName || staticMap.name),
+                mapId: staticMap.mapId ?? staticMap.id ?? null,
+                input: clean,
+                match: 'static'
+            };
+        }
+
+        const loose = looseEventMapKey(clean);
+        if (loose.length >= 5) {
+            const looseExact = known.find(map => looseEventMapKey(map.mapName) === loose || (map.aliases || []).some(a => looseEventMapKey(a) === loose));
+            if (looseExact) return { ...looseExact, input: clean, match: 'loose' };
+
+            const contains = known.filter(map => {
+                const names = [map.mapName, ...(map.aliases || [])].filter(Boolean).map(looseEventMapKey);
+                return names.some(n => n === loose || (loose.length >= 8 && (n.includes(loose) || loose.includes(n))));
+            });
+            if (contains.length === 1) return { ...contains[0], input: clean, match: 'contains' };
+        }
+
+        return null;
+    }
+
+    function parseEventHeroRouteText(rawText = '') {
+        const lines = parseEventHeroMapLines(rawText);
+        const known = collectKnownEventMapRecords();
+        const maps = [];
+        const unmatched = [];
+        const seen = new Set();
+        for (const line of lines) {
+            const match = matchEventMapLine(line, known);
+            if (!match?.mapKey) {
+                unmatched.push(line);
+                continue;
+            }
+            if (seen.has(match.mapKey)) continue;
+            seen.add(match.mapKey);
+            maps.push({
+                mapName: match.mapName || match.name,
+                name: match.mapName || match.name,
+                mapKey: match.mapKey,
+                normalizedKey: match.mapKey,
+                mapId: match.mapId ?? null,
+                input: match.input || line,
+                match: match.match || 'known'
+            });
+        }
+        return { maps, unmatched, totalLines: lines.length };
+    }
+    window.parseEventHeroRouteText = parseEventHeroRouteText;
+
+    function readEventHeroRoutes() {
+        const store = readJsonObjectStore(EVENT_HERO_ROUTES_KEY, {});
+        for (const route of Object.values(store)) {
+            if (!route || typeof route !== 'object') continue;
+            route.maps = Array.isArray(route.maps) ? route.maps : [];
+            route.loop = !!route.loop;
+        }
+        return store;
+    }
+    window.readEventHeroRoutes = readEventHeroRoutes;
+
+    function writeEventHeroRoutes(store) {
+        return writeJsonObjectStore(EVENT_HERO_ROUTES_KEY, store || {});
+    }
+    window.writeEventHeroRoutes = writeEventHeroRoutes;
+
+    function getEventHeroRouteDistance(fromMap, toMap) {
+        if (!fromMap || !toMap || normalizeMapName(fromMap) === normalizeMapName(toMap)) return 0;
+        try {
+            if (typeof planStaticRoute === 'function') {
+                const planned = planStaticRoute(fromMap, toMap, { silent: true, avoidBlocked: true });
+                if (planned?.found) return Math.max(0, Number(planned.mapSteps ?? (planned.maps?.length || 1) - 1));
+            }
+        } catch (e) {}
+        try {
+            if (typeof getShortestPath === 'function') {
+                const path = getShortestPath(fromMap, toMap, typeof routePathOptions === 'function' ? routePathOptions() : {});
+                if (Array.isArray(path) && path.length) return Math.max(0, path.length - 1);
+            }
+        } catch (e) {}
+        return 9999;
+    }
+
+    function optimizeEventHeroMapOrder(records, currentMap = getCurrentMapName()) {
+        const pending = (Array.isArray(records) ? records : []).filter(r => r?.mapName);
+        const out = [];
+        let cursor = currentMap || pending[0]?.mapName || '';
+        while (pending.length) {
+            let bestIndex = 0;
+            let bestScore = Infinity;
+            for (let i = 0; i < pending.length; i++) {
+                const score = getEventHeroRouteDistance(cursor, pending[i].mapName);
+                if (score < bestScore) {
+                    bestScore = score;
+                    bestIndex = i;
+                }
+            }
+            const [next] = pending.splice(bestIndex, 1);
+            out.push({ ...next, routeCostFromPrevious: Number.isFinite(bestScore) ? bestScore : 9999 });
+            cursor = next.mapName;
+        }
+        return out;
+    }
+    window.optimizeEventHeroMapOrder = optimizeEventHeroMapOrder;
+
+    function saveEventHeroRoute(name, rawMapsText) {
+        const heroName = String(name || '').replace(/\s+/g, ' ').trim();
+        if (!heroName) return { ok: false, reason: 'empty_name' };
+        const parsed = parseEventHeroRouteText(rawMapsText);
+        if (!parsed.maps.length) return { ok: false, reason: 'no_maps', parsed };
+        const routes = readEventHeroRoutes();
+        const id = normalizeMapName(heroName).replace(/[^a-z0-9]+/g, '-') || `event-${Date.now()}`;
+        const existing = routes[id] || {};
+        const maps = optimizeEventHeroMapOrder(parsed.maps, getCurrentMapName());
+        routes[id] = {
+            id,
+            name: heroName,
+            maps,
+            rawText: String(rawMapsText || ''),
+            unmatched: parsed.unmatched,
+            loop: !!existing.loop,
+            createdAt: existing.createdAt || Date.now(),
+            updatedAt: Date.now()
+        };
+        writeEventHeroRoutes(routes);
+        return { ok: true, route: routes[id], parsed };
+    }
+    window.saveEventHeroRoute = saveEventHeroRoute;
+
+    let eventHeroSearchState = { active: false };
+    let eventHeroSearchTimer = null;
+
+    function getActiveEventHeroSearchName() {
+        return eventHeroSearchState?.active ? String(eventHeroSearchState.heroName || '') : '';
+    }
+    window.getActiveEventHeroSearchName = getActiveEventHeroSearchName;
+
+    function clearEventHeroTimer() {
+        if (eventHeroSearchTimer) clearTimeout(eventHeroSearchTimer);
+        eventHeroSearchTimer = null;
+    }
+
+    function scheduleEventHeroSearchTick(delay = 1000) {
+        clearEventHeroTimer();
+        if (!eventHeroSearchState?.active) return;
+        eventHeroSearchTimer = setTimeout(runEventHeroSearchTick, Math.max(250, Number(delay) || 1000));
+    }
+
+    function setEventHeroStatus(text, color = '#90caf9') {
+        const el = document.getElementById('eventHeroSearchStatus');
+        if (!el) return;
+        el.textContent = String(text || '');
+        el.style.color = color;
+    }
+
+    function stopEventHeroSearch(reason = 'manual', foundName = '') {
+        const wasActive = !!eventHeroSearchState?.active;
+        clearEventHeroTimer();
+        eventHeroSearchState = { active: false, stoppedAt: Date.now(), reason, foundName };
+        window.eventHeroSearchState = eventHeroSearchState;
+        const status = foundName ? `Zatrzymano: ${foundName}` : 'Szukajka eventowa zatrzymana';
+        setEventHeroStatus(status, foundName ? '#ffd54f' : '#999');
+        if (wasActive && typeof window.logHero === 'function') window.logHero(`[EVENT] Stop szukania (${reason})`, foundName ? '#ffd54f' : '#999');
+        return true;
+    }
+    window.stopEventHeroSearch = stopEventHeroSearch;
+
+    function notifyEventHeroFound(foundName = '') {
+        const mapName = getCurrentMapName();
+        const title = 'MargoNeuro: heros eventowy';
+        const body = `${foundName || eventHeroSearchState.heroName || 'Heros'} na mapie ${mapName || '?'}`;
+        try {
+            if (typeof Notification !== 'undefined') {
+                if (Notification.permission === 'granted') new Notification(title, { body });
+                else if (Notification.permission !== 'denied') Notification.requestPermission().then(p => {
+                    if (p === 'granted') new Notification(title, { body });
+                });
+            }
+        } catch (e) {}
+    }
+
+    function handleEventHeroDetected(foundName = '') {
+        if (!eventHeroSearchState?.active) return false;
+        notifyEventHeroFound(foundName);
+        stopEventHeroSearch('hero_detected', foundName || eventHeroSearchState.heroName);
+        return true;
+    }
+    window.handleEventHeroDetected = handleEventHeroDetected;
+
+    function runEventHeroSearchTick() {
+        if (!eventHeroSearchState?.active) return;
+        rememberCurrentMapIdentity('event-search');
+        const maps = Array.isArray(eventHeroSearchState.maps) ? eventHeroSearchState.maps : [];
+        if (!maps.length) return stopEventHeroSearch('empty_route');
+        const currentMap = getCurrentMapName();
+        const now = Date.now();
+        let index = Number(eventHeroSearchState.index || 0);
+        if (index < 0 || index >= maps.length) index = 0;
+        let target = maps[index];
+        const currentKey = normalizeMapName(currentMap);
+        const targetKey = target?.mapKey || normalizeMapName(target?.mapName);
+        const currentRuntimeMapId = getCurrentRuntimeMapId();
+        const targetMapId = target?.mapId ?? null;
+        const sameMapById = botSettings?.performance?.preferMapIds !== false
+            && targetMapId !== null && targetMapId !== undefined && targetMapId !== ''
+            && currentRuntimeMapId !== null && currentRuntimeMapId !== undefined && currentRuntimeMapId !== ''
+            && String(targetMapId) === String(currentRuntimeMapId);
+
+        if ((targetKey && currentKey === targetKey) || sameMapById) {
+            if (eventHeroSearchState.arrivedKey !== targetKey) {
+                eventHeroSearchState.arrivedKey = targetKey;
+                eventHeroSearchState.arrivedAt = now;
+                eventHeroSearchState.lastRushAt = 0;
+                setEventHeroStatus(`Sprawdzam: ${target.mapName}`, '#ffd54f');
+                scheduleEventHeroSearchTick(Math.max(700, Number(botSettings?.eventHeroes?.dwellMs || 1600)));
+                return;
+            }
+
+            const dwellMs = Math.max(700, Number(botSettings?.eventHeroes?.dwellMs || 1600));
+            if (now - Number(eventHeroSearchState.arrivedAt || 0) < dwellMs) {
+                scheduleEventHeroSearchTick(500);
+                return;
+            }
+
+            index += 1;
+            if (index >= maps.length) {
+                if (eventHeroSearchState.loop) index = 0;
+                else return stopEventHeroSearch('route_finished');
+            }
+            eventHeroSearchState.index = index;
+            eventHeroSearchState.arrivedKey = '';
+            eventHeroSearchState.arrivedAt = 0;
+            target = maps[index];
+        }
+
+        if (!target?.mapName) return stopEventHeroSearch('bad_target');
+        const targetName = target.mapName;
+        const sameRush = window.isRushing && normalizeMapName(window.rushTarget || '') === normalizeMapName(targetName);
+        if (!sameRush && now - Number(eventHeroSearchState.lastRushAt || 0) > 1600) {
+            if (typeof window.rushToMap === 'function') {
+                window.rushToMap(targetName);
+                eventHeroSearchState.lastRushAt = now;
+                setEventHeroStatus(`Biegne: ${targetName}`, '#00e5ff');
+            } else {
+                setEventHeroStatus('Brak rushToMap', '#ff8a80');
+            }
+        }
+        window.eventHeroSearchState = eventHeroSearchState;
+        scheduleEventHeroSearchTick(1000);
+    }
+
+    function startEventHeroSearch(routeId) {
+        const routes = readEventHeroRoutes();
+        const route = routes[String(routeId || '')];
+        if (!route || !Array.isArray(route.maps) || !route.maps.length) {
+            if (typeof heroAlert === 'function') heroAlert('Brak zapisanej trasy eventowej.');
+            return false;
+        }
+        const optimized = optimizeEventHeroMapOrder(route.maps, getCurrentMapName());
+        eventHeroSearchState = {
+            active: true,
+            routeId: route.id,
+            heroName: route.name,
+            maps: optimized,
+            loop: !!route.loop,
+            index: 0,
+            startedAt: Date.now(),
+            lastRushAt: 0
+        };
+        window.eventHeroSearchState = eventHeroSearchState;
+        heroFoundAlerted = false;
+        botSettings.radarEnabled = true;
+        const radarChk = document.getElementById('chkRadar');
+        if (radarChk) radarChk.checked = true;
+        if (typeof saveSettings === 'function') saveSettings();
+        if (typeof stopPatrol === 'function') stopPatrol(false);
+        if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+            try { Notification.requestPermission(); } catch (e) {}
+        }
+        if (typeof window.logHero === 'function') window.logHero(`[EVENT] Szukam: ${route.name} (${optimized.length} map)`, '#00e5ff');
+        setEventHeroStatus(`Start: ${route.name}`, '#a5d6a7');
+        scheduleEventHeroSearchTick(100);
+        return true;
+    }
+    window.startEventHeroSearch = startEventHeroSearch;
+
+    function deleteEventHeroRoute(routeId) {
+        const routes = readEventHeroRoutes();
+        const id = String(routeId || '');
+        if (!routes[id]) return false;
+        if (eventHeroSearchState?.routeId === id) stopEventHeroSearch('route_deleted');
+        delete routes[id];
+        writeEventHeroRoutes(routes);
+        if (typeof window.renderEventHeroesPanel === 'function') window.renderEventHeroesPanel();
+        return true;
+    }
+    window.deleteEventHeroRoute = deleteEventHeroRoute;
+
+    function setEventHeroLoop(routeId, value) {
+        const routes = readEventHeroRoutes();
+        const route = routes[String(routeId || '')];
+        if (!route) return false;
+        route.loop = !!value;
+        route.updatedAt = Date.now();
+        writeEventHeroRoutes(routes);
+        if (eventHeroSearchState?.routeId === route.id) eventHeroSearchState.loop = !!value;
+        return true;
+    }
+    window.setEventHeroLoop = setEventHeroLoop;
 
     const EXP_ROUTE_BY_HERO_STORAGE_KEY = 'margoneuro_exp_routes_by_hero_v1';
     const EXP_LAST_ROUTE_HERO_KEY = 'margoneuro_last_exp_route_hero_key_v1';
@@ -3316,9 +3807,11 @@ let opacityValue = 0.95;
     }
 
     function recordMargoneuroConsoleEntry(level = 'INFO', source = 'runtime', message = '', details = null) {
+        const normalizedLevel = String(level || 'INFO').toUpperCase();
+        if (botSettings?.performance?.hideConsoles && normalizedLevel !== 'WARN' && normalizedLevel !== 'ERROR') return null;
         const entry = {
             at: Date.now(),
-            level: String(level || 'INFO').toUpperCase(),
+            level: normalizedLevel,
             source: String(source || 'runtime'),
             message: String(message || ''),
             details
@@ -5736,6 +6229,14 @@ function loadData() {
             botSettings = {...botSettings, ...parsed};
         }
         botSettings.logging = { level: 'INFO', dedupeWindowMs: 6000, verbose: false, ...(botSettings.logging || {}) };
+        botSettings.performance = {
+            hideConsoles: true,
+            disableFloatingRadar: true,
+            disableInternalMapPreview: true,
+            preferMapIds: true,
+            ...(botSettings.performance || {})
+        };
+        botSettings.eventHeroes = { dwellMs: 1600, ...(botSettings.eventHeroes || {}) };
         if (Array.isArray(botSettings?.expProfiles)) deduplicateExpProfiles(botSettings.expProfiles, 'load_settings');
         if (Array.isArray(botSettings?.exp?.mapOrder)) setExpMapOrder(botSettings.exp.mapOrder, 'load_settings', { deferRouteState: true, deferPersist: true });
         if (typeof restoreCurrentHeroExpRoute === 'function') restoreCurrentHeroExpRoute('load_settings');
@@ -9772,6 +10273,7 @@ function cleanOldGateways() {
     // ==========================================
 
     function showHeroAlertBanner(heroName) {
+        if (typeof handleEventHeroDetected === 'function') handleEventHeroDetected(heroName);
 
         let b = document.createElement('div');
 
@@ -9948,7 +10450,8 @@ let attackInterval = null;
 
 
 
-        let targetHero = document.getElementById('selHero').value;
+        const eventHeroTarget = typeof getActiveEventHeroSearchName === 'function' ? getActiveEventHeroSearchName() : '';
+        let targetHero = eventHeroTarget || document.getElementById('selHero').value;
 
         let isE2Mode = document.getElementById('e2ModeToggle').classList.contains('active-tab');
 
@@ -9992,7 +10495,12 @@ let attackInterval = null;
 
             if (!isE2Mode && !isKolosMode) {
 
-                if (targetHero && targetHero !== "") {
+                if (eventHeroTarget) {
+                    if (nData.nick) {
+                        let cleanNick = nData.nick.replace(/<[^>]*>?/gm, '').toLowerCase();
+                        if (cleanNick.includes(eventHeroTarget.toLowerCase())) isTarget = true;
+                    }
+                } else if (targetHero && targetHero !== "") {
 
                     if (nData.nick) {
 
@@ -10054,6 +10562,7 @@ let attackInterval = null;
 
 
                     let foundName = nData.nick ? nData.nick.replace(/<[^>]*>?/gm, '') : targetHero;
+                    if (typeof handleEventHeroDetected === 'function') handleEventHeroDetected(foundName);
                     showHeroAlertBanner(foundName);
 
            // PUSH NA DISCORD
@@ -10297,6 +10806,7 @@ function autoDetectEngineData() {
 
     let currentName = Engine.map.d.name;
     if (!currentName || currentName === "undefined") return;
+    if (typeof rememberMapIdentity === 'function') rememberMapIdentity(currentName, getCurrentRuntimeMapId(), 'engine-detect');
     if (typeof markExpMapVisited === 'function') markExpMapVisited(currentName, 'engine_detect');
 
     // --- ŁATKA: SYNCHRONIZACJA TELEPORTÓW NA PODSTAWIE NICKU ---
@@ -13321,7 +13831,7 @@ function initGUI() {
             .gui-content { padding: 10px; flex-grow: 1; overflow-y: auto; overflow-x: hidden; position:relative; background: #1a1d21; display: flex; flex-direction: column; }
             .gui-content::-webkit-scrollbar { width: 8px; } .gui-content::-webkit-scrollbar-track { background: #111; border-left: 1px solid #333; } .gui-content::-webkit-scrollbar-thumb { background: #5a4b31; border-radius: 4px; }
             .nav-row { margin-bottom: 8px; flex-shrink: 0; } .nav-row label { display: block; font-size: 11px; margin-bottom: 3px; color: #a99a75; }
-            .nav-row select, .nav-row input[type="text"], .nav-row input[type="number"] { width: 100%; padding: 4px 6px; background: #0f0f0f; color: #e0d8c0; border: 1px solid #4a3f2b; border-radius: 2px; outline: none; font-size:11px; box-shadow: inset 0 1px 3px rgba(0,0,0,0.8); }
+            .nav-row select, .nav-row input[type="text"], .nav-row input[type="number"], .nav-row textarea { width: 100%; padding: 4px 6px; background: #0f0f0f; color: #e0d8c0; border: 1px solid #4a3f2b; border-radius: 2px; outline: none; font-size:11px; box-shadow: inset 0 1px 3px rgba(0,0,0,0.8); box-sizing:border-box; }
 
             .location-wrapper { display: flex; align-items: center; justify-content: space-between; background: #141414; border: 1px solid #333; border-radius: 2px; padding: 4px 8px; margin-bottom: 8px; }
             .location-label { font-size: 10px; color: #a99a75; white-space: nowrap; margin-right: 5px; }
@@ -13376,6 +13886,10 @@ function initGUI() {
         document.head.appendChild(style);
 
         const gearIcon = document.createElement('div'); gearIcon.id = 'gearIcon'; gearIcon.innerHTML = 'Opcje'; gearIcon.title = 'Przesuń lub kliknij'; document.body.appendChild(gearIcon);
+        const perfSettings = botSettings.performance || {};
+        const hideConsoles = perfSettings.hideConsoles !== false;
+        const disableFloatingRadar = perfSettings.disableFloatingRadar !== false;
+        const disableInternalMapPreview = perfSettings.disableInternalMapPreview !== false;
 
         const mainGui = document.createElement('div'); mainGui.id = 'heroNavGUI'; mainGui.className = 'hero-window';
         mainGui.innerHTML = `
@@ -13421,10 +13935,25 @@ function initGUI() {
                         <div id="heroMapListContainer"><div style="padding:5px;text-align:center;color:#777;">Wybierz herosa</div></div>
                                                 <div style="display:flex; gap:5px; margin-top:5px;">
                             <button id="btnAutoRoute" class="btn btn-go-sepia" style="flex-grow:1;">Kreator trasy</button>
+                            <button id="btnToggleEventHeroes" class="btn btn-sepia" style="border-color:#00acc1; color:#00e5ff; background:#12232a; width:auto;">Eventowe</button>
                             <button id="btnResetRoute" class="btn btn-sepia" style="background:#8e0000; width: auto;" title="Zresetuj pętlę i przywróć z bazy">Resetuj bazę</button>
                         </div>
                     </div>
                     <div class="nav-row" style="margin-top: 10px; display: flex; flex-direction: column;"><label style="color:#d4af37;">Koordynaty (zasięg: 7 kratek):</label><div id="cordsListContainer"></div></div>
+                    <div id="eventHeroesPanel" style="display:none; margin-top:5px; padding:6px; border:1px solid #00acc1; background:rgba(0, 172, 193, 0.08);">
+                        <div class="nav-row" style="margin-bottom:5px;">
+                            <label>Nazwa herosa eventowego:</label>
+                            <input type="text" id="eventHeroName" placeholder="Np. Heros Eventowy">
+                        </div>
+                        <div class="nav-row" style="margin-bottom:5px;">
+                            <label>Mapy respow / expienia:</label>
+                            <textarea id="eventHeroMapsRaw" rows="7" placeholder="Respy:\nOkolice Eder:\n- Podmokla Dolina\n- Morwowe Przejscie"></textarea>
+                        </div>
+                        <button id="btnSaveEventHero" class="btn btn-go-sepia" style="border-color:#00acc1; color:#00e5ff;">Zapisz eventowego</button>
+                        <div id="eventHeroParseInfo" style="font-size:10px; color:#90caf9; margin:5px 0;"></div>
+                        <div id="eventHeroSearchStatus" style="font-size:10px; color:#999; margin:4px 0;">Szukajka eventowa nieaktywna</div>
+                        <div id="eventHeroRoutesList" style="max-height:150px; overflow:auto; border-top:1px solid rgba(255,255,255,0.08); padding-top:5px;"></div>
+                    </div>
                     <button id="btnStartStop" class="btn btn-go-sepia" style="margin-top:auto; padding: 6px; font-size: 12px; border: 1px solid #4caf50; color: #4caf50; font-weight:bold;">START HEROSI</button>
                 </div>
                 <div id="e2Container" style="display:none; flex-direction:column; flex:1; min-height:0;">
@@ -13647,6 +14176,20 @@ function initGUI() {
             </div>
         `;
         document.body.appendChild(mainGui);
+        if (hideConsoles) {
+            const heroConsoleEl = document.getElementById('heroConsole');
+            const expConsoleEl = document.getElementById('expConsole');
+            const logButtonEl = document.getElementById('btnOpenErrorConsole');
+            if (heroConsoleEl) heroConsoleEl.style.display = 'none';
+            if (expConsoleEl) expConsoleEl.style.display = 'none';
+            if (logButtonEl) logButtonEl.style.display = 'none';
+        }
+        if (disableFloatingRadar) {
+            const radarButtonEl = document.getElementById('btnToggleRadar');
+            const radarWindowEl = document.getElementById('margoRadarWindow');
+            if (radarButtonEl) radarButtonEl.style.display = 'none';
+            if (radarWindowEl) radarWindowEl.style.display = 'none';
+        }
 
         // --- OKNO GŁÓWNYCH USTAWIEŃ ---
         const settingsGui = document.createElement('div'); settingsGui.id = 'heroSettingsGUI'; settingsGui.className = 'hero-window'; settingsGui.style.display = 'none';
@@ -13669,6 +14212,14 @@ function initGUI() {
 
                 <div class="nav-row"><label>Zasięg widoczności (Domyślnie 7):</label><input type="number" id="inpVisionRange" value="${botSettings.visionRange}" min="1" max="15"></div>
                 <div class="nav-row"><label>Skrót klawiszowy (Chowaj/Pokaż bota):</label><input type="text" id="inpToggleKey" value="${botSettings.toggleKey || 'Kliknij i wciśnij klawisz...'}" readonly style="cursor:pointer; text-align:center;"></div>
+
+                <div class="accordion-header" id="accPerformance" onclick="toggleSettingsAcc('accPerformance')">Wydajnosc</div>
+                <div id="accPerformanceContent" style="display:none; padding:5px; background:rgba(0,0,0,0.2); border:1px solid #333; margin-bottom:10px;">
+                    <label style="display:block; font-size:11px; color:#e0d8c0; margin-bottom:5px;"><input type="checkbox" id="perfHideConsoles" ${hideConsoles ? 'checked' : ''}> Ukryj konsole i nie dopisuj logow do UI</label>
+                    <label style="display:block; font-size:11px; color:#e0d8c0; margin-bottom:5px;"><input type="checkbox" id="perfDisableFloatingRadar" ${disableFloatingRadar ? 'checked' : ''}> Ukryj plynny podglad radaru/mapy</label>
+                    <label style="display:block; font-size:11px; color:#e0d8c0; margin-bottom:5px;"><input type="checkbox" id="perfDisableInternalMap" ${disableInternalMapPreview ? 'checked' : ''}> Ukryj techniczna mape przejsc</label>
+                    <label style="display:block; font-size:11px; color:#e0d8c0;"><input type="checkbox" id="perfPreferMapIds" ${botSettings.performance?.preferMapIds !== false ? 'checked' : ''}> Preferuj mapId w nowych trasach Eventowe</label>
+                </div>
 
               <div style="display:flex; gap:4px;">
                     <button id="btnOpenLicenseSettings" class="btn btn-sepia" style="display:none !important; flex:1; padding:6px 2px; font-size:9px; background:#8a6d1f; border-color:#ffc107; color:#ffe082;">🔑 Licencja</button>
@@ -14073,6 +14624,31 @@ function bindClick(id, handler) {
     return true;
 }
 
+function applyPerformanceUiSettings() {
+    const perf = botSettings.performance || {};
+    const hideConsolesNow = perf.hideConsoles !== false;
+    const disableFloatingRadarNow = perf.disableFloatingRadar !== false;
+    const disableInternalMapNow = perf.disableInternalMapPreview !== false;
+    const heroConsoleEl = document.getElementById('heroConsole');
+    const expConsoleEl = document.getElementById('expConsole');
+    const logButtonEl = document.getElementById('btnOpenErrorConsole');
+    const radarButtonEl = document.getElementById('btnToggleRadar');
+    const radarWindowEl = document.getElementById('margoRadarWindow');
+    const internalMapButtonEl = document.getElementById('btnOpenInternalMap');
+    const internalMapWindowEl = document.getElementById('heroInternalMapGUI');
+
+    if (heroConsoleEl) heroConsoleEl.style.display = hideConsolesNow ? 'none' : 'block';
+    if (expConsoleEl) expConsoleEl.style.display = hideConsolesNow ? 'none' : 'block';
+    if (logButtonEl) logButtonEl.style.display = hideConsolesNow ? 'none' : 'flex';
+
+    if (radarButtonEl) radarButtonEl.style.display = disableFloatingRadarNow ? 'none' : 'flex';
+    if (disableFloatingRadarNow && radarWindowEl) radarWindowEl.style.display = 'none';
+
+    if (internalMapButtonEl) internalMapButtonEl.style.display = disableInternalMapNow ? 'none' : 'block';
+    if (disableInternalMapNow && internalMapWindowEl) internalMapWindowEl.style.display = 'none';
+}
+window.applyPerformanceUiSettings = applyPerformanceUiSettings;
+
 function setOnChange(id, handler) {
     const el = document.getElementById(id);
     if (!el) return false;
@@ -14406,6 +14982,33 @@ if (!botSettings.berserk) {
         if (!botSettings.autopot) { botSettings.autopot = { enabled: false, stacks: 14 }; saveSettings(); }
         if (botSettings.exp.autoChangeRoute === undefined) { botSettings.exp.autoChangeRoute = false; saveSettings(); }
         if (botSettings.exp.expMapLevelLead === undefined) { botSettings.exp.expMapLevelLead = 0; saveSettings(); }
+        botSettings.performance = {
+            hideConsoles: true,
+            disableFloatingRadar: true,
+            disableInternalMapPreview: true,
+            preferMapIds: true,
+            ...(botSettings.performance || {})
+        };
+        bindChange('perfHideConsoles', (e) => {
+            botSettings.performance.hideConsoles = !!e.target.checked;
+            if (typeof saveSettings === 'function') saveSettings();
+            if (typeof applyPerformanceUiSettings === 'function') applyPerformanceUiSettings();
+        });
+        bindChange('perfDisableFloatingRadar', (e) => {
+            botSettings.performance.disableFloatingRadar = !!e.target.checked;
+            if (typeof saveSettings === 'function') saveSettings();
+            if (typeof applyPerformanceUiSettings === 'function') applyPerformanceUiSettings();
+        });
+        bindChange('perfDisableInternalMap', (e) => {
+            botSettings.performance.disableInternalMapPreview = !!e.target.checked;
+            if (typeof saveSettings === 'function') saveSettings();
+            if (typeof applyPerformanceUiSettings === 'function') applyPerformanceUiSettings();
+        });
+        bindChange('perfPreferMapIds', (e) => {
+            botSettings.performance.preferMapIds = !!e.target.checked;
+            if (typeof saveSettings === 'function') saveSettings();
+        });
+        if (typeof applyPerformanceUiSettings === 'function') applyPerformanceUiSettings();
         bindChange('expMapLevelLead', (e) => {
             const value = Math.max(0, Math.min(80, parseInt(e.target.value, 10) || 0));
             botSettings.exp.expMapLevelLead = value;
@@ -15074,6 +15677,101 @@ function initE2AutomationUI() {
 initE2AutomationUI();
 
 
+function renderEventHeroesPanel() {
+    const container = document.getElementById('eventHeroRoutesList');
+    if (!container) return;
+    const routes = Object.values(readEventHeroRoutes()).sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'pl'));
+    if (!routes.length) {
+        container.innerHTML = '<div style="padding:5px; color:#777; text-align:center; font-size:10px;">Brak zapisanych herosow eventowych.</div>';
+        return;
+    }
+    container.innerHTML = routes.map(route => {
+        const maps = Array.isArray(route.maps) ? route.maps : [];
+        const preview = maps.slice(0, 5).map(m => `${escapeHtml(m.mapName || m.name || '')}${m.mapId ? ` <span style="color:#607d8b;">#${escapeHtml(m.mapId)}</span>` : ''}`).join(' -> ');
+        const more = maps.length > 5 ? ` <span style="color:#777;">+${maps.length - 5}</span>` : '';
+        const active = eventHeroSearchState?.active && eventHeroSearchState.routeId === route.id;
+        return `
+            <div class="event-hero-route" data-route-id="${escapeHtml(route.id)}" style="border:1px solid ${active ? '#00e5ff' : '#263238'}; background:${active ? 'rgba(0,229,255,0.08)' : '#15191d'}; padding:5px; margin-bottom:5px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:5px;">
+                    <div style="font-weight:bold; color:#00e5ff; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(route.name || route.id)}</div>
+                    <div style="display:flex; gap:4px; align-items:center; flex-shrink:0;">
+                        <label style="font-size:10px; color:#d7d7d7;"><input type="checkbox" class="event-hero-loop" ${route.loop ? 'checked' : ''}> petla</label>
+                        <button class="btn-sepia event-hero-search" style="padding:2px 6px; background:#006064;">Szukaj</button>
+                        <button class="btn-sepia event-hero-delete" style="padding:2px 6px; background:#8e0000;">Usun</button>
+                    </div>
+                </div>
+                <div style="font-size:9px; color:#b0bec5; margin-top:3px;">${maps.length} map: ${preview}${more}</div>
+            </div>
+        `;
+    }).join('');
+}
+window.renderEventHeroesPanel = renderEventHeroesPanel;
+
+function initEventHeroesUI() {
+    bindClick('btnToggleEventHeroes', () => {
+        const panel = document.getElementById('eventHeroesPanel');
+        if (!panel) return;
+        panel.style.display = panel.style.display === 'none' || !panel.style.display ? 'block' : 'none';
+        if (panel.style.display !== 'none') renderEventHeroesPanel();
+    });
+    bindClick('btnSaveEventHero', () => {
+        const nameInput = document.getElementById('eventHeroName');
+        const mapsInput = document.getElementById('eventHeroMapsRaw');
+        const info = document.getElementById('eventHeroParseInfo');
+        const result = saveEventHeroRoute(nameInput?.value || '', mapsInput?.value || '');
+        if (!result.ok) {
+            const msg = result.reason === 'empty_name'
+                ? 'Wpisz nazwe herosa eventowego.'
+                : 'Nie rozpoznalem zadnej mapy z wklejonej listy.';
+            if (info) {
+                info.textContent = msg;
+                info.style.color = '#ff8a80';
+            }
+            if (typeof heroAlert === 'function') heroAlert(msg);
+            return;
+        }
+        if (info) {
+            const unmatched = result.parsed?.unmatched || [];
+            info.textContent = unmatched.length
+                ? `Zapisano ${result.route.maps.length} map. Nie rozpoznano: ${unmatched.slice(0, 5).join(', ')}${unmatched.length > 5 ? '...' : ''}`
+                : `Zapisano ${result.route.maps.length} map. Trasa ulozona wedlug znanych przejsc.`;
+            info.style.color = unmatched.length ? '#ffcc80' : '#a5d6a7';
+        }
+        renderEventHeroesPanel();
+    });
+
+    const list = document.getElementById('eventHeroRoutesList');
+    if (list && !list.__eventHeroesBound) {
+        list.__eventHeroesBound = true;
+        list.addEventListener('click', (e) => {
+            const row = e.target?.closest?.('.event-hero-route');
+            if (!row) return;
+            const id = row.dataset.routeId || '';
+            if (e.target?.closest?.('.event-hero-search')) {
+                startEventHeroSearch(id);
+                renderEventHeroesPanel();
+            } else if (e.target?.closest?.('.event-hero-delete')) {
+                heroConfirm('Usunac tego herosa eventowego?', (ok) => {
+                    if (!ok) return;
+                    deleteEventHeroRoute(id);
+                    renderEventHeroesPanel();
+                });
+            }
+        });
+        list.addEventListener('change', (e) => {
+            const loop = e.target?.closest?.('.event-hero-loop');
+            if (!loop) return;
+            const row = loop.closest('.event-hero-route');
+            if (!row) return;
+            setEventHeroLoop(row.dataset.routeId || '', loop.checked);
+        });
+    }
+    renderEventHeroesPanel();
+}
+
+initEventHeroesUI();
+
+
 
         const selHero = document.getElementById('selHero');
 
@@ -15280,7 +15978,7 @@ selHero.addEventListener('change', (e) => {
 
 
       // --- MODUŁ EXPORTU / IMPORTU DO PLIKU ---
-        let keysToSave = ['hero_global_gateways_v20', 'hero_map_order_v20', 'hero_settings_db_v64', 'exp_profiles_v64_4', 'hero_boss_coords_v64', 'hero_teleports_by_nick_v64'];
+        let keysToSave = ['hero_global_gateways_v20', 'hero_map_order_v20', 'hero_settings_db_v64', 'exp_profiles_v64_4', 'hero_boss_coords_v64', 'hero_teleports_by_nick_v64', EVENT_HERO_ROUTES_KEY, MARGONEURO_MAP_ID_CACHE_KEY];
 
         let btnExport = document.getElementById('btnExportFile');
         if (btnExport) {
@@ -20412,6 +21110,11 @@ window.expDryRunSimulation = function(type = 'gate-stuck-x5') {
     }
 
     window.logExp = function(msg, color="#a99a75") {
+        if (botSettings?.performance?.hideConsoles) {
+            const text = String(msg || '').toLowerCase();
+            if (text.includes('nie znaleziono przeciwnika')) window.expLastTargetNotFoundAt = Date.now();
+            return;
+        }
         let consoleDiv = document.getElementById('expConsole');
         if (!consoleDiv) return;
         const normalizedMsg = normalizeConsoleMessage(msg);
@@ -20455,6 +21158,7 @@ window.expDryRunSimulation = function(type = 'gate-stuck-x5') {
 
 
 window.logHero = function(msg, color="#a99a75") {
+        if (botSettings?.performance?.hideConsoles) return;
         let consoleDiv = document.getElementById('heroConsole');
         if (!consoleDiv) return;
         const normalizedMsg = normalizeConsoleMessage(msg);
@@ -28958,6 +29662,7 @@ window.clearExpMaps = clearExpMaps;
     };
 
     window.openInternalMapGraph = function(selectedMap = null) {
+        if (botSettings?.performance?.disableInternalMapPreview) return false;
         const win = document.getElementById('heroInternalMapGUI');
         if (!win) return;
         win.style.display = 'flex';
@@ -28972,6 +29677,7 @@ window.clearExpMaps = clearExpMaps;
     };
 
     window.renderInternalMapGraph = function(selectedMap = null, force = false) {
+        if (botSettings?.performance?.disableInternalMapPreview) return;
         const list = document.getElementById('internalMapGraphList');
         const details = document.getElementById('internalMapDetails');
         const summary = document.getElementById('internalMapSummary');
@@ -35081,6 +35787,11 @@ window.radarTargetInfo = null;
 window.__radarLastToggleTs = 0;
 
 function toggleFloatingRadarWindow() {
+    if (botSettings?.performance?.disableFloatingRadar) {
+        const existing = document.getElementById('margoRadarWindow');
+        if (existing) existing.style.display = 'none';
+        return false;
+    }
     let win = document.getElementById('margoRadarWindow');
     if (!win) {
         if (typeof initFloatingRadarUI === 'function') initFloatingRadarUI();
@@ -35126,6 +35837,7 @@ function toggleRadar() {
 }
 
 function initFloatingRadarUI() {
+    if (botSettings?.performance?.disableFloatingRadar) return;
     ensureRadarButtonHandlers();
 
     let toggleBtn = document.getElementById('btnToggleRadar');
@@ -35898,6 +36610,11 @@ function renderTacticalRadar() {
 
 // Główna pętla taktująca
 setInterval(() => {
+    if (botSettings?.performance?.disableFloatingRadar) {
+        const win = document.getElementById('margoRadarWindow');
+        if (win) win.style.display = 'none';
+        return;
+    }
     if (typeof initFloatingRadarUI === 'function') initFloatingRadarUI();
 
     if (typeof Engine !== 'undefined' && Engine.hero?.d && Engine.map?.d) {
