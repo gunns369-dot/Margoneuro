@@ -13,28 +13,26 @@ test('matrix: [route map/non-route] x [running/stop] x [checkbox]', () => {
         fsm.setTask('EXP');
         fsm.setRunning(running);
 
-        const expected = inRouteMap && running && checkbox;
+        const expected = false;
         assert.equal(fsm.state.berserkActive, expected, `failed combo route=${inRouteMap} running=${running} checkbox=${checkbox}`);
       }
     }
   }
 });
 
-test('flow: exp map -> start -> berserk ON -> map change -> berserk OFF', () => {
+test('flow: exp map -> start -> server berserk stays OFF', () => {
   const fsm = new HeroRouteCombatFSM();
   fsm.setCheckbox(true);
   fsm.setTask('EXP');
   fsm.onMapChange(true);
   fsm.setRunning(true);
-  assert.equal(fsm.state.berserkActive, true);
+  assert.equal(fsm.state.berserkActive, false);
 
   fsm.onMapChange(false);
   assert.equal(fsm.state.berserkActive, false);
 
   const hasOn = fsm.events.some(e => e.event === 'berserk_on');
-  const hasOff = fsm.events.some(e => e.event === 'berserk_off');
-  assert.equal(hasOn, true);
-  assert.equal(hasOff, true);
+  assert.equal(hasOn, false);
 });
 
 test('trap flow: detect -> fullscreen ON before first action -> resolve -> fullscreen OFF', () => {
@@ -55,7 +53,7 @@ test('trap flow: detect -> fullscreen ON before first action -> resolve -> fulls
   assert.equal(offEvents.length, 1);
 });
 
-test('attack lock: no attack when berserk OFF', () => {
+test('quick attack is allowed when server berserk is OFF', () => {
   const fsm = new HeroRouteCombatFSM();
   fsm.setCheckbox(false);
   fsm.setTask('EXP');
@@ -63,9 +61,9 @@ test('attack lock: no attack when berserk OFF', () => {
   fsm.setRunning(true);
 
   assert.equal(fsm.state.berserkActive, false);
-  assert.equal(fsm.autoAttack(), false);
-  assert.equal(fsm.attackCalls, 0);
-  assert.equal(fsm.events.some(e => e.event === 'attack_suppressed'), true);
+  assert.equal(fsm.autoAttack(), true);
+  assert.equal(fsm.attackCalls, 1);
+  assert.equal(fsm.events.some(e => e.event === 'quick_attack_allowed'), true);
 });
 
 test('stopped -> berserk is turned OFF', () => {
@@ -74,7 +72,7 @@ test('stopped -> berserk is turned OFF', () => {
   fsm.setTask('EXP');
   fsm.onMapChange(true);
   fsm.setRunning(true);
-  assert.equal(fsm.state.berserkActive, true);
+  assert.equal(fsm.state.berserkActive, false);
 
   fsm.setRunning(false);
   assert.equal(fsm.state.berserkActive, false);
