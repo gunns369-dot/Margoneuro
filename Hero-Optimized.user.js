@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         MargoNeuro - Optimized Edition
-// @version      64.8.3
+// @version      64.8.5
 // @description  Automatyczne wykrywanie, inteligentny zasięg, natywny auto-atak, poprawne limity poziomowe, naprawiony scroll.
 // @author       Ty & Gemini
 // @match        https://*.margonem.pl/*
@@ -15836,9 +15836,61 @@ bindChange('useTeleportsEq', (e) => { botSettings.exp.useTeleportsEq = e.target.
         });
 
 // Pętla milczącego ładownia profili (dla Auto-Expowiska)
+        function ensureExpSoftRunning(reason = 'auto_resume') {
+            const now = Date.now();
+            window.margoneuroStoppedManually = false;
+            window.__expStopRequested = false;
+            window.isExping = true;
+            window.expRunning = true;
+            window.botRunning = true;
+            window.margoneuroCurrentMode = "EXP";
+            if (!window.expRunId) window.expRunId = `auto-${now.toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+            const expCtl = typeof getExpControlState === 'function' ? getExpControlState() : null;
+            if (expCtl) {
+                expCtl.runId = window.expRunId;
+                expCtl.lastStartAt = now;
+            }
+            const btn = document.getElementById('btnStartExp');
+            if (btn) {
+                btn.innerHTML = "STOP";
+                btn.style.borderColor = "#f44336";
+                btn.style.color = "#f44336";
+            }
+            if (typeof window.restartExpScheduler === 'function') window.restartExpScheduler(120, window.expRunId);
+            else if (typeof window.requestExpLogicSoon === 'function') window.requestExpLogicSoon(120, reason);
+            return true;
+        }
+        window.ensureExpSoftRunning = ensureExpSoftRunning;
+
+        function softResetExpProfileRuntime(reason = 'auto_profile_change', keepRunning = false) {
+            expNoMobScans = 0;
+            expCurrentTargetId = null;
+            expLastActionTime = 0;
+            expMapTransitionCooldown = 0;
+            expAntiLagTime = 0;
+            window.expCurrentTargetId = null;
+            window.expCurrentTargetGroupKey = null;
+            window.expFocusTarget = null;
+            window.lastExpMap = null;
+            window.__expFastNextMobCache = null;
+            window.__currentVisibleExpMobsCache = null;
+            window.__expRadarMobSnapshotCache = null;
+            window.__expFastPathCache = {};
+            if (typeof clearExpTargetLock === 'function') clearExpTargetLock(reason);
+            if (typeof resetExpMoveCommand === 'function') resetExpMoveCommand(reason);
+            if (typeof primeExpImmediateStartState === 'function') primeExpImmediateStartState(reason);
+            if (keepRunning) {
+                ensureExpSoftRunning(reason);
+                if (typeof window.requestImmediateExpRetargetTick === 'function') window.requestImmediateExpRetargetTick(reason);
+                else if (typeof window.requestExpLogicSoon === 'function') window.requestExpLogicSoon(0, reason);
+            }
+        }
+        window.softResetExpProfileRuntime = softResetExpProfileRuntime;
+
         window.autoLoadExpProfile = function(index) {
             let p = botSettings.expProfiles[index];
            if(p) {
+                const keepExpRunning = !!(window.isExping || window.expRunning);
                 botSettings.exp.activeProfileName = p.name;
                 setExpMapOrder(p.maps, 'auto_load_profile');
                 let lvlMatch = p.name.match(/\((\d+)\s*lvl\)/i);
@@ -15850,9 +15902,10 @@ bindChange('useTeleportsEq', (e) => { botSettings.exp.useTeleportsEq = e.target.
                     if (mIn) mIn.value = botSettings.exp.minLvl; if (mAx) mAx.value = botSettings.exp.maxLvl;
                 }
 
-                window.mapClearTimes = window.mapClearTimes || {}; expCurrentTargetId = null; window.expCurrentTargetGroupKey = null; expMapTransitionCooldown = 0; expLastActionTime = 0; expAntiLagTime = 0;
+                window.mapClearTimes = window.mapClearTimes || {};
                 if (typeof saveSettings === 'function') saveSettings();
-                expNoMobScans = 0; expLastTargetMap = ""; expLastTargetPos = null; window.lastExpMap = null; window.isRushing = false; window.isRushingToShop = false;
+                expLastTargetMap = ""; expLastTargetPos = null; window.isRushingToShop = false;
+                softResetExpProfileRuntime('auto_load_profile', keepExpRunning);
 
                 // Bezwarunkowe narysowanie zaktualizowanej trasy
                 if (typeof window.renderExpMaps === 'function') window.renderExpMaps();
@@ -15891,8 +15944,12 @@ bindChange('useTeleportsEq', (e) => { botSettings.exp.useTeleportsEq = e.target.
                         window._lastExpLogTime = Date.now();
                     }
 
-                    if (typeof stopPatrol === 'function') stopPatrol(true);
+                    const keepExpRunning = !!(window.isExping || window.expRunning);
                     window.autoLoadExpProfile(profIdx);
+                    if (keepExpRunning) {
+                        ensureExpSoftRunning('auto_change_exp_profile');
+                        if (typeof window.logExp === 'function') window.logExp("[EXP] Zmieniono expowisko bez zatrzymywania bota.", "#80deea");
+                    }
                 }
             }
         };
@@ -16707,22 +16764,56 @@ function getShopItemData(item) {
         name: d.name || item?._cachedStats?.name || item?.name || '',
         cl: Number(d.cl ?? item?.cl ?? 0),
         level: Number(d.lvl ?? d.level ?? item?.level ?? (String(d.stat || item?.stat || '').match(/(?:lvl|level|reqp_lvl)=([0-9]+)/)?.[1] || 0)),
-        stat: String(d.stat || item?.stat || item?._cachedStats?.stat || ''),
-        prof: String(d.prof || item?.prof || '')
+        stat: String(d.stat || item?.stat || item?._cachedStats?.stat || item?.tooltip_text || item?.raw_detected_text || ''),
+        prof: String(d.prof || item?.prof || item?._cachedStats?.prof || '')
     };
+}
+
+function getHeroProfessionAliases() {
+    const raw = String(Engine?.hero?.d?.prof || Engine?.hero?.d?.profession || '').toLowerCase();
+    const normalized = typeof normalizeDialogText === 'function' ? normalizeDialogText(raw) : raw;
+    const map = {
+        w: ['w', 'woj', 'wojownik', 'warrior'],
+        m: ['m', 'mag', 'mage'],
+        p: ['p', 'pal', 'paladyn', 'paladin'],
+        h: ['h', 'lowca', 'lowczyni', 'hunter'],
+        t: ['t', 'tropiciel', 'tracker'],
+        b: ['b', 'tancerz', 'tancerz ostrzy', 'blade dancer', 'blade']
+    };
+    const key = Object.keys(map).find(k => normalized === k || map[k].some(alias => normalized.includes(alias))) || normalized.charAt(0);
+    return new Set([key, ...(map[key] || []), normalized].filter(Boolean));
+}
+
+function getEqBuyerProfessionTokens(data) {
+    const textRaw = `${data?.stat || ''};${data?.prof || ''}`;
+    const text = typeof normalizeDialogText === 'function' ? normalizeDialogText(textRaw) : String(textRaw || '').toLowerCase();
+    if (!text || /prof=(all|ka|kazd|wsz)|dla kazdej|dla wszystkich/.test(text)) return [];
+    const tokens = [];
+    const direct = text.match(/(?:reqp|prof|profession)=([^;]+)/);
+    if (direct?.[1]) tokens.push(...direct[1].split(/[,\s|/]+/));
+    const polish = text.match(/(?:profesja|dla profesji|wymaga profesji)[:=\s]+([^;]+)/);
+    if (polish?.[1]) tokens.push(...polish[1].split(/[,\s|/]+/));
+    if (!tokens.length) {
+        for (const word of ['wojownik', 'mag', 'paladyn', 'lowca', 'tropiciel', 'tancerz']) {
+            if (text.includes(word)) tokens.push(word);
+        }
+    }
+    return tokens.map(t => t.trim()).filter(Boolean);
 }
 
 function isEqBuyerItemForHero(data, settings) {
     const hero = Engine?.hero?.d || {};
     const heroLvl = Number(hero.lvl || hero.level || 1);
-    const heroProf = String(hero.prof || '').toLowerCase();
+    const heroProfAliases = getHeroProfessionAliases();
     const cl = Number(data.cl || 0);
     if (![4, 8, 9, 10, 11, 12, 13, 15, 22, 29].includes(cl)) return false;
     if (settings.weaponsOnly && ![4, 29].includes(cl)) return false;
     if (data.level && data.level > heroLvl) return false;
-    const stat = `${data.stat};${data.prof}`.toLowerCase();
-    const reqProf = stat.match(/(?:reqp|prof)=([^;]+)/)?.[1] || '';
-    if (reqProf && heroProf && !reqProf.includes(heroProf) && !/all|wsz|kazd|ka/.test(reqProf)) return false;
+    const profTokens = getEqBuyerProfessionTokens(data);
+    if (profTokens.length && !profTokens.some(token => {
+        const t = String(token || '').toLowerCase();
+        return heroProfAliases.has(t) || [...heroProfAliases].some(alias => alias && (t.includes(alias) || alias.includes(t)));
+    })) return false;
     return true;
 }
 
@@ -16748,6 +16839,47 @@ function equipEqBuyerPurchasedItems(names = []) {
     });
 }
 
+function beginEqBuyerAutomation(task) {
+    const settings = ensureEqBuyerSettings();
+    const key = getEqBuyerTaskKey(task);
+    if (settings.activeTaskKey !== key) {
+        settings.activeTaskKey = key;
+        settings.wasExpingBeforeBuy = !!(window.isExping || window.expRunning);
+        settings.startedAt = Date.now();
+        if (settings.wasExpingBeforeBuy && typeof rememberExpShopReturnTarget === 'function') {
+            rememberExpShopReturnTarget(`eq_buyer:${task.level}`, { currentMap: typeof Engine !== 'undefined' ? Engine?.map?.d?.name : '' });
+        }
+        if (settings.wasExpingBeforeBuy && typeof stopPatrol === 'function') {
+            window.__margoneuroAutoPauseReason = `eq_buyer:${task.level}`;
+            try { stopPatrol(true); }
+            finally { window.__margoneuroAutoPauseReason = ''; }
+        }
+    }
+    window.__eqBuyerActive = true;
+    window.isExpSuspended = true;
+    return settings;
+}
+
+function finishEqBuyerAutomation(task, reason = 'done') {
+    const settings = ensureEqBuyerSettings();
+    const shouldResume = !!settings.wasExpingBeforeBuy;
+    settings.activeTaskKey = '';
+    settings.wasExpingBeforeBuy = false;
+    settings.finishedAt = Date.now();
+    settings.finishReason = reason;
+    window.__eqBuyerActive = false;
+    window.isExpSuspended = false;
+    if (typeof saveSettings === 'function') saveSettings();
+    renderEqBuyerPanel();
+    if (shouldResume) {
+        setTimeout(() => {
+            if (typeof window.resumeExpAfterAutoSell === 'function') window.resumeExpAfterAutoSell();
+            else if (typeof window.ensureExpSoftRunning === 'function') window.ensureExpSoftRunning(`eq_buyer_${reason}`);
+            if (typeof window.requestExpLogicSoon === 'function') window.requestExpLogicSoon(900, `eq_buyer_${reason}`);
+        }, 900);
+    }
+}
+
 function tryBuyEqBuyerItems(task) {
     const settings = ensureEqBuyerSettings();
     if (!(Engine?.shop?.items && Engine?.shop?.basket)) {
@@ -16758,6 +16890,8 @@ function tryBuyEqBuyerItems(task) {
     if (!items.length) {
         const status = document.getElementById('eqBuyerStatus');
         if (status) status.textContent = `Sklep NPC ${task.npcId}: brak pasujacego EQ dla profesji/poziomu.`;
+        settings.skipped[getEqBuyerTaskKey(task)] = Date.now();
+        finishEqBuyerAutomation(task, 'no_matching_items');
         return false;
     }
     const bestByClass = new Map();
@@ -16775,18 +16909,16 @@ function tryBuyEqBuyerItems(task) {
         setTimeout(() => equipEqBuyerPurchasedItems(names), 1200);
         const key = getEqBuyerTaskKey(task);
         settings.done[key] = Date.now();
-        settings.activeTaskKey = '';
-        if (typeof saveSettings === 'function') saveSettings();
-        renderEqBuyerPanel();
         if (window.logExp) window.logExp(`[EQ] Kupiono/zalozono: ${names.join(', ') || 'EQ'} (lvl ${task.level})`, '#ce93d8');
         try { Engine.shop.close?.(); } catch (e) {}
+        finishEqBuyerAutomation(task, 'bought');
     }, 650);
     return true;
 }
 
 function runEqBuyerTask(task) {
     if (!task || !Engine?.hero?.d) return false;
-    const settings = ensureEqBuyerSettings();
+    const settings = beginEqBuyerAutomation(task);
     const key = getEqBuyerTaskKey(task);
     settings.activeTaskKey = key;
     if (!isOnEqBuyerTaskMap(task)) {
@@ -16978,8 +17110,9 @@ function getEqUpgraderItemData(item) {
     const cl = Number(d.cl ?? item?.cl ?? cached.cl ?? 0);
     const st = Number(d.st ?? item?.st ?? 0);
     const id = d.id ?? item?.id ?? cached.id ?? '';
-    const text = auctionNorm ? auctionNorm(`${name} ${stat} ${cached.tip || ''} ${d.tip || ''}`) : String(`${name} ${stat}`).toLowerCase();
-    return { raw: item, data: d, id, name, cl, st, stat, text };
+    const icon = String(d.icon || d.img || d.image || d.src || item?.icon || item?.img || item?.image || item?.src || cached.icon || cached.img || '');
+    const text = auctionNorm ? auctionNorm(`${name} ${stat} ${cached.tip || ''} ${d.tip || ''} ${icon}`) : String(`${name} ${stat} ${icon}`).toLowerCase();
+    return { raw: item, data: d, id, name, cl, st, stat, icon, text };
 }
 
 function classifyEqUpgraderSlot(item) {
@@ -17011,6 +17144,12 @@ function findEqItemDomElement(item) {
         `[data-id="${id}"]`,
         `[data-item-id="${id}"]`,
         `[item-id="${id}"]`,
+        `[data-item_id="${id}"]`,
+        `[data-eq-id="${id}"]`,
+        `[data-uniq-id="${id}"]`,
+        `[data-name*="${id}"]`,
+        `[tip*="${id}"]`,
+        `[data-tip*="${id}"]`,
         `#item${id}`,
         `.item-id-${id}`,
         `.item-${id}`
@@ -17020,33 +17159,71 @@ function findEqItemDomElement(item) {
         if (el && isAuctionElementVisible(el)) return el;
     }
     const name = auctionNorm ? auctionNorm(item?.name || '') : String(item?.name || '').toLowerCase();
-    if (!name) return null;
-    return [...document.querySelectorAll('.item, .inventory-item, [class*="item"], img, div')]
+    const icon = String(item?.icon || '').split(/[\\/]/).pop().replace(/\?.*$/, '').toLowerCase();
+    const candidates = [...document.querySelectorAll('.item, .inventory-item, [class*="item"], [class*="equip"], [tip], [data-tip], [title], img, canvas, div, span')]
         .find(el => {
             if (!isAuctionElementVisible(el)) return false;
-            const text = auctionNorm ? auctionNorm(`${el.textContent || ''} ${el.title || ''} ${el.getAttribute?.('tip') || ''} ${el.getAttribute?.('data-name') || ''}`) : '';
-            return text && text.includes(name);
-        }) || null;
+            const attrs = [
+                el.textContent || '',
+                el.title || '',
+                el.alt || '',
+                el.id || '',
+                el.className || '',
+                el.getAttribute?.('tip') || '',
+                el.getAttribute?.('data-tip') || '',
+                el.getAttribute?.('data-name') || '',
+                el.getAttribute?.('aria-label') || '',
+                el.getAttribute?.('src') || '',
+                el.getAttribute?.('style') || '',
+                el.style?.backgroundImage || ''
+            ].join(' ');
+            const text = auctionNorm ? auctionNorm(attrs) : attrs.toLowerCase();
+            if (name && text.includes(name)) return true;
+            if (icon && attrs.toLowerCase().includes(icon)) return true;
+            return false;
+        });
+    return candidates || null;
 }
 
 function openEqUpgraderItemMenu(item) {
     const raw = item?.raw || item;
-    const event = {
+    const makeEvent = () => ({
         stopPropagation() {},
         preventDefault() {},
         button: 2,
+        which: 3,
         bubbles: true,
         cancelable: true,
         view: window
-    };
-    const handlers = [raw?.oncontextmenu, raw?.d?.oncontextmenu, raw?.sprite?.oncontextmenu].filter(fn => typeof fn === 'function');
+    });
+    const handlers = [
+        raw?.oncontextmenu,
+        raw?.d?.oncontextmenu,
+        raw?.sprite?.oncontextmenu,
+        raw?.contextMenu,
+        raw?.openMenu,
+        raw?.showMenu
+    ].filter(fn => typeof fn === 'function');
     for (const fn of handlers) {
-        try { fn.call(raw, event); return true; } catch (e) {}
+        try { fn.call(raw, makeEvent(), raw); return true; } catch (e) {}
     }
     const el = findEqItemDomElement(item);
     if (!el) return false;
     try {
-        el.dispatchEvent(new MouseEvent('contextmenu', event));
+        const rect = el.getBoundingClientRect();
+        const clientX = rect.left + rect.width / 2;
+        const clientY = rect.top + rect.height / 2;
+        ['mouseover', 'mousedown', 'contextmenu', 'mouseup'].forEach(type => {
+            el.dispatchEvent(new MouseEvent(type, {
+                bubbles: true,
+                cancelable: true,
+                view: window,
+                button: 2,
+                buttons: type === 'mouseup' ? 0 : 2,
+                clientX,
+                clientY
+            }));
+        });
         return true;
     } catch (e) {
         return false;
@@ -17100,7 +17277,7 @@ function selectPreferredCraftStat(root) {
     return false;
 }
 
-function handleCraftWindowForEqUpgrader() {
+function handleCraftWindowForEqUpgrader(force = false) {
     const settings = ensureEquipmentUpgraderSettings();
     const root = getCraftRoot();
     if (!root) return false;
@@ -17137,7 +17314,7 @@ function handleCraftWindowForEqUpgrader() {
             return true;
         }
     }
-    if (/ulepszanie|moc przedmiotu/.test(text) && settings.upgradeToMax) {
+    if (/ulepszanie|moc przedmiotu/.test(text) && (settings.upgradeToMax || force)) {
         if (clickVisibleCraftText(/^ulepsz$/)) {
             setEqUpgraderStatus('Ulepszam przedmiot.', '#80deea');
             return true;
@@ -17166,7 +17343,7 @@ function tickEquipmentUpgrader(force = false) {
     if (Engine?.battle?.show || window.autoSellState?.active || window.autoPotState?.active || window.auctionSellerState?.active) return false;
     if (!force && Date.now() - Number(settings.lastRunAt || 0) < 2200) return false;
     settings.lastRunAt = Date.now();
-    if (handleCraftWindowForEqUpgrader()) return true;
+    if (handleCraftWindowForEqUpgrader(force)) return true;
     const target = chooseEqUpgraderTarget();
     if (!target) {
         setEqUpgraderStatus('Brak aktywnego przedmiotu do ulepszenia.', '#80deea');
@@ -17175,7 +17352,7 @@ function tickEquipmentUpgrader(force = false) {
     window.__eqUpgraderItemCooldown = window.__eqUpgraderItemCooldown || {};
     window.__eqUpgraderItemCooldown[String(target.id)] = Date.now();
     if (!openEqUpgraderItemMenu(target)) {
-        setEqUpgraderStatus(`Nie moge otworzyc menu: ${target.name || target.id}`, '#ffcc80');
+        setEqUpgraderStatus(`Nie moge otworzyc menu: ${target.name || target.id} id=${target.id || '?'} st=${target.st || '?'} icon=${target.icon || '-'}`, '#ffcc80');
         return false;
     }
     setTimeout(() => {
@@ -18923,7 +19100,9 @@ function optimizeRoute() {
 
 
 function stopPatrol(hardStop = true) {
-        if (!window.__stoppingForCaptcha) window.margoneuroStoppedManually = true;
+        const autoPauseReason = String(window.__margoneuroAutoPauseReason || '');
+        const manualStop = !autoPauseReason;
+        if (manualStop && !window.__stoppingForCaptcha) window.margoneuroStoppedManually = true;
         let wasMoving = isPatrolling || isRushing;
         isPatrolling = false;
         window.isPatrolling = false;
@@ -18978,11 +19157,11 @@ function stopPatrol(hardStop = true) {
             HeroLogger.emit('INFO', 'ROUTE_STOP', 'STOP ekspienia/trasy (stopPatrol)', "#f44336", { category: 'ROUTE' });
         }
 
-        if (hardStop && window.autoPotState?.active && typeof window.resetAutoPotAutomation === 'function') {
+        if (manualStop && hardStop && window.autoPotState?.active && typeof window.resetAutoPotAutomation === 'function') {
             window.resetAutoPotAutomation('manual_stop', 30000);
         }
 
-        if (window.BerserkController?.onBotStop) window.BerserkController.onBotStop('stop_patrol');
+        if (manualStop && window.BerserkController?.onBotStop) window.BerserkController.onBotStop('stop_patrol');
     }
 
     function normalizePatrolMapName(name) {
@@ -19228,6 +19407,7 @@ let expMapEnteredAt = 0;
 let expLastMapName = "";
 
 let expEmptyScans = 0;
+let expNoMobScans = 0;
 let expLastLoggedTargetId = null;
 let expLastLoggedTransitMap = null;
 let expLastMissingTargetId = null;
@@ -19306,14 +19486,14 @@ const EXP_MEMORY_TARGET_ACTIVE_LIMIT = 12;
 const EXP_RADAR_SNAPSHOT_TTL_MS = 700;
 const EXP_RADAR_SNAPSHOT_MOVING_TTL_MS = 1100;
 const EXP_TARGET_GROUP_CANDIDATE_LIMIT = 14;
-const EXP_TARGET_SWITCH_LOCK_MS = 6000;
-const EXP_OPPORTUNISTIC_RETARGET_MIN_MS = 4000;
-const EXP_OPPORTUNISTIC_RETARGET_MAX_MS = 6000;
-const EXP_OPPORTUNISTIC_RETARGET_COOLDOWN_MS = 1800;
+const EXP_TARGET_SWITCH_LOCK_MS = 5200;
+const EXP_OPPORTUNISTIC_RETARGET_MIN_MS = 5000;
+const EXP_OPPORTUNISTIC_RETARGET_MAX_MS = 7000;
+const EXP_OPPORTUNISTIC_RETARGET_COOLDOWN_MS = 900;
 const EXP_OPPORTUNISTIC_NEAR_CHEB_DIST = 5;
 const EXP_OPPORTUNISTIC_MIN_PATH_GAIN = 3;
-const EXP_TARGET_SELECTION_INTERVAL_MS = 800;
-const EXP_TARGET_REPATH_INTERVAL_MS = 1200;
+const EXP_TARGET_SELECTION_INTERVAL_MS = 500;
+const EXP_TARGET_REPATH_INTERVAL_MS = 850;
 const EXP_TARGET_LOST_GRACE_MS = 550;
 const EXP_BETTER_TARGET_REQUIRED_GAIN = 16;
 const EXP_BETTER_TARGET_REQUIRED_RATIO = 0.35;
@@ -19321,7 +19501,7 @@ const EXP_CLEAN_GUARD_LOG_THROTTLE_MS = 30000;
 const EXP_TRANSIT_VISIBLE_SCAN_INTERVAL_MS = 2200;
 const EXP_TRANSIT_MOVING_SCAN_INTERVAL_MS = 4000;
 const EXP_TRANSIT_RUSH_REISSUE_MS = 2600;
-const EXP_ADJACENT_ATTACK_POKE_MS = 650;
+const EXP_ADJACENT_ATTACK_POKE_MS = 320;
 const EXP_FAST_DISTANCE_CACHE_TTL_MS = 1800;
 const EXP_FAST_PATH_CACHE_TTL_MS = 6000;
 const EXP_VISIBLE_MOB_HEAVY_FALLBACK_MS = 1300;
@@ -19337,16 +19517,16 @@ const EXP_MOVE_LEASE_MS = 9000;
 const EXP_MOVE_PROGRESS_LEASE_MS = 11000;
 const EXP_MOVE_PROGRESS_HOLD_MS = 6500;
 const EXP_MOVE_STALL_RETRY_MS = 5000;
-const EXP_APPROACH_STANDSTILL_SWITCH_MS = 5000;
-const EXP_APPROACH_PULSE_MIN_MS = 250;
-const EXP_APPROACH_PULSE_MAX_MS = 500;
+const EXP_APPROACH_STANDSTILL_SWITCH_MS = 5200;
+const EXP_APPROACH_PULSE_MIN_MS = 180;
+const EXP_APPROACH_PULSE_MAX_MS = 340;
 const EXP_APPROACH_PULSE_GUARD_NOTE_MS = 450;
 const EXP_APPROACH_PULSE_MAX_TARGET_DIST = 32;
 const EXP_TICK_IDLE_MS = 1000;
-const EXP_TICK_MOVING_MS = 350;
+const EXP_TICK_MOVING_MS = 260;
 const EXP_TICK_TRANSIT_MS = 1200;
 const EXP_TICK_PVP_MS = 250;
-const EXP_TICK_FAST_MS = 220;
+const EXP_TICK_FAST_MS = 160;
 const EXP_TICK_EMPTY_MS = 650;
 const EXP_TICK_LOADING_MS = 1600;
 const EXP_TICK_ENGINE_WAIT_MS = 2000;
@@ -19364,14 +19544,14 @@ const ONE_TILE_MS = 1000 / HERO_SPEED_TILES_PER_SEC;
 const EXP_MOVE_COMMAND_MIN_GAP_MS = 220;
 const EXP_PATH_RECALC_MIN_GAP_MS = 700;
 const EXP_POST_MOVE_MIN_GAP_MS = 110;
-const EXP_ATTACK_AFTER_ARRIVAL_BUFFER_MS = 150;
-const EXP_ATTACK_SAME_TARGET_COOLDOWN_MS = 650;
+const EXP_ATTACK_AFTER_ARRIVAL_BUFFER_MS = 80;
+const EXP_ATTACK_SAME_TARGET_COOLDOWN_MS = 360;
 const EXP_MOVE_VISUAL_OFFSET_WAIT = 0.10;
 const EXP_MOVE_DESYNC_OFFSET = 0.35;
 const EXP_MOVE_DESYNC_HOLD_MS = 420;
 const EXP_MOVE_ETA_BUFFER_MS = 650;
 const EXP_MOVE_ETA_MAX_MS = 8500;
-const EXP_KILL_RETARGET_DELAY_MS = 90;
+const EXP_KILL_RETARGET_DELAY_MS = 35;
 const EXP_KILL_SIGNAL_WATCH_MS = 4200;
 const EXP_KILL_SIGNAL_MIN_CHECK_MS = 70;
 const EXP_KILL_SIGNAL_MAX_CHECK_MS = 125;
@@ -26312,6 +26492,17 @@ function shouldKeepLockedExpTarget(lock, lockedMob, bestMob, lockedCost, bestCos
     if (opportunistic.allow) {
         window.__expLastOpportunisticRetargetAt = now;
         return { keep: false, reason: opportunistic.reason, ...opportunistic };
+    }
+    const approachAge = now - Math.max(Number(lock.lastSwitchAt || 0), Number(lock.selectedAt || 0));
+    if (approachAge >= EXP_APPROACH_STANDSTILL_SWITCH_MS) {
+        const lockedCheb = Number.isFinite(Number(lockedMob?.cheapDistance)) ? Number(lockedMob.cheapDistance) : getExpTargetChebDistanceFromHero(lockedMob || lock);
+        const candidateCheb = Number.isFinite(Number(bestMob?.cheapDistance)) ? Number(bestMob.cheapDistance) : getExpTargetChebDistanceFromHero(bestMob);
+        const pathGain = lockCost - candidateCost;
+        const chebGain = lockedCheb - candidateCheb;
+        if (pathGain >= 2 || chebGain >= 2 || candidateCheb <= 1) {
+            window.__expLastOpportunisticRetargetAt = now;
+            return { keep: false, reason: 'closer_target_after_approach_guard', approachAge, pathGain, chebGain, lockCost, candidateCost };
+        }
     }
     if (now < Number(lock.switchLockedUntil || 0)) return { keep: true, reason: opportunistic.reason || 'switch_lock_active', opportunistic };
     const lastMove = window.expLastMoveCommand || null;
@@ -33762,6 +33953,25 @@ if (isDead) {
                             return;
                         }
 
+                        const preBuySellReport = typeof window.getSellableItemsReport === 'function' ? window.getSellableItemsReport() : null;
+                        const preBuySellable = Number(preBuySellReport?.sellableCount || 0);
+                        const lastPreBuySellAt = Number(window.__autoPotLastPreBuySellAt || 0);
+                        if (preBuySellable > 0 && autoPotNow - lastPreBuySellAt > 90000 && typeof window.startAutoSellSession === 'function') {
+                            window.__autoPotLastPreBuySellAt = autoPotNow;
+                            const started = window.startAutoSellSession('autopot_before_buy', {
+                                force: true,
+                                stats: s,
+                                trigger: { reason: 'autopot_before_buy', potionInventory, sellableCount: preBuySellable }
+                            });
+                            if (started?.ok) {
+                                window.__autoPotBuyBlockedUntil = autoPotNow + 45000;
+                                if (typeof logEvent === 'function') {
+                                    logEvent('AUTOPOT', `Przed zakupem mikstur sprzedaje itemy (${preBuySellable}).`, 30000, '#ffb300', { key: 'autopot_prebuy_sell' });
+                                }
+                                return;
+                            }
+                        }
+
                         if (s.freeSlots < requiredStacks && botSettings.autosell && botSettings.autosell.enabled) {
                             const sellReport = typeof window.getSellableItemsReport === 'function' ? window.getSellableItemsReport() : null;
                             if (sellReport && Number(sellReport.sellableCount || 0) <= 0) {
@@ -33803,12 +34013,21 @@ if (isDead) {
                         if (lastAnalysisAt && autoPotNow - lastAnalysisAt < 10000) return;
                         window.__autoPotLastAnalysisAt = autoPotNow;
 
-                        if (typeof stopPatrol === 'function') stopPatrol(true);
+                        const wasExpingBeforeAutoPot = !!(window.isExping || window.expRunning);
+                        if (wasExpingBeforeAutoPot && typeof rememberExpShopReturnTarget === 'function') {
+                            rememberExpShopReturnTarget('autopot_start', { currentMap: typeof Engine !== 'undefined' ? Engine?.map?.d?.name : '' });
+                        }
+                        if (typeof stopPatrol === 'function') {
+                            window.__margoneuroAutoPauseReason = 'autopot';
+                            try { stopPatrol(true); }
+                            finally { window.__margoneuroAutoPauseReason = ''; }
+                        }
                         window.autoPotState.active = true;
                         window.autoPotState.startedAt = Date.now();
                         window.autoPotState.talkAttempts = 0;
                         window.autoPotState.dialogStartedAt = 0;
                         window.autoPotState.stacksToBuy = requiredStacks; // Zapisujemy ile realnie kupujemy
+                        window.autoPotState.wasExpingBeforePot = wasExpingBeforeAutoPot;
                         window.autoPotState.wasBerserkOn = botSettings.berserk && botSettings.berserk.enabled;
                     if (window.autoPotState.wasBerserkOn) {
                         botSettings.berserk.enabled = false;
@@ -33817,7 +34036,7 @@ if (isDead) {
                         if (typeof window.updateServerBerserk === 'function') window.updateServerBerserk();
                         if (window.logExp) window.logExp("🛡️ Wyłączam Berserka na czas powrotu do miasta.", "#ff9800");
                     }
-                    let maxhp = parseInt(Engine.hero.d.maxhp) || (Engine.hero.d.warrior_stats ? parseInt(Engine.hero.d.warrior_stats.maxhp) : 0);
+                    let maxhp = 0;
                     if (!maxhp) {
                         let hpEl = document.querySelector('.health-val') || document.querySelector('.hp-values');
                         if (hpEl && hpEl.innerText) {
@@ -33827,7 +34046,7 @@ if (isDead) {
                     }
                     maxhp = maxhp || 5000;
                     let currentLvl = Engine.hero.d.lvl || 1;
-                    let targetHeal = Math.floor(maxhp * 0.30);
+                    let targetHeal = Number.MAX_SAFE_INTEGER;
                     let minAcceptableHeal = targetHeal * 0.15; // Potka musi leczyć chociaż 15% tego co chcemy
 
                     let currMap = Engine.map.d.name;
@@ -33862,7 +34081,7 @@ if (isDead) {
                                 if (healMatch) healAmount = parseInt(healMatch[1].replace(/\s/g, ''));
 
                                 if (healAmount > 0) {
-                                    availablePotions.push({ npc: k, itemName: i.name.split('Typ:')[0].trim(), heal: healAmount, distance: dist });
+                                    availablePotions.push({ npc: k, itemName: i.name.split('Typ:')[0].trim(), heal: healAmount, itemLvl, distance: dist });
                                 }
                             });
                         }
@@ -33882,7 +34101,8 @@ if (isDead) {
                             if (a.distance !== b.distance) return a.distance - b.distance;
 
                             // Jeśli dystans ten sam, bierzemy potkę, która lepiej pasuje
-                            return Math.abs(a.heal - targetHeal) - Math.abs(b.heal - targetHeal);
+                            if (Number(a.itemLvl || 0) !== Number(b.itemLvl || 0)) return Number(b.itemLvl || 0) - Number(a.itemLvl || 0);
+                            return Number(b.heal || 0) - Number(a.heal || 0);
                         });
 
                         let bestChoice = availablePotions[0];
@@ -33893,6 +34113,7 @@ if (isDead) {
                         window.isRushing = true;
 
                         let msg = `đź§Ş Analiza... Szukam potki na ~${targetHeal} HP. Wybrano: ${bestChoice.itemName} (${bestChoice.heal} HP) od ${bestChoice.npc.npc_name} (Dystans: ${bestChoice.distance} map).`;
+                        msg = `Kupuje mikstury: ${bestChoice.itemName} (${bestChoice.heal || '?'} HP, lvl ${bestChoice.itemLvl || '?'}) od ${bestChoice.npc.npc_name} (dystans: ${bestChoice.distance} map).`;
                         if (window.logHero) window.logHero(msg, "#e91e63");
                         if (window.logExp) window.logExp(msg, "#e91e63");
                     } else {
@@ -34041,6 +34262,7 @@ if (isDead) {
                     let msg = `✅ Otrzymano mikstury. Zamykam i wracam do pracy.`;
                     if (window.logHero) window.logHero(msg, "#4caf50");
                     if (window.logExp) window.logExp(msg, "#4caf50");
+                    const shouldResumeExpAfterPot = !!window.autoPotState.wasExpingBeforePot;
                     window.autoPotState.active = false;
                     window.isExpSuspended = false;
                     window.isRushing = false;
@@ -34052,6 +34274,13 @@ if (isDead) {
                     let closeBtn = document.querySelector('.shop-close-btn, .close-button, .window-close, .close-cross');
                     if (closeBtn) closeBtn.click();
                     window.lastExpMap = null;
+                    if (shouldResumeExpAfterPot) {
+                        setTimeout(() => {
+                            if (typeof window.resumeExpAfterAutoSell === 'function') window.resumeExpAfterAutoSell();
+                            else if (typeof window.ensureExpSoftRunning === 'function') window.ensureExpSoftRunning('autopot_done');
+                            if (typeof window.requestExpLogicSoon === 'function') window.requestExpLogicSoon(700, 'autopot_done');
+                        }, 700);
+                    }
                 }
             }
         }, 500);
@@ -34072,6 +34301,8 @@ function getAuctionSellerDefaultSettings() {
         minDelayMs: 500,
         maxDelayMs: 1500,
         renewBeforeHours: 24,
+        allowBidOnly: false,
+        minSafeBuyNowPrice: 1000,
         uniqueBidPrice: 0,
         uniqueBuyNowPrice: 3000000,
         heroicBidPrice: 0,
@@ -34239,6 +34470,8 @@ function getAuctionItemData(item) {
 
 function detectAuctionItemRarity(itemData) {
     const t = itemData?.text || '';
+    const n = auctionNorm(itemData?.name || '');
+    if (['obuch ducha gor', 'obuch ducha gĂłr'].includes(n)) return 'heroic';
     if (/legend|legendarn|rarity[=: ]legend|rarity[=: ]5/.test(t)) return 'legendary';
     if (/heroic|heroik|heroiczn|heroicz|rarity[=: ]hero|rarity[=: ]4/.test(t)) return 'heroic';
     if (/unikat|unique|uniqe|zolty|zloty|yellow|rarity[=: ]uni|rarity[=: ]3|rarity[=: ]2/.test(t)) return 'unique';
@@ -34553,12 +34786,17 @@ function isAuctionElementVisible(el) {
 function realAuctionClick(el) {
     if (!el) return false;
     try {
+        const rect = el.getBoundingClientRect?.();
+        const clientX = rect ? rect.left + rect.width / 2 : 0;
+        const clientY = rect ? rect.top + rect.height / 2 : 0;
         ['mouseover', 'mousedown', 'mouseup', 'click'].forEach(type => {
             el.dispatchEvent(new MouseEvent(type, {
                 bubbles: true,
                 cancelable: true,
                 view: window,
-                button: 0
+                button: 0,
+                clientX,
+                clientY
             }));
         });
     } catch (e) {
@@ -34569,18 +34807,29 @@ function realAuctionClick(el) {
 }
 window.realAuctionClick = realAuctionClick;
 
+function getAuctionElementArea(el) {
+    try {
+        const rect = el.getBoundingClientRect();
+        return Math.max(0, rect.width * rect.height);
+    } catch (e) {
+        return 0;
+    }
+}
+
 function getAuctionListingRoot() {
-    const selectors = [
-        '.auction-window',
-        '.auction',
-        '[class*="auction"]',
-        '.window',
-        '.dialog-window',
-        '.margo-window',
-        '.popup',
-        '.modal',
-        'body > div'
-    ].join(',');
+    const strictBoxes = [...document.querySelectorAll('div, .window, .dialog-window, .margo-window, .popup, .modal')]
+        .filter(isAuctionElementVisible)
+        .filter(el => {
+            const text = auctionNorm(el.innerText || el.textContent || '');
+            return /licytacja od/.test(text)
+                && /kwota kup teraz|kup teraz/.test(text)
+                && /czas trwania/.test(text)
+                && !/nazwa przedmiotu|min cena|max cena|aukcje graczy|twoje aukcje|obserwowane|licytowane|wybierz kategorie/.test(text);
+        })
+        .sort((a, b) => getAuctionElementArea(a) - getAuctionElementArea(b));
+    if (strictBoxes[0]) return strictBoxes[0];
+
+    const selectors = '.auction-window,.auction,[class*="auction"],.window,.dialog-window,.margo-window,.popup,.modal,body > div';
     const roots = [...document.querySelectorAll(selectors)]
         .filter(isAuctionElementVisible)
         .map(el => {
@@ -34592,17 +34841,18 @@ function getAuctionListingRoot() {
             if (/czas trwania/.test(text)) score += 25;
             if (/koszt wystawienia|podatek ze sprzedazy|podatek ze sprzeda/.test(text)) score += 15;
             if (/wystaw\s*(?:\[|$|\s)/.test(text)) score += 8;
-            if (/nazwa przedmiotu|min cena|max cena|wybierz kategorie|aukcje graczy|obserwowane|licytowane/.test(text)) score -= 35;
+            if (/nazwa przedmiotu|min cena|max cena|wybierz kategorie|aukcje graczy|twoje aukcje|obserwowane|licytowane/.test(text)) score -= 55;
             return { el, text, rect, score, area: rect.width * rect.height };
         })
-        .filter(x => x.score > 20)
+        .filter(x => x.score > 55)
         .sort((a, b) => (b.score - a.score) || (a.area - b.area));
     return roots[0]?.el || null;
 }
 window.getAuctionListingRoot = getAuctionListingRoot;
 
 function findAuctionFinalSubmitButton() {
-    const root = getAuctionListingRoot() || document;
+    const root = getAuctionListingRoot();
+    if (!root) return null;
     const candidates = Array.from(root.querySelectorAll('button, input, div, span, a'))
         .filter(isAuctionElementVisible)
         .map(el => {
@@ -34636,7 +34886,7 @@ function findAuctionAcceptButton() {
                 height: rect.height
             };
         })
-        .filter(x => /^(tak|ok|akceptuj|potwierdz|potwierdź|zatwierdz|zatwierdź|wystaw)$/i.test(x.text))
+        .filter(x => /^(tak|ok|akceptuj|potwierdz|potwierdź|zatwierdz|zatwierdź)$/i.test(x.text))
         .sort((a, b) => b.top - a.top);
     return candidates[0]?.el || null;
 }
@@ -34656,9 +34906,36 @@ async function acceptAuctionConfirm(timeoutMs = 2200) {
 }
 window.acceptAuctionConfirm = acceptAuctionConfirm;
 
-async function clickAuctionSubmitAndConfirm() {
+function isAuctionPreparedOfferValid(expected = {}) {
+    const prepared = window.__auctionLastPreparedOffer || null;
+    if (!prepared || Date.now() - Number(prepared.at || 0) > 5000) {
+        return { ok: false, reason: 'offer_not_prepared' };
+    }
+    const expectedBuyNow = Math.max(0, Number(expected.buyNow ?? prepared.buyNow ?? 0));
+    const minSafe = Math.max(1, Number(expected.minSafeBuyNowPrice ?? prepared.minSafeBuyNowPrice ?? 1000));
+    if (expectedBuyNow < minSafe) return { ok: false, reason: 'buy_now_below_safe_min', expectedBuyNow, minSafe };
+    const root = getAuctionListingRoot();
+    if (!root) return { ok: false, reason: 'listing_form_missing' };
+    const inputs = getAuctionListingInputs(root);
+    const buyInput = inputs.buyInput;
+    if (!buyInput) return { ok: false, reason: 'buy_now_input_missing' };
+    const readNumber = value => Number(String(value || '').replace(/\D/g, '')) || 0;
+    const actualBuyNow = readNumber(buyInput.value);
+    if (actualBuyNow !== expectedBuyNow) {
+        return { ok: false, reason: 'buy_now_not_confirmed', actualBuyNow, expectedBuyNow };
+    }
+    return { ok: true, prepared, actualBuyNow };
+}
+window.isAuctionPreparedOfferValid = isAuctionPreparedOfferValid;
+
+async function clickAuctionSubmitAndConfirm(expected = {}) {
+    const prepared = isAuctionPreparedOfferValid(expected);
+    if (!prepared.ok) {
+        auctionLog(`blokuje Wystaw: ${prepared.reason}`, '#ff5252', 5000, `auction_submit_guard:${prepared.reason}`);
+        return { ok: false, reason: prepared.reason, guard: prepared };
+    }
     if (window.MARGO_AUKCJA_3M && typeof window.MARGO_AUKCJA_3M.clickAuctionSubmit === 'function') {
-        const ok = await window.MARGO_AUKCJA_3M.clickAuctionSubmit();
+        const ok = await window.MARGO_AUKCJA_3M.clickAuctionSubmit(expected);
         return ok ? { ok: true, confirmed: true, source: 'MARGO_AUKCJA_3M' } : { ok: false, reason: 'submit_not_found' };
     }
     const btn = findAuctionFinalSubmitButton();
@@ -34672,11 +34949,32 @@ window.clickAuctionSubmitAndConfirm = clickAuctionSubmitAndConfirm;
 
 function installMargoneuroAuctionCompat() {
     const A = window.MARGO_AUKCJA_3M || (window.MARGO_AUKCJA_3M = {});
-    A.CFG = { ...(A.CFG || {}), AUTO_WYSTAW: true };
+    const settings = ensureAuctionSellerSettings();
+    A.CFG = {
+        ...(A.CFG || {}),
+        AUTO_WYSTAW: true,
+        JAKOSCI_DO_WYSTAWIENIA: [
+            settings.listUnique ? 'unique' : '',
+            settings.listHeroic ? 'heroic' : '',
+            settings.listLegendary ? 'legendary' : ''
+        ].filter(Boolean),
+        CENY: {
+            unique: Number(settings.uniqueBuyNowPrice || 0),
+            heroic: Number(settings.heroicBuyNowPrice || 0),
+            legendary: Number(settings.legendaryBuyNowPrice || 0)
+        },
+        CZAS_H: Number(settings.durationHours || 168),
+        LICYTACJA_OD: ''
+    };
     A.acceptConfirm = async function() {
         return acceptAuctionConfirm(2200);
     };
-    A.clickAuctionSubmit = async function() {
+    A.clickAuctionSubmit = async function(expected = {}) {
+        const prepared = isAuctionPreparedOfferValid(expected);
+        if (!prepared.ok) {
+            auctionLog(`adapter aukcji stop: ${prepared.reason}`, '#ff5252', 5000, `auction_adapter_guard:${prepared.reason}`);
+            return false;
+        }
         const btn = findAuctionFinalSubmitButton();
         if (!btn) {
             auctionLog('Nie znalazlem finalnego przycisku Wystaw w formularzu.', '#ffcc80', 2500, 'auction_submit_missing');
@@ -34687,6 +34985,26 @@ function installMargoneuroAuctionCompat() {
         await A.acceptConfirm();
         return true;
     };
+    A.scanItems = function() {
+        return getAuctionSellerCandidates({ includeDisabled: true, force: true }).items || [];
+    };
+    A.runOnce = async function() {
+        const first = getAuctionSellerCandidates({ force: true, includeDisabled: true }).items?.[0];
+        if (!first) return false;
+        const result = await listOneAuctionItem(first);
+        return !!result?.ok;
+    };
+    A.runMany = async function(count = 1) {
+        let okCount = 0;
+        for (let i = 0; i < Number(count || 1); i++) {
+            const ok = await A.runOnce();
+            if (!ok) break;
+            okCount += 1;
+            await new Promise(r => setTimeout(r, 900));
+        }
+        return okCount;
+    };
+    window.MARGO_AUKCJA_AUTO = A;
     return A;
 }
 window.installMargoneuroAuctionCompat = installMargoneuroAuctionCompat;
@@ -34763,9 +35081,9 @@ function getAuctionRoot() {
     return getAuctionListingRoot() || document;
 }
 
-function setAuctionInputValue(input, value) {
+function setAuctionInputRaw(input, value) {
     if (!input) return false;
-    const str = String(Math.max(0, Number(value || 0)));
+    const str = value === '' || value === null || value === undefined ? '' : String(value);
     try {
         const proto = Object.getPrototypeOf(input);
         const descriptor = Object.getOwnPropertyDescriptor(proto, 'value');
@@ -34776,15 +35094,16 @@ function setAuctionInputValue(input, value) {
     }
     input.dispatchEvent(new Event('input', { bubbles: true }));
     input.dispatchEvent(new Event('change', { bubbles: true }));
+    try { input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true })); } catch (e) {}
     return true;
 }
 
-function fillAuctionListingForm(item, price, settings) {
-    const root = getAuctionRoot();
-    if (root === document) {
-        auctionLog('Nie widze formularza wystawiania - nie wpisuje cen w glowna wyszukiwarke.', '#ffcc80', 2500, 'auction_no_listing_root');
-        return false;
-    }
+function setAuctionInputValue(input, value) {
+    return setAuctionInputRaw(input, String(Math.max(0, Number(value || 0))));
+}
+
+function getAuctionListingInputs(root = getAuctionListingRoot()) {
+    if (!root) return { inputs: [], bidInput: null, buyInput: null, durationInput: null };
     const inputs = [...root.querySelectorAll('input')]
         .filter(input => !/checkbox|radio|button|submit/i.test(input.type || ''))
         .filter(input => {
@@ -34796,7 +35115,7 @@ function fillAuctionListingForm(item, price, settings) {
                 return true;
             }
         });
-    if (!inputs.length) return false;
+    if (!inputs.length) return { inputs, bidInput: null, buyInput: null, durationInput: null };
     const findByText = (rx) => inputs.find(input => {
         let node = input;
         for (let i = 0; i < 4 && node; i++, node = node.parentElement) {
@@ -34804,14 +35123,49 @@ function fillAuctionListingForm(item, price, settings) {
         }
         return false;
     });
-    const bidInput = findByText(/licytacja|min cena|min/) || inputs[0];
-    const buyInput = findByText(/kup teraz|kwota/) || inputs[1] || bidInput;
+    const bidInput = findByText(/licytacja od|licytacja/) || inputs[0] || null;
+    const buyInput = findByText(/kwota kup teraz|kup teraz|kwota/) || inputs.find(input => input !== bidInput) || inputs[1] || null;
     const durationInput = findByText(/czas trwania|czas/) || inputs[2] || null;
-    const minBid = Math.max(500, Number(price.bid || 0) || 500);
-    const buyNow = Math.max(minBid, Number(price.buyNow || 0) || minBid);
-    setAuctionInputValue(bidInput, minBid);
-    if (buyInput && buyInput !== bidInput) setAuctionInputValue(buyInput, buyNow);
+    return { inputs, bidInput, buyInput, durationInput };
+}
+window.getAuctionListingInputs = getAuctionListingInputs;
+
+function fillAuctionListingForm(item, price, settings) {
+    const root = getAuctionListingRoot();
+    if (!root) {
+        auctionLog('Nie widze formularza wystawiania - nie wpisuje cen w glowna wyszukiwarke.', '#ffcc80', 2500, 'auction_no_listing_root');
+        return false;
+    }
+    const minSafe = Math.max(1, Number(settings.minSafeBuyNowPrice || 1000));
+    const bid = Math.max(0, Number(price.bid || 0));
+    const buyNow = Math.max(0, Number(price.buyNow || 0));
+    if (!settings.allowBidOnly && buyNow < minSafe) {
+        auctionLog(`Przerywam wystawianie ${item?.name || item?.id}: kup teraz ${buyNow} < ${minSafe}.`, '#ff5252', 8000, `auction_price_guard:${item?.id || item?.name}`);
+        return false;
+    }
+    const { bidInput, buyInput, durationInput } = getAuctionListingInputs(root);
+    if (!bidInput || !buyInput || !durationInput) {
+        auctionLog('Nie znalazlem kompletu pol: licytacja/kup teraz/czas.', '#ffcc80', 4000, 'auction_inputs_missing');
+        return false;
+    }
+    setAuctionInputRaw(bidInput, bid > 0 ? String(bid) : '');
+    setAuctionInputRaw(buyInput, String(buyNow));
     if (durationInput && durationInput !== bidInput && durationInput !== buyInput) setAuctionInputValue(durationInput, settings.durationHours || 168);
+    const readNumber = value => Number(String(value || '').replace(/\D/g, '')) || 0;
+    const confirmedBuyNow = readNumber(buyInput.value);
+    if (confirmedBuyNow !== buyNow) {
+        auctionLog(`Cena kup teraz nie weszla do formularza (${confirmedBuyNow}/${buyNow}) - nie wystawiam.`, '#ff5252', 8000, `auction_buy_verify:${item?.id || item?.name}`);
+        return false;
+    }
+    window.__auctionLastPreparedOffer = {
+        at: Date.now(),
+        itemId: String(item?.id || ''),
+        name: item?.name || '',
+        rarity: item?.rarity || '',
+        bid,
+        buyNow,
+        minSafeBuyNowPrice: minSafe
+    };
     return true;
 }
 
@@ -34897,14 +35251,9 @@ async function waitForAuctionItemGone(item, beforeStats, timeout = 4500) {
 
 async function listOneAuctionItem(item) {
     const settings = ensureAuctionSellerSettings();
+    try { installMargoneuroAuctionCompat(); } catch (e) {}
     const price = item.price || getAuctionPriceForItem(item, item.rarity, settings);
     const beforeStats = typeof window.getBagStats === 'function' ? window.getBagStats() : { freeSlots: 0 };
-    const api = tryAuctionApiListItem(item, price, settings);
-    if (api.ok) {
-        const result = await waitForAuctionItemGone(item, beforeStats, 3500);
-        if (result.ok) return { ok: true, reason: `api_${api.method}` };
-        auctionLog(`API aukcji nie potwierdzilo wystawienia, probuje DOM: ${api.method}/${result.reason}`, '#ffcc80', 4000, `api_fallback:${item.id}`);
-    }
     const openBtn = getVisibleElementsByText(/wystaw przedmiot/)[0];
     if (openBtn) {
         realAuctionClick(openBtn);
@@ -34914,7 +35263,11 @@ async function listOneAuctionItem(item) {
     await new Promise(r => setTimeout(r, 250));
     if (!fillAuctionListingForm(item, price, settings)) return { ok: false, reason: 'form_not_found' };
     await new Promise(r => setTimeout(r, 180));
-    const submit = await clickAuctionSubmitAndConfirm();
+    const submit = await clickAuctionSubmitAndConfirm({
+        itemId: item.id,
+        buyNow: Number(price.buyNow || 0),
+        minSafeBuyNowPrice: Number(settings.minSafeBuyNowPrice || 1000)
+    });
     if (!submit.ok) return submit;
     let result = await waitForAuctionItemGone(item, beforeStats, 6500);
     if (!result.ok) {
@@ -34959,7 +35312,11 @@ function startAuctionSeller(reason = 'manual', options = {}) {
     const report = getAuctionSellerCandidates({ force: !!options.force, includeDisabled: !!options.force });
     if (!report.count) return { ok: false, reason: 'no_auction_items', report };
     const wasExpingBeforeAuction = !!(window.isExping || window.expRunning);
-    if (typeof stopPatrol === 'function') stopPatrol(true);
+    if (typeof stopPatrol === 'function') {
+        window.__margoneuroAutoPauseReason = `auction:${reason}`;
+        try { stopPatrol(true); }
+        finally { window.__margoneuroAutoPauseReason = ''; }
+    }
     if (wasExpingBeforeAuction && typeof rememberExpShopReturnTarget === 'function') {
         rememberExpShopReturnTarget(`auction_start:${reason}`, { currentMap: typeof Engine !== 'undefined' ? Engine?.map?.d?.name : '' });
     }
@@ -35545,7 +35902,11 @@ if (!window.__auctionSellerDaemonInstalled) {
             }
             const wasExpingBeforeSell = !!(window.isExping || window.expRunning);
             const wasBerserkOnBeforeSell = !!(botSettings.berserk && botSettings.berserk.enabled);
-            if (typeof stopPatrol === 'function') stopPatrol(true);
+            if (typeof stopPatrol === 'function') {
+                window.__margoneuroAutoPauseReason = `autosell:${reason}`;
+                try { stopPatrol(true); }
+                finally { window.__margoneuroAutoPauseReason = ''; }
+            }
             window.autoSellState.ignoreUntil = 0;
             window.autoSellState.active = true;
             window.autoSellState.step = 1;
@@ -35557,7 +35918,7 @@ if (!window.__auctionSellerDaemonInstalled) {
             const autoSellTriggerReason = String(options.trigger?.reason || reason || "");
             const preferTuniaForFullBag = !!(
                 botSettings.autosell?.onlyTunia ||
-                /full|bag|inventory|space|plecak|zakon_full_bag|autopot_need_space/i.test(autoSellTriggerReason)
+                /full|bag|inventory|space|plecak|zakon_full_bag/i.test(autoSellTriggerReason)
             );
             window.autoSellState.preferredTargetMap = preferTuniaForFullBag ? "Dom Tunii" : "";
             if (preferTuniaForFullBag) {
@@ -36015,7 +36376,11 @@ if (!window.__auctionSellerDaemonInstalled) {
                     const wasExpingBeforeSell = !!window.isExping;
                     const wasBerserkOnBeforeSell = !!(botSettings.berserk && botSettings.berserk.enabled);
 
-                    if (typeof stopPatrol === 'function') stopPatrol(true);
+                    if (typeof stopPatrol === 'function') {
+                        window.__margoneuroAutoPauseReason = 'autosell_full_inventory_fallback';
+                        try { stopPatrol(true); }
+                        finally { window.__margoneuroAutoPauseReason = ''; }
+                    }
                     window.autoSellState.active = true;
                     window.autoSellState.step = 1;
                     window.autoSellState.phase = SHOP_SELL_STATES.OPENING;
