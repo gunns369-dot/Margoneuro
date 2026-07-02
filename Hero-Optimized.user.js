@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         MargoNeuro - Optimized Edition
-// @version      64.8.1
+// @version      64.8.2
 // @description  Automatyczne wykrywanie, inteligentny zasięg, natywny auto-atak, poprawne limity poziomowe, naprawiony scroll.
 // @author       Ty & Gemini
 // @match        https://*.margonem.pl/*
@@ -3505,6 +3505,7 @@ let opacityValue = 0.95;
             lastRunAt: 0,
             defaultSeeded: true
         },
+        equipmentUpgrader: getEquipmentUpgraderDefaultSettings(),
         loot: {
             autoAccept: true
         },
@@ -6686,6 +6687,21 @@ function loadData() {
         }
         botSettings.equipmentBuyer.done = botSettings.equipmentBuyer.done || {};
         botSettings.equipmentBuyer.skipped = botSettings.equipmentBuyer.skipped || {};
+        botSettings.equipmentUpgrader = {
+            ...getEquipmentUpgraderDefaultSettings(),
+            ...(botSettings.equipmentUpgrader || {})
+        };
+        botSettings.equipmentUpgrader.slots = {
+            ...getEquipmentUpgraderDefaultSettings().slots,
+            ...(botSettings.equipmentUpgrader.slots || {})
+        };
+        if (!Array.isArray(botSettings.equipmentUpgrader.order)) {
+            botSettings.equipmentUpgrader.order = getEquipmentUpgraderDefaultSettings().order.slice();
+        }
+        botSettings.equipmentUpgrader.fodder = {
+            ...getEquipmentUpgraderDefaultSettings().fodder,
+            ...(botSettings.equipmentUpgrader.fodder || {})
+        };
         botSettings.loot = {
             autoAccept: true,
             ...(botSettings.loot || {})
@@ -14669,6 +14685,23 @@ function initGUI() {
                         <div id="eqBuyerStatus" style="font-size:10px; color:#b39ddb; margin-bottom:4px;">Brak aktywnego zadania.</div>
                         <div id="eqBuyerTasksList" style="max-height:145px; overflow:auto; border:1px solid #4a148c; background:#080808; padding:3px;"></div>
                     </div>
+                  <div class="accordion-header" id="accEqUpgrader" data-exp-section="equpgrader" onclick="toggleSettingsAcc('accEqUpgrader')" style="background: rgba(0, 188, 212, 0.16); border-color: #00bcd4; color: #ce93d8; margin-top: 5px; margin-bottom: 0;">Ulepszanie ekwipunku</div>
+                    <div id="accEqUpgraderContent" style="display:none; padding: 8px; background: rgba(0,0,0,0.3); border: 1px solid #00bcd4; border-top: none; margin-bottom: 5px;">
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:5px; color:#ce93d8; margin-bottom:6px;">
+                            <label><input type="checkbox" id="eqUpgraderEnabled" ${botSettings.equipmentUpgrader?.enabled ? 'checked' : ''}> Wlacznik</label>
+                            <label><input type="checkbox" id="eqUpgraderToMax" ${botSettings.equipmentUpgrader?.upgradeToMax !== false ? 'checked' : ''}> Ulepszaj na max</label>
+                            <label><input type="checkbox" id="eqUpgraderAutoEnchant" ${botSettings.equipmentUpgrader?.autoEnchant !== false ? 'checked' : ''}> Zaklinaj 5 poziom</label>
+                            <label><input type="checkbox" id="eqUpgraderAllowExtract" ${botSettings.equipmentUpgrader?.allowExtraction ? 'checked' : ''}> Ekstrakcja zlej staty</label>
+                            <label><input type="checkbox" id="eqUpgraderAllowBreak" ${botSettings.equipmentUpgrader?.allowBreakItems ? 'checked' : ''}> Rozbijaj itemy</label>
+                            <label>Bufor zlota:<input type="number" id="eqUpgraderGoldBuffer" value="${botSettings.equipmentUpgrader?.goldBuffer ?? 0}" min="0" style="width:70px; background:#050505; color:#e0f7fa; border:1px solid #006064;"></label>
+                        </div>
+                        <div style="font-size:10px; color:#b2ebf2; margin:4px 0;">Kolejnosc i sloty:</div>
+                        <div id="eqUpgraderSlotList" style="max-height:150px; overflow:auto; border:1px solid #004d40; background:#050505; padding:4px; color:#ce93d8; font-size:10px;"></div>
+                        <div style="display:flex; gap:5px; margin-top:6px;">
+                            <button id="btnEqUpgraderRunNow" class="btn-sepia" style="flex:1; padding:4px; background:#006064;">Ulepsz teraz</button>
+                            <div id="eqUpgraderStatus" style="flex:1.5; color:#80deea; font-size:10px;">Ulepszanie: czekam.</div>
+                        </div>
+                    </div>
                  <div class="accordion-header" id="accAlerts" data-exp-section="alarms" onclick="toggleSettingsAcc('accAlerts')" style="background: rgba(33, 150, 243, 0.2); border-color: #2196f3; color: #2196f3; margin-top: 5px; margin-bottom: 0;">Alarmy i powiadomienia</div>
                     <div id="accAlertsContent" style="display:none; padding: 8px; background: rgba(0,0,0,0.3); border: 1px solid #2196f3; border-top: none; margin-bottom: 5px;">
                         <div style="display:flex; flex-direction:column; gap:6px;">
@@ -16859,8 +16892,345 @@ function initEqBuyerUI() {
     }
 }
 
+function getEquipmentUpgraderDefaultSettings() {
+    return {
+        enabled: false,
+        upgradeToMax: true,
+        autoEnchant: true,
+        allowExtraction: false,
+        allowBreakItems: false,
+        goldBuffer: 0,
+        lastRunAt: 0,
+        order: ['weapon', 'armor', 'offhand', 'necklace', 'ring', 'gloves', 'helmet', 'boots', 'bagAny'],
+        slots: {
+            weapon: true,
+            armor: true,
+            offhand: true,
+            necklace: true,
+            ring: true,
+            gloves: true,
+            helmet: true,
+            boots: true,
+            bagAny: false
+        },
+        fodder: {
+            common: true,
+            unique: false,
+            heroic: false,
+            legendary: false
+        }
+    };
+}
+
+const EQ_UPGRADER_SLOT_LABELS = {
+    weapon: 'Bron glowna',
+    armor: 'Zbroja',
+    offhand: 'Bron pom. / tarcza / strzaly',
+    necklace: 'Naszyjnik',
+    ring: 'Pierscien',
+    gloves: 'Rekawice',
+    helmet: 'Helm',
+    boots: 'Buty',
+    bagAny: 'Dowolny przedmiot w sakwie'
+};
+
+function ensureEquipmentUpgraderSettings() {
+    const defaults = getEquipmentUpgraderDefaultSettings();
+    botSettings.equipmentUpgrader = { ...defaults, ...(botSettings.equipmentUpgrader || {}) };
+    botSettings.equipmentUpgrader.slots = { ...defaults.slots, ...(botSettings.equipmentUpgrader.slots || {}) };
+    botSettings.equipmentUpgrader.fodder = { ...defaults.fodder, ...(botSettings.equipmentUpgrader.fodder || {}) };
+    if (!Array.isArray(botSettings.equipmentUpgrader.order)) botSettings.equipmentUpgrader.order = defaults.order.slice();
+    return botSettings.equipmentUpgrader;
+}
+window.ensureEquipmentUpgraderSettings = ensureEquipmentUpgraderSettings;
+
+function setEqUpgraderStatus(message, color = '#80deea') {
+    const el = document.getElementById('eqUpgraderStatus');
+    if (el) {
+        el.textContent = message;
+        el.style.color = color;
+    }
+    window.__lastEqUpgraderStatus = { message, color, at: Date.now() };
+}
+
+function getHeroProfessionKey() {
+    return String(Engine?.hero?.d?.prof || '').toLowerCase();
+}
+
+function getPreferredEnchantStatsForHero() {
+    const prof = getHeroProfessionKey();
+    const map = {
+        m: ['intelekt', 'wszystkie cechy', 'mana', 'obrazenia magiczne'],
+        h: ['zrecznosc', 'sila', 'wszystkie cechy', 'krytyk', 'szybkosc ataku'],
+        t: ['zrecznosc', 'intelekt', 'wszystkie cechy', 'obrazenia magiczne', 'szybkosc ataku'],
+        w: ['sila', 'wszystkie cechy', 'pancerz', 'punkty zycia', 'zycie'],
+        p: ['sila', 'intelekt', 'wszystkie cechy', 'punkty zycia', 'pancerz'],
+        b: ['zrecznosc', 'sila', 'wszystkie cechy', 'unik', 'szybkosc ataku']
+    };
+    return map[prof] || ['wszystkie cechy', 'sila', 'zrecznosc', 'intelekt'];
+}
+
+function getEqUpgraderItemData(item) {
+    const d = item?.d || item || {};
+    const cached = item?._cachedStats || d?._cachedStats || {};
+    const stat = String(d.stat || item?.stat || cached.stat || '');
+    const name = String(d.name || item?.name || cached.name || item?.nick || '');
+    const cl = Number(d.cl ?? item?.cl ?? cached.cl ?? 0);
+    const st = Number(d.st ?? item?.st ?? 0);
+    const id = d.id ?? item?.id ?? cached.id ?? '';
+    const text = auctionNorm ? auctionNorm(`${name} ${stat} ${cached.tip || ''} ${d.tip || ''}`) : String(`${name} ${stat}`).toLowerCase();
+    return { raw: item, data: d, id, name, cl, st, stat, text };
+}
+
+function classifyEqUpgraderSlot(item) {
+    const cl = Number(item?.cl || 0);
+    const text = item?.text || '';
+    if (cl === 4 || /bron glowna|typ: bron|miecz|luk|rozga|kostur|szabla|topor/.test(text)) return 'weapon';
+    if (cl === 8 || /zbroja|pancerz|szata|kaftan/.test(text)) return 'armor';
+    if ([5, 15, 29].includes(cl) || /tarcza|strzaly|strzala|bron pomoc|pomocnic/.test(text)) return 'offhand';
+    if (cl === 13 || /naszyj|amulet/.test(text)) return 'necklace';
+    if (cl === 12 || /piersc/.test(text)) return 'ring';
+    if (cl === 11 || /rekawic|rękawic/.test(text)) return 'gloves';
+    if (cl === 9 || /helm|kaptur|czapk/.test(text)) return 'helmet';
+    if (cl === 10 || /buty|trzewik/.test(text)) return 'boots';
+    return '';
+}
+
+function getEquippedItemsForUpgrade() {
+    if (typeof Engine?.heroEquipment?.getHItems !== 'function') return [];
+    return Object.values(Engine.heroEquipment.getHItems() || {})
+        .map(getEqUpgraderItemData)
+        .filter(item => item.id && Number(item.st || 0) > 0)
+        .map(item => ({ ...item, slotKey: classifyEqUpgraderSlot(item) }))
+        .filter(item => item.slotKey);
+}
+
+function findEqItemDomElement(item) {
+    const id = String(item?.id || '');
+    const selectors = id ? [
+        `[data-id="${id}"]`,
+        `[data-item-id="${id}"]`,
+        `[item-id="${id}"]`,
+        `#item${id}`,
+        `.item-id-${id}`,
+        `.item-${id}`
+    ] : [];
+    for (const selector of selectors) {
+        const el = document.querySelector(selector);
+        if (el && isAuctionElementVisible(el)) return el;
+    }
+    const name = auctionNorm ? auctionNorm(item?.name || '') : String(item?.name || '').toLowerCase();
+    if (!name) return null;
+    return [...document.querySelectorAll('.item, .inventory-item, [class*="item"], img, div')]
+        .find(el => {
+            if (!isAuctionElementVisible(el)) return false;
+            const text = auctionNorm ? auctionNorm(`${el.textContent || ''} ${el.title || ''} ${el.getAttribute?.('tip') || ''} ${el.getAttribute?.('data-name') || ''}`) : '';
+            return text && text.includes(name);
+        }) || null;
+}
+
+function openEqUpgraderItemMenu(item) {
+    const raw = item?.raw || item;
+    const event = {
+        stopPropagation() {},
+        preventDefault() {},
+        button: 2,
+        bubbles: true,
+        cancelable: true,
+        view: window
+    };
+    const handlers = [raw?.oncontextmenu, raw?.d?.oncontextmenu, raw?.sprite?.oncontextmenu].filter(fn => typeof fn === 'function');
+    for (const fn of handlers) {
+        try { fn.call(raw, event); return true; } catch (e) {}
+    }
+    const el = findEqItemDomElement(item);
+    if (!el) return false;
+    try {
+        el.dispatchEvent(new MouseEvent('contextmenu', event));
+        return true;
+    } catch (e) {
+        return false;
+    }
+}
+
+function clickVisibleCraftText(pattern) {
+    const rx = pattern instanceof RegExp ? pattern : new RegExp(pattern, 'i');
+    const candidates = [...document.querySelectorAll('button, input, div, span, a, li')]
+        .filter(isAuctionElementVisible)
+        .filter(el => !el.closest?.('#accEqUpgraderContent, #accEqUpgrader, #eqUpgraderSlotList'))
+        .map(el => ({ el, text: auctionNorm ? auctionNorm(el.value || el.innerText || el.textContent || '') : String(el.value || el.innerText || el.textContent || '').toLowerCase(), rect: el.getBoundingClientRect() }))
+        .filter(x => rx.test(x.text))
+        .sort((a, b) => b.rect.top - a.rect.top);
+    if (!candidates[0]) return false;
+    realAuctionClick(candidates[0].el);
+    return true;
+}
+
+function getCraftRoot() {
+    const roots = [...document.querySelectorAll('.craft-window, [class*="craft"], .window, .margo-window, .dialog-window, body > div')]
+        .filter(isAuctionElementVisible)
+        .filter(el => !el.querySelector?.('#eqUpgraderEnabled, #eqUpgraderSlotList, #btnEqUpgraderRunNow'))
+        .map(el => {
+            const text = auctionNorm ? auctionNorm(el.innerText || el.textContent || '') : String(el.innerText || el.textContent || '').toLowerCase();
+            const rect = el.getBoundingClientRect();
+            let score = 0;
+            if (/rzemioslo|rzemios/.test(text)) score += 20;
+            if (/ulepszanie|zaklinanie|ekstrakcja|rozbijanie|gniazdo przedmiotu|moc przedmiotu/.test(text)) score += 35;
+            if (/wybierz jedno z trzech|zaklnij|ulepsz|ekstraktuj|rozbij/.test(text)) score += 20;
+            return { el, text, score, area: rect.width * rect.height };
+        })
+        .filter(x => x.score > 30)
+        .sort((a, b) => (b.score - a.score) || (a.area - b.area));
+    return roots[0]?.el || null;
+}
+
+function selectPreferredCraftStat(root) {
+    const preferred = getPreferredEnchantStatsForHero().map(s => auctionNorm ? auctionNorm(s) : s);
+    const rows = [...root.querySelectorAll('label, div, span, li')]
+        .filter(isAuctionElementVisible)
+        .map(el => ({ el, text: auctionNorm ? auctionNorm(el.innerText || el.textContent || '') : String(el.innerText || el.textContent || '').toLowerCase() }))
+        .filter(x => x.text && preferred.some(p => x.text.includes(p)));
+    for (const pref of preferred) {
+        const row = rows.find(x => x.text.includes(pref));
+        if (!row) continue;
+        const radio = row.el.querySelector?.('input[type="radio"]') || row.el.closest?.('label')?.querySelector?.('input[type="radio"]') || null;
+        realAuctionClick(radio || row.el);
+        return true;
+    }
+    return false;
+}
+
+function handleCraftWindowForEqUpgrader() {
+    const settings = ensureEquipmentUpgraderSettings();
+    const root = getCraftRoot();
+    if (!root) return false;
+    const text = auctionNorm ? auctionNorm(root.innerText || root.textContent || '') : String(root.innerText || root.textContent || '').toLowerCase();
+    if (/wybierz jedno z trzech|zaklinanie|zaklnij/.test(text)) {
+        if (!settings.autoEnchant) {
+            setEqUpgraderStatus('Czeka na zaklinanie reczne.', '#ffcc80');
+            return true;
+        }
+        const selected = selectPreferredCraftStat(root);
+        if (!selected) {
+            if (settings.allowExtraction) {
+                if (clickVisibleCraftText(/ekstrakcja/)) {
+                    setEqUpgraderStatus('Brak dobrej staty - przechodze do ekstrakcji.', '#ffcc80');
+                    return true;
+                }
+            }
+            setEqUpgraderStatus('Brak preferowanej staty do zaklecia.', '#ffcc80');
+            return true;
+        }
+        const gold = Number(String(Engine?.hero?.d?.gold || '0').replace(/\D/g, '')) || 0;
+        if (gold <= Number(settings.goldBuffer || 0)) {
+            setEqUpgraderStatus('Za malo zlota ponad bufor.', '#ffcc80');
+            return true;
+        }
+        if (clickVisibleCraftText(/^zaklnij$/)) {
+            setEqUpgraderStatus('Zaklinam preferowana statystyke.', '#80deea');
+            return true;
+        }
+    }
+    if (/ekstrakcja/.test(text) && settings.allowExtraction) {
+        if (clickVisibleCraftText(/ekstraktuj|wydobadz|wyciagnij/)) {
+            setEqUpgraderStatus('Ekstrakcja zlej statystyki.', '#ffcc80');
+            return true;
+        }
+    }
+    if (/ulepszanie|moc przedmiotu/.test(text) && settings.upgradeToMax) {
+        if (clickVisibleCraftText(/^ulepsz$/)) {
+            setEqUpgraderStatus('Ulepszam przedmiot.', '#80deea');
+            return true;
+        }
+    }
+    return true;
+}
+
+function chooseEqUpgraderTarget() {
+    const settings = ensureEquipmentUpgraderSettings();
+    const items = getEquippedItemsForUpgrade()
+        .filter(item => settings.slots[item.slotKey] !== false)
+        .filter(item => Date.now() - Number(window.__eqUpgraderItemCooldown?.[String(item.id)] || 0) > 12000);
+    const order = Array.isArray(settings.order) ? settings.order : getEquipmentUpgraderDefaultSettings().order;
+    items.sort((a, b) => {
+        const ai = order.indexOf(a.slotKey);
+        const bi = order.indexOf(b.slotKey);
+        return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+    });
+    return items[0] || null;
+}
+
+function tickEquipmentUpgrader(force = false) {
+    const settings = ensureEquipmentUpgraderSettings();
+    if (!settings.enabled && !force) return false;
+    if (Engine?.battle?.show || window.autoSellState?.active || window.autoPotState?.active || window.auctionSellerState?.active) return false;
+    if (!force && Date.now() - Number(settings.lastRunAt || 0) < 2200) return false;
+    settings.lastRunAt = Date.now();
+    if (handleCraftWindowForEqUpgrader()) return true;
+    const target = chooseEqUpgraderTarget();
+    if (!target) {
+        setEqUpgraderStatus('Brak aktywnego przedmiotu do ulepszenia.', '#80deea');
+        return false;
+    }
+    window.__eqUpgraderItemCooldown = window.__eqUpgraderItemCooldown || {};
+    window.__eqUpgraderItemCooldown[String(target.id)] = Date.now();
+    if (!openEqUpgraderItemMenu(target)) {
+        setEqUpgraderStatus(`Nie moge otworzyc menu: ${target.name || target.id}`, '#ffcc80');
+        return false;
+    }
+    setTimeout(() => {
+        if (clickVisibleCraftText(/^ulepsz$/)) {
+            setEqUpgraderStatus(`Otwieram ulepszanie: ${target.name || target.id}`, '#80deea');
+        } else {
+            setEqUpgraderStatus(`Brak opcji Ulepsz dla: ${target.name || target.id}`, '#ffcc80');
+        }
+    }, 220);
+    return true;
+}
+window.tickEquipmentUpgrader = tickEquipmentUpgrader;
+
+function renderEqUpgraderPanel() {
+    const settings = ensureEquipmentUpgraderSettings();
+    const list = document.getElementById('eqUpgraderSlotList');
+    if (!list) return;
+    const order = Array.isArray(settings.order) ? settings.order : getEquipmentUpgraderDefaultSettings().order;
+    list.innerHTML = order.map((key, idx) => `
+        <div class="equpgrader-slot-row" data-slot="${key}" style="display:grid; grid-template-columns:22px 1fr 58px; gap:5px; align-items:center; border-bottom:1px solid #003c40; padding:3px 0;">
+            <span style="color:#777;">${idx + 1}</span>
+            <span>${EQ_UPGRADER_SLOT_LABELS[key] || key}</span>
+            <label><input type="checkbox" class="equpgrader-slot-enabled" ${settings.slots[key] !== false ? 'checked' : ''}> ON</label>
+        </div>
+    `).join('');
+}
+
+function initEqUpgraderUI() {
+    const settings = ensureEquipmentUpgraderSettings();
+    bindChange('eqUpgraderEnabled', e => { settings.enabled = !!e.target.checked; saveSettings(); renderEqUpgraderPanel(); });
+    bindChange('eqUpgraderToMax', e => { settings.upgradeToMax = !!e.target.checked; saveSettings(); });
+    bindChange('eqUpgraderAutoEnchant', e => { settings.autoEnchant = !!e.target.checked; saveSettings(); });
+    bindChange('eqUpgraderAllowExtract', e => { settings.allowExtraction = !!e.target.checked; saveSettings(); });
+    bindChange('eqUpgraderAllowBreak', e => { settings.allowBreakItems = !!e.target.checked; saveSettings(); });
+    bindChange('eqUpgraderGoldBuffer', e => { settings.goldBuffer = Math.max(0, Number(e.target.value || 0)); saveSettings(); });
+    bindClick('btnEqUpgraderRunNow', () => tickEquipmentUpgrader(true));
+    const list = document.getElementById('eqUpgraderSlotList');
+    if (list && !list.__eqUpgraderBound) {
+        list.__eqUpgraderBound = true;
+        list.addEventListener('change', e => {
+            const row = e.target?.closest?.('.equpgrader-slot-row');
+            if (!row || !e.target.classList.contains('equpgrader-slot-enabled')) return;
+            settings.slots[row.dataset.slot] = !!e.target.checked;
+            saveSettings();
+        });
+    }
+    renderEqUpgraderPanel();
+    if (!window.__eqUpgraderDaemon) {
+        window.__eqUpgraderDaemon = setInterval(() => tickEquipmentUpgrader(false), 1500);
+    }
+}
+
 initAuctionSellerUI();
 initEqBuyerUI();
+initEqUpgraderUI();
 
 
 
@@ -33140,6 +33510,24 @@ window.renderEqItems = function(filterType = 'Wszystkie') {
         }
         window.requestAutoPotionRestock = requestAutoPotionRestock;
 
+        function isAutoPotionMerchantEntry(k) {
+            if (!k || !k.map_name || !k.npc_name) return false;
+            const name = auctionNorm ? auctionNorm(k.npc_name) : String(k.npc_name || '').toLowerCase();
+            const map = auctionNorm ? auctionNorm(k.map_name) : String(k.map_name || '').toLowerCase();
+            const shop = auctionNorm ? auctionNorm(`${k.shop_name || ''} ${k.shop_url || ''}`) : String(`${k.shop_name || ''} ${k.shop_url || ''}`).toLowerCase();
+            const items = Array.isArray(k.items) ? k.items : [];
+            const hasPotionItem = items.some(i => {
+                const text = String(i?.name || i?.stat || i?.stats || i?.tooltip_text || i?.raw_detected_text || '').toLowerCase();
+                return /mikstur|eliksir|lec(z|zy)|punkt[oó]w zycia|punktow zycia|hp|hot[=:]/i.test(text);
+            });
+            const isPotionShop = /sklep z mikstur|mikstur|uzdrow/.test(shop);
+            const isHealer = /uzdrowiciel|uzdrowicielka|alchemik|medyk/.test(name);
+            const suspiciousStorage = /magazyn/.test(map) && !isPotionShop && !isHealer;
+            if (suspiciousStorage) return false;
+            return (isPotionShop || isHealer) && hasPotionItem;
+        }
+        window.isAutoPotionMerchantEntry = isAutoPotionMerchantEntry;
+
         setInterval(() => {
             if (botSettings?.autoheal) botSettings.autoheal.enabled = false;
             window.isRegeneratingToFull = false;
@@ -33433,14 +33821,15 @@ if (isDead) {
 
                     let currMap = Engine.map.d.name;
                     let availablePotions = [];
-                 // Rozszerzamy filtr: szukamy Uzdrowicieli ORAZ Tunii
+                 // Tylko realne sklepy z miksturami / uzdrowiciele. Nie bierzemy ogolnych kupcow.
                     let healers = (window.DatabaseModule.kupcy || []).filter(k => {
-                        if (!k.npc_name) return false;
-                        let n = k.npc_name.toLowerCase();
-                        return n.includes('uzdrow') || n.includes('tuni');
+                        return typeof isAutoPotionMerchantEntry === 'function'
+                            ? isAutoPotionMerchantEntry(k)
+                            : /uzdrow|mikstur/i.test(`${k?.npc_name || ''} ${k?.shop_name || ''}`);
                     });
 
                     healers.forEach(k => {
+                        if (!k.map_name || !k.npc_name) return;
                         let dist = Infinity;
                         if (k.map_name === currMap) {
                             dist = 0;
@@ -33524,6 +33913,19 @@ if (isDead) {
                             if (typeof window.rushToMap === 'function') window.rushToMap(bestNpc.map_name, bestNpc.x, bestNpc.y);
                         }
                     } else {
+                        if (!Number.isFinite(Number(bestNpc.x)) || !Number.isFinite(Number(bestNpc.y))) {
+                            const livePotionNpc = typeof findNearestNpcByNick === 'function'
+                                ? findNearestNpcByNick([String(bestNpc.npc_name || '').split('(')[0].trim()], null, 0)
+                                : null;
+                            if (livePotionNpc) {
+                                bestNpc.x = Number(livePotionNpc.x);
+                                bestNpc.y = Number(livePotionNpc.y);
+                                bestNpc.liveId = livePotionNpc.id;
+                            } else {
+                                window.autoPotState.nextActionTime = Date.now() + 900;
+                                return;
+                            }
+                        }
                         let dist = Math.abs(Engine.hero.d.x - bestNpc.x) + Math.abs(Engine.hero.d.y - bestNpc.y);
                         if (dist <= 2) {
                             window.isRushingToShop = false;
@@ -34156,8 +34558,41 @@ function realAuctionClick(el) {
 }
 window.realAuctionClick = realAuctionClick;
 
+function getAuctionListingRoot() {
+    const selectors = [
+        '.auction-window',
+        '.auction',
+        '[class*="auction"]',
+        '.window',
+        '.dialog-window',
+        '.margo-window',
+        '.popup',
+        '.modal',
+        'body > div'
+    ].join(',');
+    const roots = [...document.querySelectorAll(selectors)]
+        .filter(isAuctionElementVisible)
+        .map(el => {
+            const text = auctionNorm(el.innerText || el.textContent || '');
+            const rect = el.getBoundingClientRect();
+            let score = 0;
+            if (/licytacja od/.test(text)) score += 40;
+            if (/kwota kup teraz|kup teraz/.test(text)) score += 35;
+            if (/czas trwania/.test(text)) score += 25;
+            if (/koszt wystawienia|podatek ze sprzedazy|podatek ze sprzeda/.test(text)) score += 15;
+            if (/wystaw\s*(?:\[|$|\s)/.test(text)) score += 8;
+            if (/nazwa przedmiotu|min cena|max cena|wybierz kategorie|aukcje graczy|obserwowane|licytowane/.test(text)) score -= 35;
+            return { el, text, rect, score, area: rect.width * rect.height };
+        })
+        .filter(x => x.score > 20)
+        .sort((a, b) => (b.score - a.score) || (a.area - b.area));
+    return roots[0]?.el || null;
+}
+window.getAuctionListingRoot = getAuctionListingRoot;
+
 function findAuctionFinalSubmitButton() {
-    const candidates = Array.from(document.querySelectorAll('button, input, div, span, a'))
+    const root = getAuctionListingRoot() || document;
+    const candidates = Array.from(root.querySelectorAll('button, input, div, span, a'))
         .filter(isAuctionElementVisible)
         .map(el => {
             const rect = el.getBoundingClientRect();
@@ -34211,6 +34646,10 @@ async function acceptAuctionConfirm(timeoutMs = 2200) {
 window.acceptAuctionConfirm = acceptAuctionConfirm;
 
 async function clickAuctionSubmitAndConfirm() {
+    if (window.MARGO_AUKCJA_3M && typeof window.MARGO_AUKCJA_3M.clickAuctionSubmit === 'function') {
+        const ok = await window.MARGO_AUKCJA_3M.clickAuctionSubmit();
+        return ok ? { ok: true, confirmed: true, source: 'MARGO_AUKCJA_3M' } : { ok: false, reason: 'submit_not_found' };
+    }
     const btn = findAuctionFinalSubmitButton();
     if (!btn) return { ok: false, reason: 'submit_not_found' };
     auctionLog(`klikam finalny Wystaw`, '#80deea', 2000, 'auction_submit');
@@ -34219,6 +34658,28 @@ async function clickAuctionSubmitAndConfirm() {
     return { ok: true, confirmed };
 }
 window.clickAuctionSubmitAndConfirm = clickAuctionSubmitAndConfirm;
+
+function installMargoneuroAuctionCompat() {
+    const A = window.MARGO_AUKCJA_3M || (window.MARGO_AUKCJA_3M = {});
+    A.CFG = { ...(A.CFG || {}), AUTO_WYSTAW: true };
+    A.acceptConfirm = async function() {
+        return acceptAuctionConfirm(2200);
+    };
+    A.clickAuctionSubmit = async function() {
+        const btn = findAuctionFinalSubmitButton();
+        if (!btn) {
+            auctionLog('Nie znalazlem finalnego przycisku Wystaw w formularzu.', '#ffcc80', 2500, 'auction_submit_missing');
+            return false;
+        }
+        auctionLog('Klikam finalny Wystaw przez adapter aukcji.', '#80deea', 2000, 'auction_submit_adapter');
+        realAuctionClick(btn);
+        await A.acceptConfirm();
+        return true;
+    };
+    return A;
+}
+window.installMargoneuroAuctionCompat = installMargoneuroAuctionCompat;
+installMargoneuroAuctionCompat();
 
 function closeAuctionWindow(reason = 'done') {
     const roots = [...document.querySelectorAll('.auction-window, .auction, [class*="auction"], .window, .margo-window, .dialog-window')]
@@ -34288,8 +34749,7 @@ function findAuctioneerTarget() {
 }
 
 function getAuctionRoot() {
-    const roots = [...document.querySelectorAll('.auction-window, .auction, [class*="auction"], .window, .dialog-window, .margo-window')];
-    return roots.find(el => /licytacja|kup teraz|czas trwania|wystaw przedmiot/i.test(el.textContent || '')) || document;
+    return getAuctionListingRoot() || document;
 }
 
 function setAuctionInputValue(input, value) {
@@ -34310,6 +34770,10 @@ function setAuctionInputValue(input, value) {
 
 function fillAuctionListingForm(item, price, settings) {
     const root = getAuctionRoot();
+    if (root === document) {
+        auctionLog('Nie widze formularza wystawiania - nie wpisuje cen w glowna wyszukiwarke.', '#ffcc80', 2500, 'auction_no_listing_root');
+        return false;
+    }
     const inputs = [...root.querySelectorAll('input')]
         .filter(input => !/checkbox|radio|button|submit/i.test(input.type || ''))
         .filter(input => {
