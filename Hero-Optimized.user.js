@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         MargoNeuro - Optimized Edition
-// @version      64.8.0
+// @version      64.8.1
 // @description  Automatyczne wykrywanie, inteligentny zasięg, natywny auto-atak, poprawne limity poziomowe, naprawiony scroll.
 // @author       Ty & Gemini
 // @match        https://*.margonem.pl/*
@@ -3505,6 +3505,9 @@ let opacityValue = 0.95;
             lastRunAt: 0,
             defaultSeeded: true
         },
+        loot: {
+            autoAccept: true
+        },
         auctionSeller: getAuctionSellerDefaultSettings(),
 
         expProfiles: loadedProfiles,
@@ -6683,6 +6686,10 @@ function loadData() {
         }
         botSettings.equipmentBuyer.done = botSettings.equipmentBuyer.done || {};
         botSettings.equipmentBuyer.skipped = botSettings.equipmentBuyer.skipped || {};
+        botSettings.loot = {
+            autoAccept: true,
+            ...(botSettings.loot || {})
+        };
         botSettings.auctionSeller = {
             ...getAuctionSellerDefaultSettings(),
             ...(botSettings.auctionSeller || {})
@@ -15509,6 +15516,19 @@ expEmptyScans = 0;
             if (typeof cleanupExpRuntimeTimers === 'function') cleanupExpRuntimeTimers('exp_start_new_run');
             window.__expStartRouteDecisionPendingUntil = Date.now() + 1600;
             if (typeof scheduleExpDeferredStart === 'function') scheduleExpDeferredStart(window.expRunId, 90);
+            setTimeout(() => {
+                if (!window.isExping || window.__expStopRequested) return;
+                try {
+                    if (typeof window.requestAutoPotionRestock === 'function') {
+                        window.requestAutoPotionRestock('exp_start');
+                    }
+                } catch (e) {}
+                try {
+                    if (typeof window.maybeStartPreExpAutoSell === 'function') {
+                        window.maybeStartPreExpAutoSell('exp_start');
+                    }
+                } catch (e) {}
+            }, 160);
             console.log("[EXP] START expienia/trasy");
             console.log("[EXP] Tryb ustawiony na EXP");
             if (typeof window.logExp === 'function') {
@@ -16087,6 +16107,103 @@ bindChange('useTeleportsEq', (e) => { botSettings.exp.useTeleportsEq = e.target.
                 window.margoneuroBerserkDiag.lastError = String(e?.message || e);
                 return false;
             }
+        }
+        function normalizeMargoneuroUiText(value) {
+            return String(value || '')
+                .replace(/<[^>]*>/g, ' ')
+                .replace(/\u00a0/g, ' ')
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .replace(/\u0142/gi, 'l')
+                .replace(/\s+/g, ' ')
+                .trim()
+                .toLowerCase();
+        }
+        function isMargoneuroVisibleElement(el) {
+            if (!el) return false;
+            try {
+                const s = getComputedStyle(el);
+                const r = el.getBoundingClientRect();
+                return s.display !== 'none' && s.visibility !== 'hidden' && r.width > 0 && r.height > 0;
+            } catch (e) {
+                return false;
+            }
+        }
+        function clickMargoneuroUiElement(el) {
+            if (!el) return false;
+            try {
+                if (typeof dispatchHumanMouseClick === 'function') {
+                    dispatchHumanMouseClick(el);
+                    return true;
+                }
+            } catch (e) {}
+            try {
+                ['mouseover', 'mousedown', 'mouseup', 'click'].forEach(type => {
+                    el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window, button: 0 }));
+                });
+                if (typeof el.click === 'function') el.click();
+                return true;
+            } catch (e) {
+                return false;
+            }
+        }
+        function getMargoneuroLootWindowRoot() {
+            const selectors = [
+                '.margo-window',
+                '.window',
+                '.c-window',
+                '.loot-window',
+                '[class*="loot"]',
+                '[id*="loot"]',
+                '[class*="lup"]',
+                '[id*="lup"]'
+            ].join(',');
+            const roots = Array.from(document.querySelectorAll(selectors)).filter(isMargoneuroVisibleElement);
+            return roots.find(root => {
+                const text = normalizeMargoneuroUiText(root.innerText || root.textContent || '');
+                if (!text) return false;
+                if (/(captcha|zapadka|zagadka|aukc|sklep|poczta)/i.test(text)) return false;
+                return /\blupy\b/.test(text) && /(potwierdz|chce)/.test(text);
+            }) || null;
+        }
+        function getMargoneuroLootConfirmButton(root) {
+            if (!root) return null;
+            const candidates = Array.from(root.querySelectorAll('button, input, div, span, a'))
+                .filter(isMargoneuroVisibleElement)
+                .map(el => {
+                    const r = el.getBoundingClientRect();
+                    const raw = el.value || el.innerText || el.textContent || '';
+                    return { el, text: normalizeMargoneuroUiText(raw), top: r.top, left: r.left };
+                })
+                .filter(x => /^(potwierdz|ok|akceptuj|wez|odbierz)(\b|$)/.test(x.text))
+                .sort((a, b) => (b.top - a.top) || (b.left - a.left));
+            return candidates[0]?.el || null;
+        }
+        function confirmMargoneuroLootWindow(reason = 'auto_loot') {
+            const now = Date.now();
+            if (now - Number(window.__lastMargoneuroLootConfirmAt || 0) < 700) return false;
+            if (Engine?.battle?.show) return false;
+            const root = getMargoneuroLootWindowRoot();
+            if (!root) return false;
+            const btn = getMargoneuroLootConfirmButton(root);
+            if (!btn) return false;
+            window.__lastMargoneuroLootConfirmAt = now;
+            const ok = clickMargoneuroUiElement(btn);
+            if (ok) {
+                window.__lastMargoneuroLootConfirm = { at: now, reason };
+                if (typeof logEvent === 'function') {
+                    logEvent('LOOT', 'Auto-potwierdzam lup z potwora.', 5000, '#8bc34a', { key: 'auto_loot_confirm', verboseOnly: true });
+                }
+            }
+            return ok;
+        }
+        window.confirmMargoneuroLootWindow = confirmMargoneuroLootWindow;
+        if (!window.__margoneuroAutoLootInstalled) {
+            window.__margoneuroAutoLootInstalled = true;
+            setInterval(() => {
+                if (botSettings?.loot?.autoAccept === false) return;
+                confirmMargoneuroLootWindow('daemon');
+            }, 450);
         }
         function syncBerserkToggleVisual() {
             const chk = document.getElementById('berserkEnabled');
@@ -27222,12 +27339,21 @@ function pickBestExpTarget(validMobs, distMap) {
         return { mob: groupCandidates[0], groupKey: null };
     }
 
-    const rankBonus = { normal: 0, elite1: 4, elite2: 10, hero: 16 };
+    const finiteGroupDistances = groups
+        .map(g => Number(g.bestPathDistance ?? 9999))
+        .filter(Number.isFinite);
+    const nearestPathDistance = finiteGroupDistances.length ? Math.min(...finiteGroupDistances) : 9999;
+    const rankBonus = { normal: 0, elite1: 0.35, elite2: 0.65, hero: 0.9 };
     for (const g of groups) {
-        const gSize = g.mobs?.length || 1;
-        const d = g.bestPathDistance ?? 9999;
+        const gSize = Math.max(1, Number(g.mobs?.length || 1));
+        const d = Number(g.bestPathDistance ?? 9999);
         const bonus = rankBonus[g.mainRanga] || 0;
-        g.score = d - (gSize * 2.2) - bonus;
+        const groupBonus = Math.min(2.25, Math.max(0, gSize - 1) * 0.35);
+        const adjacentBonus = d <= 1 ? 7 : (d <= 2 ? 4 : 0);
+        const farPenalty = Number.isFinite(nearestPathDistance)
+            ? Math.max(0, d - nearestPathDistance) * 4
+            : 0;
+        g.score = d + farPenalty - adjacentBonus - groupBonus - bonus;
     }
 
     groups.sort((a,b)=>a.score-b.score);
@@ -27235,7 +27361,7 @@ function pickBestExpTarget(validMobs, distMap) {
     if ((window.expCurrentTargetId ?? expCurrentTargetId) != null) {
         const activeTargetId = window.expCurrentTargetId ?? expCurrentTargetId;
         const currentGroup = groups.find(g => (g.bestTargetMob?.id || g.mobs?.[0]?.id) == activeTargetId);
-        if (currentGroup && best && (currentGroup.score <= best.score + 1.8)) {
+        if (currentGroup && best && (currentGroup.score <= best.score + 0.7)) {
             best = currentGroup; // histereza przełączania celu
         }
     }
@@ -27284,6 +27410,13 @@ function maybeStepOutFromGatewayAfterEntry(options = {}) {
             .filter(item => Number.isFinite(item.dist))
             .sort((a, b) => a.dist - b.dist)[0]?.mob
         : null;
+    const nearestMobDistance = nearestMob
+        ? Math.max(Math.abs(hx - Number(nearestMob.x)), Math.abs(hy - Number(nearestMob.y)))
+        : Infinity;
+    if (Number.isFinite(nearestMobDistance) && nearestMobDistance <= 1) {
+        window.expDidStepOutAfterEntry = true;
+        return false;
+    }
     const mx = Number(nearestMob?.x);
     const my = Number(nearestMob?.y);
     const gatewayTileKey = new Set(normalizedGateways.map(g => `${g.x},${g.y}`));
@@ -32991,6 +33124,21 @@ window.renderEqItems = function(filterType = 'Wszystkie') {
             return { count, stacks: items.length, bestHeal, items };
         }
         window.getUsableAutoPotionInventory = getUsableAutoPotionInventory;
+        function requestAutoPotionRestock(reason = 'manual') {
+            if (!botSettings?.autopot?.enabled) return { ok: false, reason: 'disabled' };
+            if (window.autoPotState?.active || window.autoSellState?.active) return { ok: false, reason: 'busy' };
+            const inventory = getUsableAutoPotionInventory();
+            window.__lastAutoPotionInventory = { ...inventory, at: Date.now(), reason };
+            if (Number(inventory.count || 0) > 0) return { ok: false, reason: 'has_potions', inventory };
+            window.__autoPotNoPotionSince = Date.now() - 9000;
+            window.__autoPotBuyBlockedUntil = 0;
+            window.__autoPotLastAnalysisAt = 0;
+            if (typeof logEvent === 'function') {
+                logEvent('AUTOPOT', `Brak mikstur - wymuszam zakup (${reason}).`, 30000, '#e91e63', { key: `autopot_force_${reason}` });
+            }
+            return { ok: true, reason: 'queued', inventory };
+        }
+        window.requestAutoPotionRestock = requestAutoPotionRestock;
 
         setInterval(() => {
             if (botSettings?.autoheal) botSettings.autoheal.enabled = false;
@@ -34802,6 +34950,98 @@ if (!window.__auctionSellerDaemonInstalled) {
             };
         }
         window.getAutoSellTriggerInfo = getAutoSellTriggerInfo;
+
+        function getNearestAutoSellMerchantDistance(currentMap) {
+            const allowedNames = botSettings?.autosell?.onlyTunia
+                ? ['Tuni']
+                : ['Flineks', 'Makin', 'Rozen', 'Tuni', 'Unil', 'Aukcjoner', 'Syntia', 'Jemen'];
+            let merchants = (window.DatabaseModule?.kupcy || [])
+                .filter(k => k && allowedNames.some(name => String(k.npc_name || '').includes(name)));
+            if (!merchants.length && allowedNames.length > 1) merchants = window.DatabaseModule?.kupcy || [];
+            let best = { distance: Infinity, sameMap: false, npc: null, path: null };
+            for (const merchant of merchants) {
+                const merchantMap = String(merchant.map_name || '');
+                if (!merchantMap || !currentMap) continue;
+                const sameMap = normMapName(merchantMap) === normMapName(currentMap);
+                let path = sameMap ? [currentMap] : null;
+                if (!sameMap && typeof getShortestPath === 'function') {
+                    path = getShortestPath(currentMap, merchantMap, routePathOptions());
+                }
+                const distance = Array.isArray(path) && path.length ? Math.max(0, path.length - 1) : Infinity;
+                if (distance < best.distance) best = { distance, sameMap, npc: merchant, path };
+            }
+            return best;
+        }
+        window.getNearestAutoSellMerchantDistance = getNearestAutoSellMerchantDistance;
+
+        function getPreExpAutoSellDecision(reason = 'pre_exp') {
+            const enabled = !!(botSettings?.autosell && botSettings.autosell.enabled);
+            if (!enabled) return { shouldStart: false, reason: 'disabled' };
+            if (window.autoSellState?.active || window.autoPotState?.active || window.auctionSellerState?.active) {
+                return { shouldStart: false, reason: 'busy' };
+            }
+            const report = typeof window.getSellableItemsReport === 'function' ? window.getSellableItemsReport() : null;
+            const sellableCount = Number(report?.sellableCount || 0);
+            const auctionCount = typeof window.getAuctionSellerCandidates === 'function'
+                ? Number(window.getAuctionSellerCandidates({ includeDisabled: false, force: true })?.count || 0)
+                : 0;
+            if (sellableCount <= 0 && auctionCount <= 0) return { shouldStart: false, reason: 'no_items', report };
+            const currentMap = Engine?.map?.d?.name || '';
+            const expMaps = typeof getCurrentExpHuntMaps === 'function'
+                ? getCurrentExpHuntMaps()
+                : (Array.isArray(botSettings?.exp?.mapOrder) ? botSettings.exp.mapOrder : []);
+            const onExpMap = expMaps.some(mapName => normMapName(mapName) === normMapName(currentMap));
+            if (onExpMap) return { shouldStart: false, reason: 'already_on_exp_map', report };
+            const merchant = getNearestAutoSellMerchantDistance(currentMap);
+            const nearestExp = typeof getClosestExpMapPath === 'function'
+                ? getClosestExpMapPath(currentMap, expMaps)
+                : null;
+            const expDistance = Array.isArray(nearestExp?.path) && nearestExp.path.length
+                ? Math.max(0, nearestExp.path.length - 1)
+                : Infinity;
+            const merchantDistance = Number(merchant.distance);
+            const nearMerchant = Number.isFinite(merchantDistance) && merchantDistance <= 1;
+            const farFromExp = !Number.isFinite(expDistance) || expDistance >= 2;
+            return {
+                shouldStart: nearMerchant && farFromExp,
+                reason: nearMerchant && farFromExp ? reason : 'merchant_or_exp_distance',
+                report,
+                currentMap,
+                merchant,
+                nearestExp,
+                merchantDistance,
+                expDistance,
+                sellableCount,
+                auctionCount
+            };
+        }
+        window.getPreExpAutoSellDecision = getPreExpAutoSellDecision;
+
+        function maybeStartPreExpAutoSell(reason = 'pre_exp') {
+            const decision = getPreExpAutoSellDecision(reason);
+            if (!decision.shouldStart) return { ok: false, ...decision };
+            const started = typeof window.startAutoSellSession === 'function'
+                ? window.startAutoSellSession('pre_exp_sell', {
+                    stats: decision.report?.stats,
+                    trigger: {
+                        reason: 'pre_exp_sell',
+                        sourceReason: reason,
+                        sellableCount: decision.sellableCount,
+                        auctionCount: decision.auctionCount,
+                        merchantDistance: decision.merchantDistance,
+                        expDistance: decision.expDistance
+                    }
+                })
+                : { ok: false, reason: 'autosell_unavailable' };
+            if (started?.ok) {
+                if (typeof logEvent === 'function') {
+                    logEvent('AUTOSELL', `Przed EXP: najpierw sprzedaz/aukcje (sell=${decision.sellableCount}, aukcje=${decision.auctionCount}).`, 30000, '#ffb300', { key: 'pre_exp_autosell' });
+                }
+                return { ok: true, started, decision };
+            }
+            return { ok: false, started, decision };
+        }
+        window.maybeStartPreExpAutoSell = maybeStartPreExpAutoSell;
 
         function startAutoSellSession(reason = 'auto', options = {}) {
             window.autoSellState = window.autoSellState || { active: false };
