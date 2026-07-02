@@ -14,6 +14,7 @@
 // @connect      127.0.0.1
 // @connect      www.margoneuro.pl
 // @connect      margoneuro.pl
+// @connect      raw.githubusercontent.com
 // @updateURL    https://raw.githubusercontent.com/gunns369-dot/Hero-Margonem/main/Hero-Optimized.user.js
 // @downloadURL  https://raw.githubusercontent.com/gunns369-dot/Hero-Margonem/main/Hero-Optimized.user.js
 // ==/UserScript==
@@ -30,6 +31,24 @@
     const MARGOWORLD_STATIC_KNOWLEDGE_STORAGE_KEY = 'margoneuro_static_map_knowledge_v1';
     const MARGOWORLD_STATIC_BLOCKED_EDGES_STORAGE_KEY = 'margoneuro_static_blocked_edges_v1';
     const MARGOWORLD_STATIC_BLOCK_TTL_MS = 10 * 60 * 1000;
+    const MARGONEURO_REMOTE_DATA_BASE_URL = 'https://raw.githubusercontent.com/gunns369-dot/Hero-Margonem/main/';
+    const MARGONEURO_REMOTE_BOOTSTRAP_URL = `${MARGONEURO_REMOTE_DATA_BASE_URL}data/margoneuro_bootstrap_database.json`;
+    const MARGONEURO_REMOTE_STATIC_KNOWLEDGE_URL = `${MARGONEURO_REMOTE_DATA_BASE_URL}data/margoworld_static_knowledge.json`;
+    const MARGONEURO_REMOTE_BOOTSTRAP_META_KEY = 'margoneuro_remote_bootstrap_meta_v1';
+    const MARGONEURO_REMOTE_BOOTSTRAP_MIN_INTERVAL_MS = 60 * 60 * 1000;
+    const MARGONEURO_REMOTE_STORAGE_KEYS = [
+        'hero_global_gateways_v20',
+        'hero_map_order_v20',
+        'hero_settings_db_v64',
+        'exp_profiles_v64_4',
+        'hero_boss_coords_v64',
+        'hero_teleports_by_nick_v64',
+        'margoneuro_event_hero_routes_v1',
+        'margoneuro_exp_routes_by_hero_v1',
+        'margoneuro_map_identity_cache_v1',
+        'margoneuro_exp_route_state_v2',
+        MARGOWORLD_STATIC_KNOWLEDGE_STORAGE_KEY
+    ];
     const MARGONEURO_SAFE_MODE = true;
     const MARGONEURO_DISABLE_AUTO_RELOAD = true;
     let margoneuroBootStarted = false;
@@ -560,7 +579,9 @@
         function importStatic(jsonOrObject) {
             const parsed = typeof jsonOrObject === 'string' ? parseStore(jsonOrObject, null) : jsonOrObject;
             if (!parsed || typeof parsed !== 'object') return { ok: false, error: 'invalid_static_knowledge' };
-            if (!parsed.graph?.nodes || !parsed.graph?.edges || !parsed.graph?.adjacency || !parsed.groupedTransitions || !parsed.expSpots) return { ok: false, error: 'missing_required_static_graph_fields' };
+            const hasGraphFormat = !!(parsed.graph?.nodes && parsed.graph?.edges && parsed.graph?.adjacency);
+            const hasLegacyFormat = !!(parsed.maps && (parsed.transitions || parsed.mapCount !== undefined || parsed.transitionCount !== undefined));
+            if (!hasGraphFormat && !hasLegacyFormat) return { ok: false, error: 'missing_required_static_graph_fields' };
             root.__margoneuroEarlyStaticStore = buildStaticStore(parsed);
             window.__margoneuroEarlyStaticStore = root.__margoneuroEarlyStaticStore;
             if (typeof normalizeMargoworldStaticKnowledge === 'function' && typeof buildMargoworldStaticGraphIndexes === 'function') {
@@ -603,6 +624,168 @@
         window.getMargoworldStaticKnowledge = debug.getMargoworldStaticKnowledge;
         window.planStaticRoute = debug.planStaticRoute;
         window.getStaticNeighbors = debug.getStaticNeighbors;
+        function normalizeRemoteMargoneuroUrl(value, fallback = '') {
+            const raw = String(value || fallback || '').trim();
+            if (!raw) return '';
+            if (/^https?:\/\//i.test(raw)) return raw;
+            return `${MARGONEURO_REMOTE_DATA_BASE_URL}${raw.replace(/^\/+/, '')}`;
+        }
+        function readRemoteBootstrapMeta() {
+            return parseStore(readStore(MARGONEURO_REMOTE_BOOTSTRAP_META_KEY), {}) || {};
+        }
+        function writeRemoteBootstrapMeta(meta) {
+            writeStore(MARGONEURO_REMOTE_BOOTSTRAP_META_KEY, JSON.stringify({ ...(meta || {}), savedAt: Date.now() }));
+        }
+        async function fetchRemoteJson(url, timeoutMs = 18000) {
+            const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+            const timer = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
+            try {
+                const sep = url.includes('?') ? '&' : '?';
+                const res = await fetch(`${url}${sep}_mn=${Date.now()}`, { cache: 'no-store', signal: ctrl?.signal });
+                if (!res.ok) throw new Error(`http_${res.status}`);
+                return await res.json();
+            } finally {
+                if (timer) clearTimeout(timer);
+            }
+        }
+        function getRemoteStaticStats(raw = {}) {
+            const mapCount = Object.keys(obj(raw.maps)).length || Object.keys(obj(raw.graph?.nodes)).length || Number(raw.mapCount || 0);
+            const transitionCount = arr(raw.groupedTransitions).length || arr(raw.graph?.edges).length || arr(raw.transitions).length || Number(raw.transitionCount || 0);
+            const expSpotCount = Object.keys(obj(raw.expSpots)).length || Number(raw.expSpotCount || 0);
+            return { mapCount, transitionCount, expSpotCount, generatedAt: raw.generatedAt || '', version: raw.version || 0 };
+        }
+        function isPlainStorageBundle(payload) {
+            if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return false;
+            return MARGONEURO_REMOTE_STORAGE_KEYS.some(key => Object.prototype.hasOwnProperty.call(payload, key));
+        }
+        function extractRemoteStorageBundle(manifest = {}) {
+            if (isPlainStorageBundle(manifest)) return manifest;
+            const bundle = manifest.localStorage || manifest.storage || manifest.localStorageKeys || manifest.keys || {};
+            return bundle && typeof bundle === 'object' ? bundle : {};
+        }
+        function applyRemoteStorageBundle(manifest = {}, options = {}) {
+            const bundle = extractRemoteStorageBundle(manifest);
+            const mode = options.forceStorage ? 'force' : String(manifest.localStorageMode || manifest.storageMode || 'missing').toLowerCase();
+            const allowed = new Set(Array.isArray(manifest.storageKeys) && manifest.storageKeys.length ? manifest.storageKeys : MARGONEURO_REMOTE_STORAGE_KEYS);
+            const applied = [];
+            const skipped = [];
+            for (const [key, value] of Object.entries(bundle || {})) {
+                if (!allowed.has(key)) {
+                    skipped.push({ key, reason: 'not_allowed' });
+                    continue;
+                }
+                const existing = readStore(key);
+                if (mode !== 'force' && existing) {
+                    skipped.push({ key, reason: 'exists' });
+                    continue;
+                }
+                const rawValue = typeof value === 'string' ? value : JSON.stringify(value);
+                if (!rawValue || rawValue === 'undefined') {
+                    skipped.push({ key, reason: 'empty' });
+                    continue;
+                }
+                writeStore(key, rawValue);
+                applied.push(key);
+            }
+            if (applied.length) {
+                try {
+                    if (applied.includes('hero_global_gateways_v20')) {
+                        if (typeof restoreGlobalMapMemory === 'function') restoreGlobalMapMemory();
+                        else {
+                            const rawGateways = readStore('hero_global_gateways_v20');
+                            if (rawGateways) {
+                                globalGateways = JSON.parse(rawGateways);
+                                window.globalGateways = globalGateways;
+                            }
+                        }
+                    }
+                    if (applied.includes('hero_map_order_v20')) {
+                        const rawOrder = readStore('hero_map_order_v20');
+                        if (rawOrder) {
+                            heroMapOrder = JSON.parse(rawOrder);
+                            window.heroMapOrder = heroMapOrder;
+                        }
+                    }
+                    window.__routePathCacheVersion = (window.__routePathCacheVersion || 0) + 1;
+                    window.__internalMapGraphCache = null;
+                } catch (e) {
+                    console.warn('[REMOTE-DB] storage sync skipped', e);
+                }
+            }
+            return { applied, skipped, mode };
+        }
+        async function loadRemoteMargoneuroDatabase(options = {}) {
+            const force = !!options.force;
+            const meta = readRemoteBootstrapMeta();
+            const currentStats = debug.getStaticGraphStats ? debug.getStaticGraphStats() : { loaded: false, maps: 0, graphEdges: 0 };
+            const now = Date.now();
+            if (!force && currentStats.loaded && Number(meta.lastCheckAt || 0) && now - Number(meta.lastCheckAt || 0) < MARGONEURO_REMOTE_BOOTSTRAP_MIN_INTERVAL_MS) {
+                return { ok: true, skipped: true, reason: 'fresh', meta, currentStats };
+            }
+
+            let manifest = null;
+            let manifestUrl = normalizeRemoteMargoneuroUrl(options.manifestUrl || MARGONEURO_REMOTE_BOOTSTRAP_URL);
+            try {
+                manifest = await fetchRemoteJson(manifestUrl, Number(options.timeoutMs || 18000));
+            } catch (error) {
+                manifest = { staticKnowledgeUrl: MARGONEURO_REMOTE_STATIC_KNOWLEDGE_URL, manifestError: String(error?.message || error) };
+            }
+
+            const storage = applyRemoteStorageBundle(manifest, options);
+            const staticUrl = normalizeRemoteMargoneuroUrl(
+                manifest.staticKnowledgeUrl || manifest.staticKnowledgePath || manifest.staticGraphUrl,
+                MARGONEURO_REMOTE_STATIC_KNOWLEDGE_URL
+            );
+            let staticResult = { ok: false, reason: 'no_static_url' };
+            if (staticUrl) {
+                try {
+                    const staticRaw = manifest.staticKnowledge && typeof manifest.staticKnowledge === 'object'
+                        ? manifest.staticKnowledge
+                        : await fetchRemoteJson(staticUrl, Number(options.timeoutMs || 22000));
+                    const remoteStats = getRemoteStaticStats(staticRaw);
+                    const shouldImport = force || !currentStats.loaded || remoteStats.mapCount > Number(currentStats.maps || currentStats.graphNodes || 0) || remoteStats.transitionCount > Number(currentStats.graphEdges || 0) || Number(new Date(remoteStats.generatedAt).getTime() || 0) > Number(new Date(meta.staticGeneratedAt || 0).getTime() || 0);
+                    if (shouldImport) {
+                        staticResult = debug.importMargoworldStaticKnowledge(staticRaw);
+                    } else {
+                        staticResult = { ok: true, skipped: true, reason: 'local_static_not_older', remoteStats };
+                    }
+                    staticResult.remoteStats = remoteStats;
+                } catch (error) {
+                    staticResult = { ok: false, error: String(error?.message || error), staticUrl };
+                }
+            }
+
+            const nextMeta = {
+                lastCheckAt: now,
+                manifestUrl,
+                staticUrl,
+                manifestGeneratedAt: manifest.generatedAt || '',
+                staticGeneratedAt: staticResult.remoteStats?.generatedAt || meta.staticGeneratedAt || '',
+                storageApplied: storage.applied,
+                storageSkipped: storage.skipped?.length || 0,
+                staticResult: {
+                    ok: !!staticResult.ok,
+                    skipped: !!staticResult.skipped,
+                    maps: staticResult.maps || staticResult.graphNodes || staticResult.remoteStats?.mapCount || 0,
+                    edges: staticResult.graphEdges || staticResult.canonicalRoutingEdges || staticResult.remoteStats?.transitionCount || 0,
+                    expSpots: staticResult.expSpots || staticResult.remoteStats?.expSpotCount || 0,
+                    error: staticResult.error || ''
+                }
+            };
+            writeRemoteBootstrapMeta(nextMeta);
+            console.log('[REMOTE-DB] bootstrap result', { storage, staticResult, nextMeta });
+            return { ok: !!(staticResult.ok || storage.applied.length), manifest, storage, staticResult, meta: nextMeta };
+        }
+        root.loadRemoteMargoneuroDatabase = loadRemoteMargoneuroDatabase;
+        window.loadRemoteMargoneuroDatabase = loadRemoteMargoneuroDatabase;
+        Object.assign(debug, {
+            loadRemoteMargoneuroDatabase,
+            getRemoteMargoneuroDatabaseMeta: readRemoteBootstrapMeta,
+            clearRemoteMargoneuroDatabaseMeta: () => { deleteStore(MARGONEURO_REMOTE_BOOTSTRAP_META_KEY); return true; }
+        });
+        setTimeout(() => {
+            loadRemoteMargoneuroDatabase({ reason: 'early_boot' }).catch(error => console.warn('[REMOTE-DB] early bootstrap failed', error));
+        }, 250);
         console.log("[STATIC-GRAPH] MargoneuroDebug exposed early");
         const earlyMeta = getStaticKnowledgeStorageInfo();
         if (earlyMeta?.storageBackend === 'indexeddb' || earlyMeta?.hasStaticGraph) {
@@ -1984,6 +2167,11 @@
 
                 this.parseShops(rawShops);
                 this.parseEq(rawEq);
+                if (typeof window.loadRemoteMargoneuroDatabase === 'function') {
+                    window.loadRemoteMargoneuroDatabase({ reason: 'database_init' })
+                        .then(result => HERO_LOG.info(`Remote DB: static=${result?.staticResult?.ok ? 'OK' : 'skip/error'}, storage=${result?.storage?.applied?.length || 0}`))
+                        .catch(error => HERO_LOG.error('Remote DB bootstrap failed', error));
+                }
                 HERO_LOG.success(`Załadowano bazy: ${this.kupcy.length} kupców i ${this.ekwipunek.length} przedmiotów.`);
             } catch (e) {
                 HERO_LOG.error("Błąd pobierania plików JSON. Sprawdź linki.", e);
@@ -8230,6 +8418,11 @@ window.heroMapOrder = heroMapOrder;
     }
 
     function validateMargoworldStaticKnowledge(source = {}) {
+        const legacyMaps = source && typeof source === 'object' ? source.maps : null;
+        const legacyTransitions = source && typeof source === 'object' ? source.transitions : null;
+        if (legacyMaps && (legacyTransitions || source.mapCount !== undefined || source.transitionCount !== undefined)) {
+            return { ok: true, missing: [], format: 'legacy' };
+        }
         const graph = source && typeof source === 'object' ? source.graph : null;
         const missing = [];
         if (!graph || typeof graph !== 'object') missing.push('graph');
@@ -8238,7 +8431,7 @@ window.heroMapOrder = heroMapOrder;
         if (!graph?.adjacency) missing.push('graph.adjacency');
         if (!source?.groupedTransitions) missing.push('groupedTransitions');
         if (!source?.expSpots) missing.push('expSpots');
-        return { ok: missing.length === 0, missing };
+        return { ok: missing.length === 0, missing, format: 'graph' };
     }
 
     function normalizeMargoworldStaticKnowledge(raw = {}) {
