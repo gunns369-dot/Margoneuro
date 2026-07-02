@@ -25221,12 +25221,20 @@ function getPathToAdjacentTile(targetX, targetY, distMap) {
 function getStablePathToExpTarget(mob, distMap) {
     if (!mob) return null;
     const lock = typeof getExpTargetLock === 'function' ? getExpTargetLock() : null;
+    const freshPath = getPathToAdjacentTile(Number(mob.x), Number(mob.y), distMap);
     if (lock && isSameExpTarget(mob, lock) && Number.isFinite(Number(lock.standX)) && Number.isFinite(Number(lock.standY))) {
         const sx = Number(lock.standX);
         const sy = Number(lock.standY);
         const standKey = `${sx}_${sy}`;
         const standBlocked = typeof Engine?.map?.checkCollision === 'function' && Engine.map.checkCollision(sx, sy);
         if (distMap?.has?.(standKey) && !standBlocked) {
+            const lockedDist = Number(distMap.get(standKey));
+            const freshDist = Number(freshPath?.stand?.dist);
+            if (Number.isFinite(freshDist) && Number.isFinite(lockedDist) && freshDist + 1 < lockedDist) {
+                lock.standX = freshPath.stand.x;
+                lock.standY = freshPath.stand.y;
+                return freshPath;
+            }
             return {
                 path: null,
                 stand: {
@@ -25240,7 +25248,7 @@ function getStablePathToExpTarget(mob, distMap) {
         lock.standX = null;
         lock.standY = null;
     }
-    return getPathToAdjacentTile(Number(mob.x), Number(mob.y), distMap);
+    return freshPath;
 }
 window.getStablePathToExpTarget = getStablePathToExpTarget;
 
@@ -26285,6 +26293,7 @@ function pickExpApproachPulseDestination(mob, moveDest) {
             nearMob,
             heroSame,
             sameAsLast,
+            heroCheb: Number.isFinite(hx) && Number.isFinite(hy) ? Math.max(Math.abs(hx - x), Math.abs(hy - y)) : 0,
             distToMob: Number.isFinite(mx) && Number.isFinite(my) ? Math.abs(x - mx) + Math.abs(y - my) : 0,
             random: Math.random()
         });
@@ -26294,7 +26303,7 @@ function pickExpApproachPulseDestination(mob, moveDest) {
         if (a.nearMob !== b.nearMob) return a.nearMob ? -1 : 1;
         if (a.heroSame !== b.heroSame) return a.heroSame ? 1 : -1;
         if (a.sameAsLast !== b.sameAsLast) return a.sameAsLast ? 1 : -1;
-        return (a.distToMob - b.distToMob) || (a.random - b.random);
+        return (a.heroCheb - b.heroCheb) || (a.distToMob - b.distToMob) || (a.random - b.random);
     });
     return { x: candidates[0].x, y: candidates[0].y };
 }
@@ -33959,6 +33968,134 @@ function getVisibleElementsByText(pattern) {
         });
 }
 
+function auctionCleanButtonText(value) {
+    return String(value || '')
+        .replace(/<[^>]*>/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function isAuctionElementVisible(el) {
+    if (!el) return false;
+    try {
+        const style = window.getComputedStyle(el);
+        const rect = el.getBoundingClientRect();
+        return style.display !== 'none'
+            && style.visibility !== 'hidden'
+            && rect.width > 0
+            && rect.height > 0;
+    } catch (e) {
+        return true;
+    }
+}
+
+function realAuctionClick(el) {
+    if (!el) return false;
+    try {
+        ['mouseover', 'mousedown', 'mouseup', 'click'].forEach(type => {
+            el.dispatchEvent(new MouseEvent(type, {
+                bubbles: true,
+                cancelable: true,
+                view: window,
+                button: 0
+            }));
+        });
+    } catch (e) {
+        try { dispatchHumanMouseClick(el); } catch (_) {}
+    }
+    try { if (typeof el.click === 'function') el.click(); } catch (e) {}
+    return true;
+}
+window.realAuctionClick = realAuctionClick;
+
+function findAuctionFinalSubmitButton() {
+    const candidates = Array.from(document.querySelectorAll('button, input, div, span, a'))
+        .filter(isAuctionElementVisible)
+        .map(el => {
+            const rect = el.getBoundingClientRect();
+            return {
+                el,
+                text: auctionCleanButtonText(el.value || el.innerText || el.textContent),
+                left: rect.left,
+                top: rect.top,
+                width: rect.width,
+                height: rect.height
+            };
+        })
+        .filter(x => /^Wystaw(\s|\[|$)/i.test(x.text) && !/przedmiot/i.test(x.text))
+        .sort((a, b) => b.top - a.top);
+    return candidates[0]?.el || null;
+}
+window.findAuctionFinalSubmitButton = findAuctionFinalSubmitButton;
+
+function findAuctionAcceptButton() {
+    const candidates = Array.from(document.querySelectorAll('button, input, div, span, a'))
+        .filter(isAuctionElementVisible)
+        .map(el => {
+            const rect = el.getBoundingClientRect();
+            return {
+                el,
+                text: auctionCleanButtonText(el.value || el.innerText || el.textContent),
+                left: rect.left,
+                top: rect.top,
+                width: rect.width,
+                height: rect.height
+            };
+        })
+        .filter(x => /^(tak|ok|akceptuj|potwierdz|potwierdź|zatwierdz|zatwierdź|wystaw)$/i.test(x.text))
+        .sort((a, b) => b.top - a.top);
+    return candidates[0]?.el || null;
+}
+window.findAuctionAcceptButton = findAuctionAcceptButton;
+
+async function acceptAuctionConfirm(timeoutMs = 2200) {
+    const started = Date.now();
+    while (Date.now() - started < timeoutMs) {
+        await new Promise(r => setTimeout(r, 180));
+        const btn = findAuctionAcceptButton();
+        if (!btn) continue;
+        auctionLog(`klikam potwierdzenie: ${auctionCleanButtonText(btn.value || btn.innerText || btn.textContent)}`, '#80deea', 2000, 'auction_confirm');
+        realAuctionClick(btn);
+        return true;
+    }
+    return false;
+}
+window.acceptAuctionConfirm = acceptAuctionConfirm;
+
+async function clickAuctionSubmitAndConfirm() {
+    const btn = findAuctionFinalSubmitButton();
+    if (!btn) return { ok: false, reason: 'submit_not_found' };
+    auctionLog(`klikam finalny Wystaw`, '#80deea', 2000, 'auction_submit');
+    realAuctionClick(btn);
+    const confirmed = await acceptAuctionConfirm();
+    return { ok: true, confirmed };
+}
+window.clickAuctionSubmitAndConfirm = clickAuctionSubmitAndConfirm;
+
+function closeAuctionWindow(reason = 'done') {
+    const roots = [...document.querySelectorAll('.auction-window, .auction, [class*="auction"], .window, .margo-window, .dialog-window')]
+        .filter(el => /aukcje graczy|twoje aukcje|wystaw przedmiot/i.test(el.textContent || ''))
+        .sort((a, b) => (b.getBoundingClientRect().width * b.getBoundingClientRect().height) - (a.getBoundingClientRect().width * a.getBoundingClientRect().height));
+    for (const root of roots) {
+        const closeCandidates = [...root.querySelectorAll('button, .close, [class*="close"], [data-close], a, div, span')]
+            .filter(isAuctionElementVisible)
+            .map(el => {
+                const rect = el.getBoundingClientRect();
+                const text = auctionCleanButtonText(el.value || el.innerText || el.textContent || el.title);
+                return { el, rect, text };
+            })
+            .filter(x => /^(x|×|zamknij|close)$/i.test(x.text) || /close|zamknij/i.test(String(x.el.className || '')))
+            .sort((a, b) => (b.rect.top - a.rect.top) || (b.rect.left - a.rect.left));
+        if (closeCandidates[0]?.el) {
+            realAuctionClick(closeCandidates[0].el);
+            auctionLog(`zamykam okno aukcji (${reason})`, '#80deea', 3000, `close:${reason}`);
+            return true;
+        }
+    }
+    return false;
+}
+window.closeAuctionWindow = closeAuctionWindow;
+
 function clickAuctionDialogOption() {
     const options = [...document.querySelectorAll('.dialogue-window-answer, .dialog-item, .dialog-choice, .option, .answer, .dialog-answer, #dialog li, .dialog-options li, .dialog-texts li, [data-option]')];
     let best = null;
@@ -34069,7 +34206,7 @@ function clickAuctionItemInDom(item) {
     for (const selector of selectors) {
         const el = document.querySelector(selector);
         if (el) {
-            dispatchHumanMouseClick(el);
+            realAuctionClick(el);
             return true;
         }
     }
@@ -34079,7 +34216,7 @@ function clickAuctionItemInDom(item) {
             return name && text.includes(name);
         });
     if (candidates[0]) {
-        dispatchHumanMouseClick(candidates[0]);
+        realAuctionClick(candidates[0]);
         return true;
     }
     return false;
@@ -34142,22 +34279,26 @@ async function listOneAuctionItem(item) {
     const api = tryAuctionApiListItem(item, price, settings);
     if (api.ok) {
         const result = await waitForAuctionItemGone(item, beforeStats, 3500);
-        return { ok: result.ok, reason: result.ok ? `api_${api.method}` : `api_${api.method}_${result.reason}` };
+        if (result.ok) return { ok: true, reason: `api_${api.method}` };
+        auctionLog(`API aukcji nie potwierdzilo wystawienia, probuje DOM: ${api.method}/${result.reason}`, '#ffcc80', 4000, `api_fallback:${item.id}`);
     }
     const openBtn = getVisibleElementsByText(/wystaw przedmiot/)[0];
     if (openBtn) {
-        dispatchHumanMouseClick(openBtn);
+        realAuctionClick(openBtn);
         await new Promise(r => setTimeout(r, 350));
     }
     clickAuctionItemInDom(item);
     await new Promise(r => setTimeout(r, 250));
     if (!fillAuctionListingForm(item, price, settings)) return { ok: false, reason: 'form_not_found' };
     await new Promise(r => setTimeout(r, 180));
-    const submit = getVisibleElementsByText(/^wystaw|wystaw \[/)[0] || getVisibleElementsByText(/wystaw/)[0];
-    if (!submit) return { ok: false, reason: 'submit_not_found' };
-    dispatchHumanMouseClick(submit);
-    const result = await waitForAuctionItemGone(item, beforeStats, 4500);
-    return { ok: result.ok, reason: result.ok ? 'dom_submit' : result.reason };
+    const submit = await clickAuctionSubmitAndConfirm();
+    if (!submit.ok) return submit;
+    let result = await waitForAuctionItemGone(item, beforeStats, 6500);
+    if (!result.ok) {
+        await acceptAuctionConfirm(1200);
+        result = await waitForAuctionItemGone(item, beforeStats, 2500);
+    }
+    return { ok: result.ok, reason: result.ok ? (submit.confirmed ? 'dom_submit_confirmed' : 'dom_submit') : result.reason };
 }
 
 function finishAuctionSeller(reason = 'done') {
@@ -34165,6 +34306,7 @@ function finishAuctionSeller(reason = 'done') {
     const shouldResumeExp = !!state.wasExpingBeforeAuction;
     const shouldStartAutoSell = !!state.afterAuctionStartAutoSell;
     auctionLog(`koniec: ${reason}`, reason === 'done' ? '#4dd0e1' : '#ffcc80', 6000, `finish:${reason}`);
+    try { closeAuctionWindow(reason); } catch (e) {}
     window.auctionSellerState = { active: false, step: 'IDLE', nextActionTime: 0, itemIndex: 0, items: [], listed: 0, failed: 0, lastReason: reason };
     window.isRushingToAuctioneer = false;
     window.isRushing = false;
@@ -34287,11 +34429,12 @@ function tickAuctionSeller() {
     }
 
     if (state.step === 'LIST') {
-        if (state.itemIndex >= state.items.length) return finishAuctionSeller('done');
         if (state.listingNow) return;
         const fresh = getAuctionSellerCandidates({ includeDisabled: true, force: true });
-        const current = fresh.items.find(x => String(x.id) === String(state.items[state.itemIndex]?.id)) || fresh.items[0];
-        if (!current) return finishAuctionSeller('no_items_left');
+        if (!fresh.count || !fresh.items.length) return finishAuctionSeller('done');
+        if (state.itemIndex >= fresh.items.length) state.itemIndex = 0;
+        const current = fresh.items.find(x => String(x.id) === String(state.items?.[state.itemIndex]?.id)) || fresh.items[state.itemIndex] || fresh.items[0];
+        if (!current) return finishAuctionSeller('done');
         state.items = fresh.items;
         state.itemIndex = Math.max(0, fresh.items.findIndex(x => String(x.id) === String(current.id)));
         state.listingNow = true;
