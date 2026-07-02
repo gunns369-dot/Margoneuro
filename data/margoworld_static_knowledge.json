@@ -1,0 +1,920 @@
+{
+  "version": 1,
+  "source": "margoworld-static-knowledge",
+  "generatedAt": "2026-05-12T05:30:51.247Z",
+  "mapCount": 1,
+  "transitionCount": 0,
+  "maps": {
+    "ithan": {
+      "mapName": "Ithan",
+      "normalizedKey": "ithan",
+      "externalId": "1",
+      "imageUrl": "https://micc.garmory-cdn.cloud/obrazki/miasta/ithan.8.png",
+      "imageRelativePath": "map-images/1-ithan.png",
+      "type": "town",
+      "widthTiles": 96,
+      "heightTiles": 100,
+      "entityCounts": {
+        "npc": 30,
+        "monster": 38,
+        "object": 205,
+        "interactive": 35,
+        "unknown": 6
+      },
+      "mobs": [
+        {
+          "name": "Adept Czarnego Kręgu",
+          "type": "monster",
+          "level": 17,
+          "rank": null,
+          "x": 6,
+          "y": 5
+        },
+        {
+          "name": "Młody pancernik",
+          "type": "monster",
+          "level": 10,
+          "rank": null,
+          "x": 15,
+          "y": 76
+        },
+        {
+          "name": "Młody pancernik",
+          "type": "monster",
+          "level": 13,
+          "rank": null,
+          "x": 11,
+          "y": 79
+        },
+        {
+          "name": "Pancernik rogaty",
+          "type": "monster",
+          "level": 20,
+          "rank": null,
+          "x": 9,
+          "y": 78
+        },
+        {
+          "name": "Szczur zbożowy",
+          "type": "monster",
+          "level": 10,
+          "rank": null,
+          "x": 76,
+          "y": 37
+        },
+        {
+          "name": "Szczur",
+          "type": "monster",
+          "level": 9,
+          "rank": null,
+          "x": 83,
+          "y": 35
+        },
+        {
+          "name": "Szczur wojownik",
+          "type": "monster",
+          "level": 11,
+          "rank": null,
+          "x": 79,
+          "y": 34
+        },
+        {
+          "name": "Szczurzy król",
+          "type": "monster",
+          "level": 12,
+          "rank": null,
+          "x": 74,
+          "y": 39
+        },
+        {
+          "name": "Zając",
+          "type": "monster",
+          "level": 1,
+          "rank": null,
+          "x": 59,
+          "y": 77
+        },
+        {
+          "name": "Zając",
+          "type": "monster",
+          "level": 1,
+          "rank": null,
+          "x": 61,
+          "y": 81
+        },
+        {
+          "name": "Królik",
+          "type": "monster",
+          "level": 1,
+          "rank": null,
+          "x": 84,
+          "y": 70
+        },
+        {
+          "name": "Królik",
+          "type": "monster",
+          "level": 1,
+          "rank": null,
+          "x": 86,
+          "y": 68
+        },
+        {
+          "name": "Królik",
+          "type": "monster",
+          "level": 1,
+          "rank": null,
+          "x": 75,
+          "y": 71
+        },
+        {
+          "name": "Królik",
+          "type": "monster",
+          "level": 1,
+          "rank": null,
+          "x": 78,
+          "y": 73
+        },
+        {
+          "name": "Królik",
+          "type": "monster",
+          "level": 1,
+          "rank": null,
+          "x": 79,
+          "y": 64
+        },
+        {
+          "name": "Królik",
+          "type": "monster",
+          "level": 1,
+          "rank": null,
+          "x": 84,
+          "y": 66
+        },
+        {
+          "name": "Pancernik rogaty",
+          "type": "monster",
+          "level": 20,
+          "rank": null,
+          "x": 3,
+          "y": 79
+        },
+        {
+          "name": "Królik",
+          "type": "monster",
+          "level": 1,
+          "rank": null,
+          "x": 77,
+          "y": 69
+        },
+        {
+          "name": "Królik",
+          "type": "monster",
+          "level": 1,
+          "rank": null,
+          "x": 77,
+          "y": 61
+        },
+        {
+          "name": "Królik",
+          "type": "monster",
+          "level": 1,
+          "rank": null,
+          "x": 67,
+          "y": 67
+        },
+        {
+          "name": "Młody żuk",
+          "type": "monster",
+          "level": 2,
+          "rank": null,
+          "x": 2,
+          "y": 9
+        },
+        {
+          "name": "Młody żuk",
+          "type": "monster",
+          "level": 2,
+          "rank": null,
+          "x": 88,
+          "y": 44
+        },
+        {
+          "name": "Młody żuk",
+          "type": "monster",
+          "level": 2,
+          "rank": null,
+          "x": 26,
+          "y": 90
+        },
+        {
+          "name": "Młody żuk",
+          "type": "monster",
+          "level": 2,
+          "rank": null,
+          "x": 78,
+          "y": 92
+        },
+        {
+          "name": "Żuk",
+          "type": "monster",
+          "level": 6,
+          "rank": null,
+          "x": 8,
+          "y": 6
+        },
+        {
+          "name": "Zając",
+          "type": "monster",
+          "level": 1,
+          "rank": null,
+          "x": 51,
+          "y": 86
+        },
+        {
+          "name": "Zając",
+          "type": "monster",
+          "level": 1,
+          "rank": null,
+          "x": 62,
+          "y": 86
+        },
+        {
+          "name": "Pancernik",
+          "type": "monster",
+          "level": 14,
+          "rank": null,
+          "x": 86,
+          "y": 86
+        },
+        {
+          "name": "Duży pancernik",
+          "type": "monster",
+          "level": 19,
+          "rank": null,
+          "x": 76,
+          "y": 78
+        },
+        {
+          "name": "Pancernik",
+          "type": "monster",
+          "level": 14,
+          "rank": null,
+          "x": 19,
+          "y": 82
+        },
+        {
+          "name": "Młody pancernik",
+          "type": "monster",
+          "level": 13,
+          "rank": null,
+          "x": 85,
+          "y": 91
+        },
+        {
+          "name": "Żuk",
+          "type": "monster",
+          "level": 6,
+          "rank": null,
+          "x": 66,
+          "y": 92
+        },
+        {
+          "name": "Pancernik",
+          "type": "monster",
+          "level": 14,
+          "rank": null,
+          "x": 42,
+          "y": 96
+        },
+        {
+          "name": "Duży pancernik",
+          "type": "monster",
+          "level": 19,
+          "rank": null,
+          "x": 84,
+          "y": 92
+        },
+        {
+          "name": "Młody pancernik",
+          "type": "monster",
+          "level": 13,
+          "rank": null,
+          "x": 9,
+          "y": 13
+        },
+        {
+          "name": "Czarny dziki pies",
+          "type": "monster",
+          "level": 9,
+          "rank": null,
+          "x": 85,
+          "y": 31
+        },
+        {
+          "name": "Żuk",
+          "type": "monster",
+          "level": 6,
+          "rank": null,
+          "x": 1,
+          "y": 36
+        },
+        {
+          "name": "Żuk",
+          "type": "monster",
+          "level": 6,
+          "rank": null,
+          "x": 1,
+          "y": 74
+        }
+      ],
+      "npcs": [
+        {
+          "name": "Uzdrowicielka Makatara",
+          "type": "npc",
+          "level": null,
+          "rank": null,
+          "x": 18,
+          "y": 15
+        },
+        {
+          "name": "Strażnik bramy",
+          "type": "npc",
+          "level": null,
+          "rank": null,
+          "x": 32,
+          "y": 74
+        },
+        {
+          "name": "Strażnik bramy",
+          "type": "npc",
+          "level": null,
+          "rank": null,
+          "x": 37,
+          "y": 74
+        },
+        {
+          "name": "Strażnik",
+          "type": "npc",
+          "level": null,
+          "rank": null,
+          "x": 41,
+          "y": 39
+        },
+        {
+          "name": "Strażnik",
+          "type": "npc",
+          "level": null,
+          "rank": null,
+          "x": 51,
+          "y": 39
+        },
+        {
+          "name": "Sprzedawca Roan",
+          "type": "npc",
+          "level": null,
+          "rank": null,
+          "x": 39,
+          "y": 51
+        },
+        {
+          "name": "Huslin",
+          "type": "npc",
+          "level": null,
+          "rank": null,
+          "x": 12,
+          "y": 96
+        },
+        {
+          "name": "Kowal Unil",
+          "type": "npc",
+          "level": null,
+          "rank": null,
+          "x": 73,
+          "y": 52
+        },
+        {
+          "name": "Strażnik",
+          "type": "npc",
+          "level": null,
+          "rank": null,
+          "x": 32,
+          "y": 16
+        },
+        {
+          "name": "Strażnik",
+          "type": "npc",
+          "level": null,
+          "rank": null,
+          "x": 35,
+          "y": 16
+        },
+        {
+          "name": "Drwal Edgar",
+          "type": "npc",
+          "level": null,
+          "rank": null,
+          "x": 2,
+          "y": 71
+        },
+        {
+          "name": "Miecznik Jokamis",
+          "type": "npc",
+          "level": null,
+          "rank": null,
+          "x": 54,
+          "y": 2
+        },
+        {
+          "name": "Zakonnik Planu Astralnego",
+          "type": "npc",
+          "level": null,
+          "rank": null,
+          "x": 56,
+          "y": 26
+        },
+        {
+          "name": "Makina",
+          "type": "npc",
+          "level": null,
+          "rank": null,
+          "x": 26,
+          "y": 45
+        },
+        {
+          "name": "Starzec Niel",
+          "type": "npc",
+          "level": null,
+          "rank": null,
+          "x": 39,
+          "y": 16
+        },
+        {
+          "name": "Bard Grant",
+          "type": "npc",
+          "level": null,
+          "rank": null,
+          "x": 40,
+          "y": 24
+        },
+        {
+          "name": "Sir Galien",
+          "type": "npc",
+          "level": null,
+          "rank": null,
+          "x": 17,
+          "y": 60
+        },
+        {
+          "name": "Tata Tomasza",
+          "type": "npc",
+          "level": null,
+          "rank": null,
+          "x": 3,
+          "y": 7
+        },
+        {
+          "name": "Tomasz",
+          "type": "npc",
+          "level": null,
+          "rank": null,
+          "x": 49,
+          "y": 57
+        },
+        {
+          "name": "Garus Tyrrak",
+          "type": "npc",
+          "level": null,
+          "rank": null,
+          "x": 51,
+          "y": 53
+        },
+        {
+          "name": "Burmistrz Czemkin",
+          "type": "npc",
+          "level": null,
+          "rank": null,
+          "x": 28,
+          "y": 16
+        },
+        {
+          "name": "Obwoływacz",
+          "type": "npc",
+          "level": null,
+          "rank": null,
+          "x": 49,
+          "y": 30
+        },
+        {
+          "name": "Psorka Jarenia",
+          "type": "npc",
+          "level": null,
+          "rank": null,
+          "x": 59,
+          "y": 21
+        },
+        {
+          "name": "Laura",
+          "type": "npc",
+          "level": null,
+          "rank": null,
+          "x": 49,
+          "y": 46
+        },
+        {
+          "name": "Strażnik",
+          "type": "npc",
+          "level": null,
+          "rank": null,
+          "x": 45,
+          "y": 64
+        },
+        {
+          "name": "Strażnik",
+          "type": "npc",
+          "level": null,
+          "rank": null,
+          "x": 24,
+          "y": 64
+        },
+        {
+          "name": "Strażnik",
+          "type": "npc",
+          "level": null,
+          "rank": null,
+          "x": 72,
+          "y": 7
+        },
+        {
+          "name": "Zakonnik Równowagi",
+          "type": "npc",
+          "level": null,
+          "rank": null,
+          "x": 52,
+          "y": 25
+        },
+        {
+          "name": "Ciemny typ",
+          "type": "npc",
+          "level": null,
+          "rank": null,
+          "x": 13,
+          "y": 75
+        },
+        {
+          "name": "Adept Ceranir",
+          "type": "npc",
+          "level": null,
+          "rank": null,
+          "x": 54,
+          "y": 55
+        }
+      ],
+      "possibleGateways": [
+        {
+          "name": "Pies",
+          "x": 21,
+          "y": 95,
+          "targetMap": "",
+          "targetKey": "",
+          "source": "margoworld-entity",
+          "confidence": 0.15
+        },
+        {
+          "name": "Biuletyn",
+          "x": 42,
+          "y": 24,
+          "targetMap": "",
+          "targetKey": "",
+          "source": "margoworld-entity",
+          "confidence": 0.15
+        },
+        {
+          "name": "Skrzynka pocztowa",
+          "x": 41,
+          "y": 50,
+          "targetMap": "",
+          "targetKey": "",
+          "source": "margoworld-entity",
+          "confidence": 0.15
+        },
+        {
+          "name": "Ognisko",
+          "x": 88,
+          "y": 83,
+          "targetMap": "",
+          "targetKey": "",
+          "source": "margoworld-entity",
+          "confidence": 0.15
+        },
+        {
+          "name": "Ognisko",
+          "x": 30,
+          "y": 88,
+          "targetMap": "",
+          "targetKey": "",
+          "source": "margoworld-entity",
+          "confidence": 0.15
+        },
+        {
+          "name": "Studnia",
+          "x": 39,
+          "y": 57,
+          "targetMap": "",
+          "targetKey": "",
+          "source": "margoworld-entity",
+          "confidence": 0.15
+        },
+        {
+          "name": "Gildia Nerthusa",
+          "x": 45,
+          "y": 13,
+          "targetMap": "",
+          "targetKey": "",
+          "source": "margoworld-entity",
+          "confidence": 0.15
+        },
+        {
+          "name": "Kuźnia",
+          "x": 75,
+          "y": 49,
+          "targetMap": "",
+          "targetKey": "",
+          "source": "margoworld-entity",
+          "confidence": 0.15
+        },
+        {
+          "name": "Baraki",
+          "x": 55,
+          "y": 53,
+          "targetMap": "",
+          "targetKey": "",
+          "source": "margoworld-entity",
+          "confidence": 0.15
+        },
+        {
+          "name": "Kupiec",
+          "x": 32,
+          "y": 50,
+          "targetMap": "",
+          "targetKey": "",
+          "source": "margoworld-entity",
+          "confidence": 0.15
+        },
+        {
+          "name": "Rzemieślnik",
+          "x": 10,
+          "y": 93,
+          "targetMap": "",
+          "targetKey": "",
+          "source": "margoworld-entity",
+          "confidence": 0.15
+        },
+        {
+          "name": "Drzewo",
+          "x": 9,
+          "y": 64,
+          "targetMap": "",
+          "targetKey": "",
+          "source": "margoworld-entity",
+          "confidence": 0.15
+        },
+        {
+          "name": "Lampa",
+          "x": 37,
+          "y": 14,
+          "targetMap": "",
+          "targetKey": "",
+          "source": "margoworld-entity",
+          "confidence": 0.15
+        },
+        {
+          "name": "Lampa",
+          "x": 30,
+          "y": 14,
+          "targetMap": "",
+          "targetKey": "",
+          "source": "margoworld-entity",
+          "confidence": 0.15
+        },
+        {
+          "name": "Kuźnia",
+          "x": 76,
+          "y": 49,
+          "targetMap": "",
+          "targetKey": "",
+          "source": "margoworld-entity",
+          "confidence": 0.15
+        },
+        {
+          "name": "Zajazd",
+          "x": 24,
+          "y": 42,
+          "targetMap": "",
+          "targetKey": "",
+          "source": "margoworld-entity",
+          "confidence": 0.15
+        },
+        {
+          "name": "Lina",
+          "x": 12,
+          "y": 19,
+          "targetMap": "",
+          "targetKey": "",
+          "source": "margoworld-entity",
+          "confidence": 0.15
+        },
+        {
+          "name": "Ognisko",
+          "x": 5,
+          "y": 7,
+          "targetMap": "",
+          "targetKey": "",
+          "source": "margoworld-entity",
+          "confidence": 0.15
+        },
+        {
+          "name": "Gwiazda",
+          "x": 16,
+          "y": 94,
+          "targetMap": "",
+          "targetKey": "",
+          "source": "margoworld-entity",
+          "confidence": 0.15
+        },
+        {
+          "name": "Onyks",
+          "x": 14,
+          "y": 97,
+          "targetMap": "",
+          "targetKey": "",
+          "source": "margoworld-entity",
+          "confidence": 0.15
+        },
+        {
+          "name": "[center]Pręgierz[/center]",
+          "x": 48,
+          "y": 27,
+          "targetMap": "",
+          "targetKey": "",
+          "source": "margoworld-entity",
+          "confidence": 0.15
+        },
+        {
+          "name": "Legendarna choinka",
+          "x": 47,
+          "y": 56,
+          "targetMap": "",
+          "targetKey": "",
+          "source": "margoworld-entity",
+          "confidence": 0.15
+        },
+        {
+          "name": "Pod Rozbrykanym Niziołkiem",
+          "x": 49,
+          "y": 19,
+          "targetMap": "",
+          "targetKey": "",
+          "source": "margoworld-entity",
+          "confidence": 0.15
+        },
+        {
+          "name": "Kordegarda",
+          "x": 39,
+          "y": 67,
+          "targetMap": "",
+          "targetKey": "",
+          "source": "margoworld-entity",
+          "confidence": 0.15
+        },
+        {
+          "name": "Izba wytrzeźwień",
+          "x": 30,
+          "y": 67,
+          "targetMap": "",
+          "targetKey": "",
+          "source": "margoworld-entity",
+          "confidence": 0.15
+        },
+        {
+          "name": "Brzuchaty Wiewiór",
+          "x": 20,
+          "y": 49,
+          "targetMap": "",
+          "targetKey": "",
+          "source": "margoworld-entity",
+          "confidence": 0.15
+        },
+        {
+          "name": "Szkoła",
+          "x": 54,
+          "y": 20,
+          "targetMap": "",
+          "targetKey": "",
+          "source": "margoworld-entity",
+          "confidence": 0.15
+        },
+        {
+          "name": "Szczelina w murze",
+          "x": 67,
+          "y": 16,
+          "targetMap": "",
+          "targetKey": "",
+          "source": "margoworld-entity",
+          "confidence": 0.15
+        },
+        {
+          "name": "Północ - centrum Ithan[br]Północny Wschód - Torneg[br]Zachód - Karka-han oraz Werbin",
+          "x": 42,
+          "y": 94,
+          "targetMap": "",
+          "targetKey": "",
+          "source": "margoworld-entity",
+          "confidence": 0.15
+        },
+        {
+          "name": "Uzdrowicielka",
+          "x": 22,
+          "y": 12,
+          "targetMap": "",
+          "targetKey": "",
+          "source": "margoworld-entity",
+          "confidence": 0.15
+        },
+        {
+          "name": "Dom aukcyjny",
+          "x": 33,
+          "y": 30,
+          "targetMap": "",
+          "targetKey": "",
+          "source": "margoworld-entity",
+          "confidence": 0.15
+        },
+        {
+          "name": "Zakątek uciech",
+          "x": 52,
+          "y": 48,
+          "targetMap": "",
+          "targetKey": "",
+          "source": "margoworld-entity",
+          "confidence": 0.15
+        },
+        {
+          "name": "brama-ithan",
+          "x": 35,
+          "y": 73,
+          "targetMap": "",
+          "targetKey": "",
+          "source": "margoworld-entity",
+          "confidence": 0.15
+        },
+        {
+          "name": "Cegła z wyrytym napisem",
+          "x": 55,
+          "y": 37,
+          "targetMap": "",
+          "targetKey": "",
+          "source": "margoworld-entity",
+          "confidence": 0.15
+        },
+        {
+          "name": "drzwi-drew-color",
+          "x": 19,
+          "y": 14,
+          "targetMap": "",
+          "targetKey": "",
+          "source": "margoworld-entity",
+          "confidence": 0.15
+        },
+        {
+          "name": "drzwi-drew-color",
+          "x": 53,
+          "y": 21,
+          "targetMap": "",
+          "targetKey": "",
+          "source": "margoworld-entity",
+          "confidence": 0.15
+        },
+        {
+          "name": "Sterta kamieni",
+          "x": 22,
+          "y": 33,
+          "targetMap": "",
+          "targetKey": "",
+          "source": "margoworld-entity",
+          "confidence": 0.15
+        },
+        {
+          "name": "Astralna Enklawa",
+          "x": 35,
+          "y": 53,
+          "targetMap": "",
+          "targetKey": "",
+          "source": "margoworld-entity",
+          "confidence": 0.15
+        }
+      ],
+      "expSpots": []
+    }
+  },
+  "transitions": []
+}

@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "source": "margoneuro-bootstrap-database",
+  "generatedAt": "2026-07-02T00:00:00.000Z",
+  "repository": "gunns369-dot/Hero-Margonem",
+  "localStorageMode": "missing",
+  "staticKnowledgeUrl": "data/margoworld_static_knowledge.json",
+  "shopsUrl": "margoworld_shops_full_database.json",
+  "tooltipCacheUrl": "margoworld_tooltip_cache_full.json",
+  "storageKeys": [
+    "hero_global_gateways_v20",
+    "hero_map_order_v20",
+    "hero_settings_db_v64",
+    "exp_profiles_v64_4",
+    "hero_boss_coords_v64",
+    "hero_teleports_by_nick_v64",
+    "margoneuro_event_hero_routes_v1",
+    "margoneuro_exp_routes_by_hero_v1",
+    "margoneuro_map_identity_cache_v1",
+    "margoneuro_exp_route_state_v2",
+    "margoneuro_static_map_knowledge_v1"
+  ],
+  "localStorage": {},
+  "notes": [
+    "Ten plik jest manifestem startowym dla nowej przegladarki.",
+    "Skrypt pobiera go z GitHuba i importuje brakujace dane tylko wtedy, gdy lokalna przegladarka ich nie ma.",
+    "Jesli chcesz przeniesc pelna pamiec z dzialajacej przegladarki, wyeksportuj baze z przycisku Pobierz plik i wklej jej klucze do localStorage albo zastap ten plik wyeksportowanym JSON-em."
+  ]
+}
