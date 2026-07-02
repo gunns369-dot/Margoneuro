@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         MargoNeuro - Optimized Edition
-// @version      64.7.8
+// @version      64.8.0
 // @description  Automatyczne wykrywanie, inteligentny zasięg, natywny auto-atak, poprawne limity poziomowe, naprawiony scroll.
 // @author       Ty & Gemini
 // @match        https://*.margonem.pl/*
@@ -648,6 +648,30 @@
                 if (timer) clearTimeout(timer);
             }
         }
+        function uniqueRemoteUrls(...values) {
+            const seen = new Set();
+            const out = [];
+            for (const value of values.flat()) {
+                const url = normalizeRemoteMargoneuroUrl(value);
+                if (!url || seen.has(url)) continue;
+                seen.add(url);
+                out.push(url);
+            }
+            return out;
+        }
+        async function fetchFirstRemoteJson(urls, timeoutMs = 18000) {
+            const errors = [];
+            for (const url of uniqueRemoteUrls(urls)) {
+                try {
+                    return { url, data: await fetchRemoteJson(url, timeoutMs) };
+                } catch (error) {
+                    errors.push({ url, error: String(error?.message || error) });
+                }
+            }
+            const err = new Error(errors.map(item => `${item.url}: ${item.error}`).join('; ') || 'no_remote_urls');
+            err.errors = errors;
+            throw err;
+        }
         function getRemoteStaticStats(raw = {}) {
             const mapCount = Object.keys(obj(raw.maps)).length || Object.keys(obj(raw.graph?.nodes)).length || Number(raw.mapCount || 0);
             const transitionCount = arr(raw.groupedTransitions).length || arr(raw.graph?.edges).length || arr(raw.transitions).length || Number(raw.transitionCount || 0);
@@ -725,23 +749,41 @@
 
             let manifest = null;
             let manifestUrl = normalizeRemoteMargoneuroUrl(options.manifestUrl || MARGONEURO_REMOTE_BOOTSTRAP_URL);
+            const manifestCandidates = uniqueRemoteUrls(
+                options.manifestUrl,
+                MARGONEURO_REMOTE_BOOTSTRAP_URL,
+                'margoneuro_bootstrap_database.json'
+            );
             try {
-                manifest = await fetchRemoteJson(manifestUrl, Number(options.timeoutMs || 18000));
+                const fetchedManifest = await fetchFirstRemoteJson(manifestCandidates, Number(options.timeoutMs || 18000));
+                manifest = fetchedManifest.data;
+                manifestUrl = fetchedManifest.url;
             } catch (error) {
-                manifest = { staticKnowledgeUrl: MARGONEURO_REMOTE_STATIC_KNOWLEDGE_URL, manifestError: String(error?.message || error) };
+                manifest = {
+                    staticKnowledgeUrl: MARGONEURO_REMOTE_STATIC_KNOWLEDGE_URL,
+                    manifestError: String(error?.message || error),
+                    manifestErrors: error?.errors || []
+                };
             }
 
             const storage = applyRemoteStorageBundle(manifest, options);
-            const staticUrl = normalizeRemoteMargoneuroUrl(
+            const staticCandidates = uniqueRemoteUrls(
                 manifest.staticKnowledgeUrl || manifest.staticKnowledgePath || manifest.staticGraphUrl,
-                MARGONEURO_REMOTE_STATIC_KNOWLEDGE_URL
+                MARGONEURO_REMOTE_STATIC_KNOWLEDGE_URL,
+                'margoworld_static_knowledge.json'
             );
+            let staticUrl = staticCandidates[0] || '';
             let staticResult = { ok: false, reason: 'no_static_url' };
-            if (staticUrl) {
+            if (staticCandidates.length || manifest.staticKnowledge) {
                 try {
-                    const staticRaw = manifest.staticKnowledge && typeof manifest.staticKnowledge === 'object'
-                        ? manifest.staticKnowledge
-                        : await fetchRemoteJson(staticUrl, Number(options.timeoutMs || 22000));
+                    let staticRaw = null;
+                    if (manifest.staticKnowledge && typeof manifest.staticKnowledge === 'object') {
+                        staticRaw = manifest.staticKnowledge;
+                    } else {
+                        const fetchedStatic = await fetchFirstRemoteJson(staticCandidates, Number(options.timeoutMs || 22000));
+                        staticRaw = fetchedStatic.data;
+                        staticUrl = fetchedStatic.url;
+                    }
                     const remoteStats = getRemoteStaticStats(staticRaw);
                     const shouldImport = force || !currentStats.loaded || remoteStats.mapCount > Number(currentStats.maps || currentStats.graphNodes || 0) || remoteStats.transitionCount > Number(currentStats.graphEdges || 0) || Number(new Date(remoteStats.generatedAt).getTime() || 0) > Number(new Date(meta.staticGeneratedAt || 0).getTime() || 0);
                     if (shouldImport) {
@@ -776,9 +818,12 @@
             console.log('[REMOTE-DB] bootstrap result', { storage, staticResult, nextMeta });
             return { ok: !!(staticResult.ok || storage.applied.length), manifest, storage, staticResult, meta: nextMeta };
         }
+        root.applyRemoteMargoneuroStorageBundle = applyRemoteStorageBundle;
         root.loadRemoteMargoneuroDatabase = loadRemoteMargoneuroDatabase;
+        window.applyRemoteMargoneuroStorageBundle = applyRemoteStorageBundle;
         window.loadRemoteMargoneuroDatabase = loadRemoteMargoneuroDatabase;
         Object.assign(debug, {
+            applyRemoteMargoneuroStorageBundle: applyRemoteStorageBundle,
             loadRemoteMargoneuroDatabase,
             getRemoteMargoneuroDatabaseMeta: readRemoteBootstrapMeta,
             clearRemoteMargoneuroDatabaseMeta: () => { deleteStore(MARGONEURO_REMOTE_BOOTSTRAP_META_KEY); return true; }
@@ -16911,13 +16956,210 @@ selHero.addEventListener('change', (e) => {
 
 
       // --- MODUŁ EXPORTU / IMPORTU DO PLIKU ---
-        let keysToSave = ['hero_global_gateways_v20', 'hero_map_order_v20', 'hero_settings_db_v64', 'exp_profiles_v64_4', 'hero_boss_coords_v64', 'hero_teleports_by_nick_v64', EVENT_HERO_ROUTES_KEY, MARGONEURO_MAP_ID_CACHE_KEY];
+        function getMargoneuroDatabaseFileKeys() {
+            const keys = [
+                ...MARGONEURO_REMOTE_STORAGE_KEYS,
+                EVENT_HERO_ROUTES_KEY,
+                MARGONEURO_MAP_ID_CACHE_KEY,
+                'margoneuro_exp_route_state_v2',
+                MARGOWORLD_STATIC_KNOWLEDGE_STORAGE_KEY
+            ].filter(Boolean);
+            return [...new Set(keys)];
+        }
+
+        function readMargoneuroDatabaseValue(key) {
+            try {
+                const raw = margoneuroReadStorage(key);
+                if (typeof raw === 'string' && raw.trim()) return raw.trim();
+            } catch (e) {}
+            try {
+                const raw = localStorage.getItem(key);
+                if (typeof raw === 'string' && raw.trim()) return raw.trim();
+            } catch (e) {}
+            return '';
+        }
+
+        function parseMargoneuroDatabaseJson(raw, fallback = null) {
+            if (!raw || typeof raw !== 'string') return fallback;
+            try { return JSON.parse(raw); } catch (e) { return fallback; }
+        }
+
+        function collectMargoneuroStorageSnapshot() {
+            const snapshot = {};
+            for (const key of getMargoneuroDatabaseFileKeys()) {
+                const raw = readMargoneuroDatabaseValue(key);
+                if (raw && raw !== 'null' && raw !== 'undefined') snapshot[key] = raw;
+            }
+            return snapshot;
+        }
+
+        function countSnapshotObject(raw) {
+            const parsed = parseMargoneuroDatabaseJson(raw, {});
+            return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? Object.keys(parsed).length : 0;
+        }
+
+        function countGatewaySnapshotEdges(raw) {
+            const parsed = parseMargoneuroDatabaseJson(raw, {});
+            let edges = 0;
+            if (!parsed || typeof parsed !== 'object') return 0;
+            for (const row of Object.values(parsed)) {
+                if (Array.isArray(row)) edges += row.length;
+                else if (row && typeof row === 'object') edges += Object.keys(row).length;
+            }
+            return edges;
+        }
+
+        function getSnapshotStaticStats(raw) {
+            const parsed = parseMargoneuroDatabaseJson(raw, {});
+            if (!parsed || typeof parsed !== 'object') return { maps: 0, transitions: 0, expSpots: 0 };
+            const maps = Object.keys(parsed.maps || parsed.graph?.nodes || {}).length || Number(parsed.mapCount || 0);
+            const transitions = (Array.isArray(parsed.groupedTransitions) ? parsed.groupedTransitions.length : 0)
+                || (Array.isArray(parsed.graph?.edges) ? parsed.graph.edges.length : 0)
+                || (Array.isArray(parsed.transitions) ? parsed.transitions.length : 0)
+                || Number(parsed.transitionCount || 0);
+            const expSpots = Object.keys(parsed.expSpots || {}).length || Number(parsed.expSpotCount || 0);
+            return { maps, transitions, expSpots };
+        }
+
+        function getMargoneuroExportStaticKnowledge(localStorageBundle = {}) {
+            try {
+                if (typeof window.getMargoworldStaticKnowledge === 'function') {
+                    const raw = window.getMargoworldStaticKnowledge();
+                    const stats = getSnapshotStaticStats(JSON.stringify(raw || {}));
+                    if (stats.maps || stats.transitions || stats.expSpots) return raw;
+                }
+            } catch (e) {}
+            const parsed = parseMargoneuroDatabaseJson(localStorageBundle[MARGOWORLD_STATIC_KNOWLEDGE_STORAGE_KEY], null);
+            const stats = getSnapshotStaticStats(JSON.stringify(parsed || {}));
+            return stats.maps || stats.transitions || stats.expSpots ? parsed : null;
+        }
+
+        function buildMargoneuroGithubBootstrapExport() {
+            const localStorageBundle = collectMargoneuroStorageSnapshot();
+            const storageKeys = Object.keys(localStorageBundle);
+            const staticKnowledge = getMargoneuroExportStaticKnowledge(localStorageBundle);
+            const staticStats = getSnapshotStaticStats(JSON.stringify(staticKnowledge || parseMargoneuroDatabaseJson(localStorageBundle[MARGOWORLD_STATIC_KNOWLEDGE_STORAGE_KEY], {}) || {}));
+            const expRouteState = parseMargoneuroDatabaseJson(localStorageBundle.margoneuro_exp_route_state_v2, {});
+            return {
+                version: 2,
+                source: 'margoneuro-bootstrap-database',
+                generatedAt: new Date().toISOString(),
+                repository: 'gunns369-dot/Hero-Margonem',
+                localStorageMode: 'missing',
+                staticKnowledgeUrl: 'data/margoworld_static_knowledge.json',
+                shopsUrl: 'margoworld_shops_full_database.json',
+                tooltipCacheUrl: 'margoworld_tooltip_cache_full.json',
+                storageKeys,
+                localStorage: localStorageBundle,
+                ...(staticKnowledge ? { staticKnowledge } : {}),
+                stats: {
+                    storageKeys: storageKeys.length,
+                    gatewayMaps: countSnapshotObject(localStorageBundle.hero_global_gateways_v20),
+                    gatewayEdges: countGatewaySnapshotEdges(localStorageBundle.hero_global_gateways_v20),
+                    heroRoutes: countSnapshotObject(localStorageBundle.hero_map_order_v20),
+                    eventHeroRoutes: countSnapshotObject(localStorageBundle.margoneuro_event_hero_routes_v1),
+                    mapIdentityEntries: countSnapshotObject(localStorageBundle[MARGONEURO_MAP_ID_CACHE_KEY]),
+                    expRouteMaps: expRouteState?.maps && typeof expRouteState.maps === 'object' ? Object.keys(expRouteState.maps).length : 0,
+                    staticKnowledgeMaps: staticStats.maps,
+                    staticKnowledgeTransitions: staticStats.transitions,
+                    staticKnowledgeExpSpots: staticStats.expSpots
+                },
+                notes: [
+                    'Wrzuc ten plik do repozytorium jako data/margoneuro_bootstrap_database.json.',
+                    'Nowa przegladarka pobierze brakujace dane z raw.githubusercontent.com.',
+                    'Tryb missing nie nadpisuje lokalnej pamieci u gracza, chyba ze recznie uzyjesz Wgraj plik.'
+                ]
+            };
+        }
+
+        function extractMargoneuroImportBundle(parsed) {
+            if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+            const directBundle = parsed.localStorage || parsed.storage || parsed.localStorageKeys || parsed.keys || null;
+            const source = directBundle && typeof directBundle === 'object' ? directBundle : parsed;
+            const allowed = new Set([
+                ...getMargoneuroDatabaseFileKeys(),
+                ...(Array.isArray(parsed.storageKeys) ? parsed.storageKeys : [])
+            ]);
+            const bundle = {};
+            for (const [key, value] of Object.entries(source)) {
+                if (!allowed.has(key)) continue;
+                const raw = typeof value === 'string' ? value : JSON.stringify(value);
+                if (raw && raw !== 'undefined' && raw !== 'null') bundle[key] = raw;
+            }
+            return bundle;
+        }
+
+        function extractMargoneuroStaticImportPayload(parsed, bundle = {}) {
+            if (!parsed || typeof parsed !== 'object') return null;
+            if (parsed.staticKnowledge && typeof parsed.staticKnowledge === 'object') return parsed.staticKnowledge;
+            if (parsed.margoworldStaticKnowledge && typeof parsed.margoworldStaticKnowledge === 'object') return parsed.margoworldStaticKnowledge;
+            if (parsed.staticGraph && typeof parsed.staticGraph === 'object') return parsed.staticGraph;
+            if (parsed.maps || parsed.graph || parsed.transitions || parsed.groupedTransitions || parsed.expSpots) return parsed;
+            return parseMargoneuroDatabaseJson(bundle[MARGOWORLD_STATIC_KNOWLEDGE_STORAGE_KEY], null);
+        }
+
+        function syncMargoneuroImportedDatabase(appliedKeys = []) {
+            try { if (typeof loadData === 'function') loadData(); } catch (e) { console.warn('[DB-FILE] loadData sync skipped', e); }
+            try {
+                const rawGateways = readMargoneuroDatabaseValue('hero_global_gateways_v20');
+                if (rawGateways) {
+                    globalGateways = JSON.parse(rawGateways);
+                    window.globalGateways = globalGateways;
+                    if (typeof saveGateways === 'function') saveGateways({ reason: 'file_import' });
+                } else if (typeof restoreGlobalMapMemory === 'function') {
+                    restoreGlobalMapMemory();
+                }
+            } catch (e) { console.warn('[DB-FILE] gateway sync skipped', e); }
+            try {
+                const rawOrder = readMargoneuroDatabaseValue('hero_map_order_v20');
+                if (rawOrder) {
+                    heroMapOrder = JSON.parse(rawOrder);
+                    window.heroMapOrder = heroMapOrder;
+                }
+            } catch (e) { console.warn('[DB-FILE] route sync skipped', e); }
+            try { if (typeof restoreExpRouteState === 'function' && appliedKeys.includes('margoneuro_exp_route_state_v2')) restoreExpRouteState(); } catch (e) {}
+            try {
+                window.__routePathCacheVersion = (window.__routePathCacheVersion || 0) + 1;
+                if (window.__routePathCache instanceof Map) window.__routePathCache.clear();
+                window.__internalMapGraphCache = null;
+            } catch (e) {}
+            try { if (typeof updateUI === 'function') updateUI(); } catch (e) {}
+            try { if (typeof renderEventHeroesPanel === 'function') renderEventHeroesPanel(); } catch (e) {}
+            try { if (typeof window.renderExpMaps === 'function') window.renderExpMaps(); } catch (e) {}
+        }
+
+        function installMargoneuroDatabaseFile(parsed) {
+            const bundle = extractMargoneuroImportBundle(parsed);
+            const manifest = {
+                ...(parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}),
+                localStorage: bundle,
+                storageKeys: Object.keys(bundle),
+                localStorageMode: 'force'
+            };
+            let storage = { applied: [], skipped: [], mode: 'force' };
+            if (typeof window.applyRemoteMargoneuroStorageBundle === 'function') {
+                storage = window.applyRemoteMargoneuroStorageBundle(manifest, { forceStorage: true, source: 'file_import' });
+            } else {
+                for (const [key, raw] of Object.entries(bundle)) {
+                    margoneuroWriteStorage(key, raw);
+                    storage.applied.push(key);
+                }
+            }
+            const staticPayload = extractMargoneuroStaticImportPayload(parsed, bundle);
+            let staticResult = null;
+            if (staticPayload && typeof window.importMargoworldStaticKnowledge === 'function') {
+                try { staticResult = window.importMargoworldStaticKnowledge(staticPayload); }
+                catch (e) { staticResult = { ok: false, error: String(e?.message || e) }; }
+            }
+            syncMargoneuroImportedDatabase(storage.applied || []);
+            console.log('[DB-FILE] import result', { storage, staticResult });
+            return { storage, staticResult };
+        }
 
         let btnExport = document.getElementById('btnExportFile');
         if (btnExport) {
             btnExport.addEventListener('click', () => {
-                let backup = {};
-                keysToSave.forEach(k => { if(localStorage.getItem(k)) backup[k] = localStorage.getItem(k); });
+                const backup = buildMargoneuroGithubBootstrapExport();
 
                 // Tworzenie wirtualnego pliku JSON
                 let blob = new Blob([JSON.stringify(backup, null, 2)], {type: "application/json"});
@@ -16926,13 +17168,13 @@ selHero.addEventListener('change', (e) => {
                 // Wymuszenie pobrania
                 let a = document.createElement('a');
                 a.href = url;
-                a.download = `MargoNeuro_Baza_${new Date().toISOString().slice(0,10)}.json`;
+                a.download = 'margoneuro_bootstrap_database.json';
                 document.body.appendChild(a);
                 a.click();
                 document.body.removeChild(a);
                 URL.revokeObjectURL(url);
 
-                heroAlert("✅ Plik z zapisaną pamięcią bota został pomyślnie wygenerowany i pobrany na Twój komputer!");
+                heroAlert(`OK: pobrano gotowa baze do GitHuba.\nWrzuc plik jako data/margoneuro_bootstrap_database.json.\nKlucze w pliku: ${backup.storageKeys.length}`);
             });
         }
 
@@ -16951,14 +17193,13 @@ selHero.addEventListener('change', (e) => {
                     reader.onload = function(ev) {
                         try {
                             let parsed = JSON.parse(ev.target.result);
-                            for(let k in parsed) { localStorage.setItem(k, parsed[k]); }
-                            heroAlert("✅ Sukces! Odczytano plik i zainstalowano nową bazę!\nZaraz nastąpi automatyczne odświeżenie gry...");
-                            setTimeout(() => {
-                                if (typeof maybeReloadMargoneuro === 'function') maybeReloadMargoneuro('import_database');
-                                else if (!window.MARGONEURO_DISABLE_AUTO_RELOAD) window.location.reload();
-                            }, 2500);
+                            const result = installMargoneuroDatabaseFile(parsed);
+                            const applied = result.storage?.applied?.length || 0;
+                            const staticMaps = result.staticResult?.maps || result.staticResult?.graphNodes || result.staticResult?.remoteStats?.mapCount || 0;
+                            heroAlert(`OK: wgrano baze.\nZapisane klucze: ${applied}\nMapy statyczne: ${staticMaps || 'bez zmian'}\nJesli okno nie pokaze zmian od razu, nacisnij F5.`);
                         } catch(err) {
-                            heroAlert("❌ Błąd: Wybrany plik jest uszkodzony lub nie należy do bota MargoNeuro!");
+                            console.error('[DB-FILE] import failed', err);
+                            heroAlert("Blad: wybrany plik jest uszkodzony albo nie jest baza MargoNeuro.");
                         }
                     };
                     reader.readAsText(file);
