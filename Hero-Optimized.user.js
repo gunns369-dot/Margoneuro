@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         MargoNeuro - Optimized Edition
-// @version      64.8.9
+// @version      64.8.11
 // @description  Automatyczne wykrywanie, inteligentny zasięg, natywny auto-atak, poprawne limity poziomowe, naprawiony scroll.
 // @author       Ty & Gemini
 // @match        https://*.margonem.pl/*
@@ -3522,7 +3522,9 @@ let opacityValue = 0.95;
             reduceGameEffects: true,
             mapTransitionGraceMs: 650,
             loadingOverlayGraceMs: 900,
-            longTaskCooldownMs: 700
+            longTaskCooldownMs: 700,
+            smoothAutowalk: true,
+            smoothAutowalkReissueMs: 5200
         },
         eventHeroes: {
             dwellMs: 1600
@@ -6707,6 +6709,8 @@ function loadData() {
             mapTransitionGraceMs: 650,
             loadingOverlayGraceMs: 900,
             longTaskCooldownMs: 700,
+            smoothAutowalk: true,
+            smoothAutowalkReissueMs: 5200,
             ...(botSettings.performance || {})
         };
         botSettings.eventHeroes = { dwellMs: 1600, ...(botSettings.eventHeroes || {}) };
@@ -14942,6 +14946,7 @@ function initGUI() {
                 <div class="accordion-header" id="accPerformance" onclick="toggleSettingsAcc('accPerformance')">Wydajnosc</div>
                 <div id="accPerformanceContent" style="display:none; padding:5px; background:rgba(0,0,0,0.2); border:1px solid #333; margin-bottom:10px;">
                     <label style="display:block; font-size:11px; color:#e0d8c0; margin-bottom:5px;"><input type="checkbox" id="perfPerformanceMode" ${botSettings.performance?.performanceMode !== false ? 'checked' : ''}> Tryb plynnosci (pauza po przejsciu + mniej skanow)</label>
+                    <label style="display:block; font-size:11px; color:#e0d8c0; margin-bottom:5px;"><input type="checkbox" id="perfSmoothAutowalk" ${botSettings.performance?.smoothAutowalk !== false ? 'checked' : ''}> Plynne chodzenie do celu (autoGoTo)</label>
                     <label style="display:block; font-size:11px; color:#e0d8c0; margin-bottom:5px;"><input type="checkbox" id="perfReduceUiAnimations" ${botSettings.performance?.reduceUiAnimations !== false ? 'checked' : ''}> Ogranicz animacje UI bota</label>
                     <label style="display:block; font-size:11px; color:#e0d8c0; margin-bottom:5px;"><input type="checkbox" id="perfReduceGameEffects" ${botSettings.performance?.reduceGameEffects !== false ? 'checked' : ''}> Ogranicz efekty gry, gdy silnik pozwala</label>
                     <div class="nav-row"><label>Pauza po zmianie mapy (ms):</label><input type="number" id="perfMapTransitionGrace" value="${botSettings.performance?.mapTransitionGraceMs || 650}" min="450" max="2000"></div>
@@ -15742,12 +15747,19 @@ if (!botSettings.berserk) {
             mapTransitionGraceMs: 650,
             loadingOverlayGraceMs: 900,
             longTaskCooldownMs: 700,
+            smoothAutowalk: true,
+            smoothAutowalkReissueMs: 5200,
             ...(botSettings.performance || {})
         };
         bindChange('perfPerformanceMode', (e) => {
             botSettings.performance.performanceMode = !!e.target.checked;
             if (typeof saveSettings === 'function') saveSettings();
             if (typeof applyMargoneuroPerformanceMode === 'function') applyMargoneuroPerformanceMode();
+        });
+        bindChange('perfSmoothAutowalk', (e) => {
+            botSettings.performance.smoothAutowalk = !!e.target.checked;
+            if (typeof resetExpSmoothAutoWalkState === 'function') resetExpSmoothAutoWalkState('settings_toggle');
+            if (typeof saveSettings === 'function') saveSettings();
         });
         bindChange('perfReduceUiAnimations', (e) => {
             botSettings.performance.reduceUiAnimations = !!e.target.checked;
@@ -19198,10 +19210,119 @@ function optimizeRoute() {
     }
     window.isSafeGoToTarget = isSafeGoToTarget;
 
+    function getGlobalSmoothAutoWalkSettings() {
+        const perf = botSettings?.performance || {};
+        const clamp = typeof clampMargoneuroPerfMs === 'function'
+            ? clampMargoneuroPerfMs
+            : ((value, fallback, min, max) => Math.max(min, Math.min(max, Number(value) || fallback)));
+        return {
+            enabled: perf.smoothAutowalk !== false,
+            reissueMs: clamp(perf.smoothAutowalkReissueMs, 5200, 1800, 12000),
+            progressLeaseMs: 11000,
+            sameDestinationWarmupMs: 900
+        };
+    }
+    window.getGlobalSmoothAutoWalkSettings = getGlobalSmoothAutoWalkSettings;
+
+    function resetGlobalSmoothAutoWalkState(reason = 'reset') {
+        window.__margoneuroGlobalSmoothAutoWalk = {
+            x: null,
+            y: null,
+            mapName: '',
+            issuedAt: 0,
+            heroXAtIssue: null,
+            heroYAtIssue: null,
+            reason
+        };
+        return true;
+    }
+    window.resetGlobalSmoothAutoWalkState = resetGlobalSmoothAutoWalkState;
+
+    function getGlobalSmoothMoveSnapshot() {
+        if (typeof getHeroMovementSnapshot === 'function') return getHeroMovementSnapshot();
+        const h = Engine?.hero;
+        const dx = Number(h?.d?.x);
+        const dy = Number(h?.d?.y);
+        const rx = Number(h?.rx ?? dx);
+        const ry = Number(h?.ry ?? dy);
+        let locked = false;
+        try { locked = !!Engine?.lock?.check?.(); } catch (e) { locked = false; }
+        let autoPathCount = 0;
+        try { autoPathCount = Number(h?.autoPath?.count?.() ?? 0) || 0; } catch (e) { autoPathCount = 0; }
+        const pathLen = Array.isArray(h?.d?.path) ? h.d.path.length : 0;
+        const roadLen = h?.autoPath?.road?.length ?? 0;
+        const roadNodesLen = h?.autoPath?.roadNodes?.length ?? 0;
+        const stepsToSendLen = Engine?.stepsToSend?.steps?.length ?? 0;
+        const visualOffset = Math.abs((Number.isFinite(rx) ? rx : dx) - dx) + Math.abs((Number.isFinite(ry) ? ry : dy) - dy);
+        return {
+            x: dx,
+            y: dy,
+            visualOffset,
+            autoPathCount,
+            pathLen,
+            roadLen,
+            roadNodesLen,
+            stepsToSendLen,
+            movementBusy: autoPathCount > 0 || pathLen > 0 || roadLen > 0 || roadNodesLen > 0 || stepsToSendLen > 0 || visualOffset > 0.08,
+            locked,
+            autoWalkLock: !!h?.autoWalkLock,
+            at: Date.now()
+        };
+    }
+
+    function shouldUseGlobalSmoothAutoWalk(options = {}) {
+        if (options?.forceExact || options?.disableSmoothAutowalk || options?.disableSmoothLease) return false;
+        const cfg = getGlobalSmoothAutoWalkSettings();
+        return !!cfg.enabled;
+    }
+
+    function isGlobalSmoothAutoWalkLeaseActive(x, y, options = {}) {
+        if (!shouldUseGlobalSmoothAutoWalk(options)) return false;
+        const state = window.__margoneuroGlobalSmoothAutoWalk || null;
+        if (!state?.issuedAt) return false;
+        const tx = Math.round(Number(x));
+        const ty = Math.round(Number(y));
+        if (!Number.isFinite(tx) || !Number.isFinite(ty)) return false;
+        const cfg = getGlobalSmoothAutoWalkSettings();
+        const now = Date.now();
+        const age = now - Number(state.issuedAt || 0);
+        if (age > cfg.reissueMs) return false;
+        const mapName = Engine?.map?.d?.name || '';
+        if (state.mapName && mapName && state.mapName !== mapName) return false;
+        if (Number(state.x) !== tx || Number(state.y) !== ty) return false;
+        const snap = getGlobalSmoothMoveSnapshot();
+        const activeMove = typeof isExpSnapshotActivelyMoving === 'function'
+            ? isExpSnapshotActivelyMoving(snap, { ageMs: age, staleMinAgeMs: 900 })
+            : !!(snap?.movementBusy || snap?.autoWalkLock || snap?.locked);
+        if (activeMove) return true;
+        const hx = Number(Engine?.hero?.d?.x);
+        const hy = Number(Engine?.hero?.d?.y);
+        const progressed = Number.isFinite(hx) && Number.isFinite(hy) && (
+            Number(state.heroXAtIssue) !== hx || Number(state.heroYAtIssue) !== hy
+        );
+        return progressed && age < cfg.progressLeaseMs;
+    }
+    window.isGlobalSmoothAutoWalkLeaseActive = isGlobalSmoothAutoWalkLeaseActive;
+
+    function noteGlobalSmoothAutoWalk(x, y, reason = 'safeGoTo', options = {}) {
+        if (!shouldUseGlobalSmoothAutoWalk(options)) return;
+        const hx = Number(Engine?.hero?.d?.x);
+        const hy = Number(Engine?.hero?.d?.y);
+        window.__margoneuroGlobalSmoothAutoWalk = {
+            x: Math.round(Number(x)),
+            y: Math.round(Number(y)),
+            mapName: Engine?.map?.d?.name || '',
+            issuedAt: Date.now(),
+            heroXAtIssue: Number.isFinite(hx) ? hx : null,
+            heroYAtIssue: Number.isFinite(hy) ? hy : null,
+            reason
+        };
+    }
+    window.noteGlobalSmoothAutoWalk = noteGlobalSmoothAutoWalk;
+
    window.safeGoTo = function(targetX, targetY, useRandom, options = {}) {
         let now = Date.now();
         const bypassThrottle = !!options?.bypassThrottle;
-        if (!bypassThrottle && now < nextAllowedClickTime) return false;
 
         let x = Number(targetX); 
         let y = Number(targetY);
@@ -19223,6 +19344,15 @@ function optimizeRoute() {
                 console.warn('[Margoneuro][safeGoTo] invalid target blocked', { x, y, options });
             }
             return false;
+        }
+
+        if (!bypassThrottle && now < nextAllowedClickTime) {
+            if (!useRandom && isGlobalSmoothAutoWalkLeaseActive(x, y, options)) return true;
+            return false;
+        }
+
+        if (!useRandom && isGlobalSmoothAutoWalkLeaseActive(x, y, options)) {
+            return true;
         }
 
         if (typeof Engine !== 'undefined' && Engine.hero) {
@@ -19280,6 +19410,7 @@ function optimizeRoute() {
 
             let throttleDelay = Math.floor(Math.random() * (botSettings.throttleMax - botSettings.throttleMin + 1)) + botSettings.throttleMin;
             nextAllowedClickTime = bypassThrottle ? Date.now() + 450 : Date.now() + throttleDelay;
+            noteGlobalSmoothAutoWalk(x, y, options?.reason || 'safeGoTo', options);
             return true;
         }
         return false;
@@ -19306,6 +19437,8 @@ function stopPatrol(hardStop = true) {
         if (typeof cancelMovementScheduler === 'function') cancelMovementScheduler('stop_patrol');
         else clearTimeout(rushInterval);
         clearTimeout(smoothPatrolInterval);
+        if (typeof resetGlobalSmoothAutoWalkState === 'function') resetGlobalSmoothAutoWalkState('stop_patrol');
+        if (typeof resetExpSmoothAutoWalkState === 'function') resetExpSmoothAutoWalkState('stop_patrol');
         if (window.__goToMapsRenderDebounce) {
             clearTimeout(window.__goToMapsRenderDebounce);
             window.__goToMapsRenderDebounce = null;
@@ -20049,6 +20182,127 @@ function issueExpGuardedSafeGoTo(x, y, reason = 'exp_move', targetId = null, saf
 }
 window.issueExpGuardedSafeGoTo = issueExpGuardedSafeGoTo;
 
+function getSmoothExpAutoWalkSettings() {
+    const perf = botSettings?.performance || {};
+    return {
+        enabled: perf.smoothAutowalk !== false,
+        reissueMs: clampMargoneuroPerfMs(perf.smoothAutowalkReissueMs, 5200, 1800, 12000),
+        warmupMs: 900
+    };
+}
+window.getSmoothExpAutoWalkSettings = getSmoothExpAutoWalkSettings;
+
+function resetExpSmoothAutoWalkState(reason = 'reset') {
+    window.__margoneuroSmoothExpAutoWalk = {
+        x: null,
+        y: null,
+        targetId: null,
+        mapName: '',
+        issuedAt: 0,
+        heroXAtIssue: null,
+        heroYAtIssue: null,
+        reason
+    };
+    return true;
+}
+window.resetExpSmoothAutoWalkState = resetExpSmoothAutoWalkState;
+
+function isSmoothExpAutoWalkLeaseActive(targetId = null, dest = null, options = {}) {
+    const cfg = getSmoothExpAutoWalkSettings();
+    if (!cfg.enabled || !window.isExping) return false;
+    const state = window.__margoneuroSmoothExpAutoWalk || null;
+    if (!state?.issuedAt) return false;
+    const now = Date.now();
+    const age = now - Number(state.issuedAt || 0);
+    if (age > Number(options.maxAgeMs || cfg.reissueMs)) return false;
+    const mapName = Engine?.map?.d?.name || '';
+    if (state.mapName && mapName && state.mapName !== mapName) return false;
+    if (targetId != null && String(state.targetId ?? '') !== String(targetId ?? '')) return false;
+    if (dest && Number.isFinite(Number(dest.x)) && Number.isFinite(Number(dest.y))) {
+        const maxDelta = Number(options.destTolerance ?? 1);
+        if (Math.abs(Number(state.x) - Number(dest.x)) > maxDelta || Math.abs(Number(state.y) - Number(dest.y)) > maxDelta) return false;
+    }
+    const snap = typeof getHeroMovementSnapshot === 'function' ? getHeroMovementSnapshot() : null;
+    const activeMove = typeof isExpSnapshotActivelyMoving === 'function'
+        ? isExpSnapshotActivelyMoving(snap, { ageMs: age, staleMinAgeMs: 900 })
+        : !!snap?.movementBusy;
+    if (activeMove) return true;
+    const hx = Number(Engine?.hero?.d?.x);
+    const hy = Number(Engine?.hero?.d?.y);
+    const progressed = Number.isFinite(hx) && Number.isFinite(hy) && (
+        Number(state.heroXAtIssue) !== hx || Number(state.heroYAtIssue) !== hy
+    );
+    return progressed && age < EXP_MOVE_PROGRESS_LEASE_MS;
+}
+window.isSmoothExpAutoWalkLeaseActive = isSmoothExpAutoWalkLeaseActive;
+
+function issueSmoothExpAutoGoTo(x, y, targetId = null, reason = 'smooth_exp_move', options = {}) {
+    const cfg = getSmoothExpAutoWalkSettings();
+    if (!cfg.enabled) {
+        const go = typeof window.safeGoTo === 'function' ? window.safeGoTo : null;
+        return { ok: !!(go && go(x, y, false, options)), sent: true, skipped: false, disabled: true };
+    }
+
+    const tx = Math.round(Number(x));
+    const ty = Math.round(Number(y));
+    if (!Number.isFinite(tx) || !Number.isFinite(ty)) return { ok: false, sent: false, reason: 'bad_target' };
+    if (typeof isSafeGoToTarget === 'function' && !isSafeGoToTarget(tx, ty, options)) {
+        return { ok: false, sent: false, reason: 'unsafe_target' };
+    }
+
+    const now = Date.now();
+    const mapName = Engine?.map?.d?.name || '';
+    const targetKey = targetId ?? reason;
+    if (!options.force && isSmoothExpAutoWalkLeaseActive(targetKey, { x: tx, y: ty }, { maxAgeMs: cfg.reissueMs, destTolerance: 0 })) {
+        return { ok: true, sent: false, skipped: true, reason: 'same_destination_active' };
+    }
+
+    const previous = window.__margoneuroSmoothExpAutoWalk || null;
+    const sameWarmup = previous?.issuedAt &&
+        previous.mapName === mapName &&
+        Number(previous.x) === tx &&
+        Number(previous.y) === ty &&
+        String(previous.targetId ?? '') === String(targetKey ?? '') &&
+        now - Number(previous.issuedAt || 0) < cfg.warmupMs;
+    if (!options.force && sameWarmup) {
+        return { ok: true, sent: false, skipped: true, reason: 'same_destination_warmup' };
+    }
+
+    let sent = false;
+    try {
+        if (typeof Engine?.hero?.autoGoTo === 'function') {
+            Engine.hero.autoGoTo({ x: tx, y: ty });
+            sent = true;
+        } else if (typeof window.safeGoTo === 'function') {
+            sent = window.safeGoTo(tx, ty, false, { ...options, bypassThrottle: !!options.bypassThrottle });
+        }
+    } catch (err) {
+        sent = false;
+        if (!window.__lastSmoothAutoWalkErrorAt || now - window.__lastSmoothAutoWalkErrorAt > 1500) {
+            window.__lastSmoothAutoWalkErrorAt = now;
+            console.warn('[Margoneuro][smoothAutoWalk] move failed', { x: tx, y: ty, targetId: targetKey, err });
+        }
+    }
+    if (!sent) return { ok: false, sent: false, reason: 'engine_rejected' };
+
+    const hx = Number(Engine?.hero?.d?.x);
+    const hy = Number(Engine?.hero?.d?.y);
+    window.__margoneuroSmoothExpAutoWalk = {
+        x: tx,
+        y: ty,
+        targetId: targetKey,
+        mapName,
+        issuedAt: now,
+        heroXAtIssue: Number.isFinite(hx) ? hx : null,
+        heroYAtIssue: Number.isFinite(hy) ? hy : null,
+        reason
+    };
+    window.__safeGoToLast = { x: tx, y: ty, at: now, heroXAtIssue: Number.isFinite(hx) ? hx : null, heroYAtIssue: Number.isFinite(hy) ? hy : null };
+    if (typeof noteGlobalSmoothAutoWalk === 'function') noteGlobalSmoothAutoWalk(tx, ty, reason, options);
+    return { ok: true, sent: true, skipped: false, reason };
+}
+window.issueSmoothExpAutoGoTo = issueSmoothExpAutoGoTo;
+
 function formatMsShort(ms) { const s = Math.max(0, Math.round(ms / 1000)); return `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`; }
 function estimateMonsterRespawnSeconds(level) {
     const lvl = Math.max(1, Number(level || 1));
@@ -20160,7 +20414,9 @@ function getMargoneuroPerformanceModeSettings() {
         reduceGameEffects: perf.reduceGameEffects !== false,
         mapTransitionGraceMs: clampMargoneuroPerfMs(perf.mapTransitionGraceMs, 650, 450, 2000),
         loadingOverlayGraceMs: clampMargoneuroPerfMs(perf.loadingOverlayGraceMs, 900, 450, 2500),
-        longTaskCooldownMs: clampMargoneuroPerfMs(perf.longTaskCooldownMs, 700, 250, 2500)
+        longTaskCooldownMs: clampMargoneuroPerfMs(perf.longTaskCooldownMs, 700, 250, 2500),
+        smoothAutowalk: perf.smoothAutowalk !== false,
+        smoothAutowalkReissueMs: clampMargoneuroPerfMs(perf.smoothAutowalkReissueMs, 5200, 1800, 12000)
     };
 }
 window.getMargoneuroPerformanceModeSettings = getMargoneuroPerformanceModeSettings;
@@ -27230,6 +27486,7 @@ function resetExpMoveCommand(reason = 'reset') {
     window.expLastMoveHeroX = null;
     window.expLastMoveHeroY = null;
     window.__safeGoToLast = { x: null, y: null, at: 0, heroXAtIssue: null, heroYAtIssue: null };
+    if (typeof resetExpSmoothAutoWalkState === 'function') resetExpSmoothAutoWalkState(reason);
     window.__lastRejectedMoveCommandReason = null;
     return true;
 }
@@ -27429,6 +27686,16 @@ function tryExpApproachPulse(mob, moveDest, pathData = null, reason = 'approach_
     if (mob.memoryOnly || mob.visible === false) return false;
 
     const key = getExpApproachPulseKey(mob);
+    const pulseTargetId = mob.id ?? key;
+    if (!options.forcePulse) {
+        const smoothActive = typeof isSmoothExpAutoWalkLeaseActive === 'function'
+            ? isSmoothExpAutoWalkLeaseActive(pulseTargetId, moveDest, { maxAgeMs: getSmoothExpAutoWalkSettings().reissueMs, destTolerance: 1 })
+            : false;
+        const globalActive = typeof isGlobalSmoothAutoWalkLeaseActive === 'function'
+            ? isGlobalSmoothAutoWalkLeaseActive(moveDest.x, moveDest.y, {})
+            : false;
+        if (smoothActive || globalActive) return false;
+    }
     const pulse = window.__expApproachPulse || (window.__expApproachPulse = {});
     if (pulse.targetKey !== key) {
         pulse.targetKey = key;
@@ -27914,8 +28181,10 @@ function handleFastExpMobTarget(fast, context = {}) {
             window.expRuntimeDiagnostics.currentMoveTarget = { x: moveDest.x, y: moveDest.y, directMob: !!moveDest.directMob };
         }
         setExpState(EXP_STATES.MOVING_TO_MOB, 'fast_move_to_target');
-        const sent = window.safeGoTo(moveDest.x, moveDest.y, false, { bypassThrottle: false });
-        if (sent === false) {
+        const moveResult = typeof issueSmoothExpAutoGoTo === 'function'
+            ? issueSmoothExpAutoGoTo(moveDest.x, moveDest.y, targetId, 'fast_move_to_target', { bypassThrottle: false, targetId })
+            : { ok: window.safeGoTo(moveDest.x, moveDest.y, false, { bypassThrottle: false, reason: 'fast_move_to_target', targetId }), sent: true };
+        if (moveResult?.ok === false) {
             window.__lastRejectedMoveCommandReason = 'safe_go_to_rejected';
             // shouldIssueExpMoveCommand already wrote the lease, but no movement was sent.
             // Clear it so the next EXP tick can try the visible radar target instead of waiting on a fake ETA.
@@ -27928,7 +28197,7 @@ function handleFastExpMobTarget(fast, context = {}) {
         window.expLastMoveAt = now;
         window.expLastMoveCommandAt = now;
         if (typeof window.ExpMovementGuard?.notePathCommandSent === 'function') {
-            window.ExpMovementGuard.notePathCommandSent({ x: moveDest.x, y: moveDest.y, targetId, reason: 'fast_move_to_target' });
+            if (moveResult?.sent !== false) window.ExpMovementGuard.notePathCommandSent({ x: moveDest.x, y: moveDest.y, targetId, reason: 'fast_move_to_target' });
         }
         window.expLastMoveHeroX = hx;
         window.expLastMoveHeroY = hy;
@@ -30660,12 +30929,16 @@ function runExpLogic() {
                 const ny = EXP_USE_DIRECT_MOB_AUTOGO ? Number(nextTarget.y) : nextPathData.stand.y;
                 updateExpTargetLock(nextTarget, nextPathData, 'chain_target_after_lock');
                 setExpState(EXP_STATES.MOVING_TO_MOB,'move_to_target');
-                const chainMoveIssued = shouldIssueExpMoveCommand(nx, ny, nextTarget.id ?? getExpMobStableKey(nextTarget), { minIntervalMs: EXP_TARGET_REPATH_INTERVAL_MS, expectedTiles: nextPathData?.stand?.dist });
+                const chainTargetId = nextTarget.id ?? getExpMobStableKey(nextTarget);
+                const chainMoveIssued = shouldIssueExpMoveCommand(nx, ny, chainTargetId, { minIntervalMs: EXP_TARGET_REPATH_INTERVAL_MS, expectedTiles: nextPathData?.stand?.dist });
                 if (!chainMoveIssued) return;
                 ActionExecutor.run('MOVE', { x: nx, y: ny }, () => {
-                    const sent = window.safeGoTo(nx, ny, false, { bypassThrottle: false });
+                    const moveResult = typeof issueSmoothExpAutoGoTo === 'function'
+                        ? issueSmoothExpAutoGoTo(nx, ny, chainTargetId, 'chain_target', { bypassThrottle: false, targetId: chainTargetId })
+                        : { ok: window.safeGoTo(nx, ny, false, { bypassThrottle: false, reason: 'chain_target', targetId: chainTargetId }), sent: true };
+                    const sent = moveResult?.ok !== false;
                     if (sent !== false && typeof window.ExpMovementGuard?.notePathCommandSent === 'function') {
-                        window.ExpMovementGuard.notePathCommandSent({ x: nx, y: ny, targetId: nextTarget.id ?? getExpMobStableKey(nextTarget), reason: 'chain_target' });
+                        if (moveResult?.sent !== false) window.ExpMovementGuard.notePathCommandSent({ x: nx, y: ny, targetId: chainTargetId, reason: 'chain_target' });
                     }
                     return sent;
                 });
@@ -30797,10 +31070,14 @@ function runExpLogic() {
                 HeroLogger.emit('DEBUG', 'EXP_TARGET_SELECTED', `[EXP] Target selected: ${target.nick || target.id}/${target.id || '?'} at ${target.x},${target.y} -> move ${moveX},${moveY} distance ${targetPathData?.stand?.dist ?? '?'}`, "#ffe082", { category: 'COMBAT', dedupeMs: 5000 });
                 HeroLogger.emit('DEBUG', 'EXP_PATH_WALK_STAND', `[PATH] Walking to mob target ${moveX},${moveY} for target ${target.id || '?'}`, "#81d4fa", { category: 'COMBAT', dedupeMs: 5000 });
                 setExpState(EXP_STATES.MOVING_TO_MOB,'move_to_target');
+                const legacyTargetId = target.id ?? getStableExpTargetKey(target);
                 ActionExecutor.run('MOVE', { x: moveX, y: moveY }, () => {
-                    const sent = window.safeGoTo(moveX, moveY, false, { bypassThrottle: false });
+                    const moveResult = typeof issueSmoothExpAutoGoTo === 'function'
+                        ? issueSmoothExpAutoGoTo(moveX, moveY, legacyTargetId, 'legacy_move_to_target', { bypassThrottle: false, targetId: legacyTargetId })
+                        : { ok: window.safeGoTo(moveX, moveY, false, { bypassThrottle: false, reason: 'legacy_move_to_target', targetId: legacyTargetId }), sent: true };
+                    const sent = moveResult?.ok !== false;
                     if (sent !== false && typeof window.ExpMovementGuard?.notePathCommandSent === 'function') {
-                        window.ExpMovementGuard.notePathCommandSent({ x: moveX, y: moveY, targetId: target.id ?? getStableExpTargetKey(target), reason: 'legacy_move_to_target' });
+                        if (moveResult?.sent !== false) window.ExpMovementGuard.notePathCommandSent({ x: moveX, y: moveY, targetId: legacyTargetId, reason: 'legacy_move_to_target' });
                     }
                     return sent;
                 });
@@ -35271,7 +35548,53 @@ function getAuctionElementArea(el) {
     }
 }
 
+function getAuctionVisibleTextInputs(scope = document) {
+    const root = scope || document;
+    return Array.from(root.querySelectorAll('input'))
+        .filter(isAuctionElementVisible)
+        .filter(el => {
+            const type = String(el.type || '').toLowerCase();
+            return !['checkbox', 'radio', 'hidden', 'button', 'submit'].includes(type);
+        })
+        .map((el, i) => {
+            const rect = el.getBoundingClientRect();
+            return {
+                i,
+                el,
+                value: el.value,
+                placeholder: el.placeholder,
+                className: String(el.className || ''),
+                left: rect.left,
+                right: rect.right,
+                top: rect.top,
+                bottom: rect.bottom,
+                width: rect.width,
+                height: rect.height
+            };
+        })
+        .sort((a, b) => (a.top - b.top) || (a.left - b.left));
+}
+window.getAuctionVisibleTextInputs = getAuctionVisibleTextInputs;
+
+function findAuctionListingBoxByText() {
+    const boxes = Array.from(document.querySelectorAll('div, .window, .dialog-window, .margo-window, .popup, .modal'))
+        .filter(isAuctionElementVisible)
+        .filter(el => {
+            const text = auctionNorm(el.innerText || el.textContent || '');
+            return /licytacja od/.test(text)
+                && /kwota kup teraz/.test(text)
+                && /czas trwania/.test(text)
+                && !/nazwa przedmiotu|min cena|max cena|aukcje graczy|twoje aukcje|obserwowane|licytowane|wybierz kategorie/.test(text);
+        })
+        .sort((a, b) => getAuctionElementArea(a) - getAuctionElementArea(b));
+    return boxes[0] || null;
+}
+window.findAuctionListingBoxByText = findAuctionListingBoxByText;
+
 function getAuctionListingRoot() {
+    const box = findAuctionListingBoxByText();
+    if (box) return box;
+
     const strictBoxes = [...document.querySelectorAll('div, .window, .dialog-window, .margo-window, .popup, .modal')]
         .filter(isAuctionElementVisible)
         .filter(el => {
@@ -35306,24 +35629,28 @@ function getAuctionListingRoot() {
 window.getAuctionListingRoot = getAuctionListingRoot;
 
 function findAuctionFinalSubmitButton() {
+    const box = findAuctionListingBoxByText();
     const root = getAuctionListingRoot();
-    if (!root) return null;
-    const candidates = Array.from(root.querySelectorAll('button, input, div, span, a'))
-        .filter(isAuctionElementVisible)
-        .map(el => {
-            const rect = el.getBoundingClientRect();
-            return {
-                el,
-                text: auctionCleanButtonText(el.value || el.innerText || el.textContent),
-                left: rect.left,
-                top: rect.top,
-                width: rect.width,
-                height: rect.height
-            };
-        })
-        .filter(x => /^Wystaw(\s|\[|$)/i.test(x.text) && !/przedmiot/i.test(x.text))
-        .sort((a, b) => b.top - a.top);
-    return candidates[0]?.el || null;
+    const roots = [box, root, document].filter(Boolean);
+    for (const scope of roots) {
+        const candidates = Array.from(scope.querySelectorAll('button, input, div, span, a'))
+            .filter(isAuctionElementVisible)
+            .map(el => {
+                const rect = el.getBoundingClientRect();
+                return {
+                    el,
+                    text: auctionCleanButtonText(el.value || el.innerText || el.textContent),
+                    left: rect.left,
+                    top: rect.top,
+                    width: rect.width,
+                    height: rect.height
+                };
+            })
+            .filter(x => /^Wystaw(\s|\[|$)/i.test(x.text) && !/przedmiot/i.test(x.text))
+            .sort((a, b) => b.top - a.top);
+        if (candidates[0]?.el) return candidates[0].el;
+    }
+    return null;
 }
 window.findAuctionFinalSubmitButton = findAuctionFinalSubmitButton;
 
@@ -35604,75 +35931,53 @@ function setAuctionInputValue(input, value) {
 
 function getAuctionListingInputs(root = getAuctionListingRoot()) {
     if (!root) return { inputs: [], bidInput: null, buyInput: null, durationInput: null };
-    const inputs = [...root.querySelectorAll('input')]
-        .filter(input => !/checkbox|radio|button|submit/i.test(input.type || ''))
-        .filter(input => {
-            try {
-                const rect = input.getBoundingClientRect();
-                const style = window.getComputedStyle(input);
-                return rect.width > 10 && rect.height > 8 && style.display !== 'none' && style.visibility !== 'hidden';
-            } catch (e) {
-                return true;
-            }
-        })
-        .sort((a, b) => {
-            const ar = a.getBoundingClientRect();
-            const br = b.getBoundingClientRect();
-            return (ar.top - br.top) || (ar.left - br.left);
+    const button = findAuctionFinalSubmitButton();
+    const allVisibleInputs = getAuctionVisibleTextInputs(document);
+
+    if (button) {
+        const br = button.getBoundingClientRect();
+        const near = allVisibleInputs.filter(x => {
+            return x.top < br.top
+                && x.top > br.top - 280
+                && x.left > br.left - 80
+                && x.left < br.left + 360
+                && x.width >= 40;
         });
-    if (!inputs.length) return { inputs, bidInput: null, buyInput: null, durationInput: null };
-    const inputMeta = inputs.map(input => {
-        const rect = input.getBoundingClientRect();
-        return {
-            input,
-            rect,
-            cx: rect.left + rect.width / 2,
-            cy: rect.top + rect.height / 2
-        };
-    });
-    const labels = [...root.querySelectorAll('label, span, div, p, td, th')]
-        .map(el => {
-            const text = auctionNorm(el.innerText || el.textContent || '');
-            if (!text || text.length > 80) return null;
-            try {
-                const rect = el.getBoundingClientRect();
-                const style = window.getComputedStyle(el);
-                if (rect.width <= 2 || rect.height <= 2 || style.display === 'none' || style.visibility === 'hidden') return null;
-                return {
-                    el,
-                    text,
-                    rect,
-                    cx: rect.left + rect.width / 2,
-                    cy: rect.top + rect.height / 2
-                };
-            } catch (e) {
-                return null;
-            }
-        })
-        .filter(Boolean);
-    const findNearLabel = (rx) => {
-        const matchingLabels = labels.filter(label => rx.test(label.text));
-        let best = null;
-        for (const label of matchingLabels) {
-            for (const meta of inputMeta) {
-                const dy = Math.abs(meta.cy - label.cy);
-                const toRight = meta.rect.left >= label.rect.left - 4;
-                const below = meta.rect.top >= label.rect.top - 2 && meta.rect.top - label.rect.bottom < 44;
-                if (dy > 38 && !below) continue;
-                const dx = Math.abs(meta.rect.left - label.rect.right);
-                const score = dy + (toRight ? 0 : 35) + Math.min(dx, 80) * 0.2 + (below ? 6 : 0);
-                if (!best || score < best.score) best = { input: meta.input, score };
-            }
+        if (near.length >= 3) {
+            const fields = near.slice(-3).map(x => x.el);
+            return {
+                inputs: fields,
+                bidInput: fields[0] || null,
+                buyInput: fields[1] || null,
+                durationInput: fields[2] || null,
+                source: 'working_script_near_submit'
+            };
         }
-        return best?.input || null;
-    };
-    const nextDistinct = (...taken) => inputs.find(input => !taken.includes(input)) || null;
-    const bidInput = findNearLabel(/licytacja od|licytacja/) || inputs[0] || null;
-    let buyInput = findNearLabel(/kwota kup teraz|kup teraz/);
-    if (!buyInput || buyInput === bidInput) buyInput = nextDistinct(bidInput) || inputs[1] || null;
-    let durationInput = findNearLabel(/czas trwania|czas/);
-    if (!durationInput || durationInput === bidInput || durationInput === buyInput) durationInput = nextDistinct(bidInput, buyInput) || inputs[2] || null;
-    return { inputs, bidInput, buyInput, durationInput };
+    }
+
+    const box = findAuctionListingBoxByText() || root;
+    if (box) {
+        const br = box.getBoundingClientRect();
+        const inside = getAuctionVisibleTextInputs(box).filter(x => {
+            return x.left >= br.left - 2
+                && x.right <= br.right + 2
+                && x.top >= br.top - 2
+                && x.bottom <= br.bottom + 2;
+        });
+        if (inside.length >= 3) {
+            const fields = inside.slice(0, 3).map(x => x.el);
+            return {
+                inputs: fields,
+                bidInput: fields[0] || null,
+                buyInput: fields[1] || null,
+                durationInput: fields[2] || null,
+                source: 'working_script_box'
+            };
+        }
+    }
+
+    auctionLog('Nie znalazlem bezpiecznych 3 pol formularza aukcji - nie dotykam wyszukiwarki.', '#ffcc80', 4000, 'auction_inputs_safe_missing');
+    return { inputs: [], bidInput: null, buyInput: null, durationInput: null, source: 'missing' };
 }
 window.getAuctionListingInputs = getAuctionListingInputs;
 
