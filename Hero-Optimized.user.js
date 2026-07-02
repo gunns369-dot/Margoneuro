@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         MargoNeuro - Optimized Edition
-// @version      64.8.2
+// @version      64.8.3
 // @description  Automatyczne wykrywanie, inteligentny zasięg, natywny auto-atak, poprawne limity poziomowe, naprawiony scroll.
 // @author       Ty & Gemini
 // @match        https://*.margonem.pl/*
@@ -3420,6 +3420,36 @@ let opacityValue = 0.95;
             enabled: true,
             source: 'screen_default'
         }));
+    }
+
+    function getEquipmentUpgraderDefaultSettings() {
+        return {
+            enabled: false,
+            upgradeToMax: true,
+            autoEnchant: true,
+            allowExtraction: false,
+            allowBreakItems: false,
+            goldBuffer: 0,
+            lastRunAt: 0,
+            order: ['weapon', 'armor', 'offhand', 'necklace', 'ring', 'gloves', 'helmet', 'boots', 'bagAny'],
+            slots: {
+                weapon: true,
+                armor: true,
+                offhand: true,
+                necklace: true,
+                ring: true,
+                gloves: true,
+                helmet: true,
+                boots: true,
+                bagAny: false
+            },
+            fodder: {
+                common: true,
+                unique: false,
+                heroic: false,
+                legendary: false
+            }
+        };
     }
 
     let botSettings = {
@@ -16892,36 +16922,6 @@ function initEqBuyerUI() {
     }
 }
 
-function getEquipmentUpgraderDefaultSettings() {
-    return {
-        enabled: false,
-        upgradeToMax: true,
-        autoEnchant: true,
-        allowExtraction: false,
-        allowBreakItems: false,
-        goldBuffer: 0,
-        lastRunAt: 0,
-        order: ['weapon', 'armor', 'offhand', 'necklace', 'ring', 'gloves', 'helmet', 'boots', 'bagAny'],
-        slots: {
-            weapon: true,
-            armor: true,
-            offhand: true,
-            necklace: true,
-            ring: true,
-            gloves: true,
-            helmet: true,
-            boots: true,
-            bagAny: false
-        },
-        fodder: {
-            common: true,
-            unique: false,
-            heroic: false,
-            legendary: false
-        }
-    };
-}
-
 const EQ_UPGRADER_SLOT_LABELS = {
     weapon: 'Bron glowna',
     armor: 'Zbroja',
@@ -19353,6 +19353,7 @@ const EXP_TICK_ENGINE_WAIT_MS = 2000;
 const EXP_ENGINE_STABLE_AFTER_LOAD_MS = 2200;
 const EXP_ENGINE_STABLE_AFTER_MAP_CHANGE_MS = 2400;
 const EXP_STARTUP_GRACE_MS = 8000;
+window.EXP_STARTUP_GRACE_MS_SAFE = EXP_STARTUP_GRACE_MS;
 const EXP_ROUTE_PLAN_COOLDOWN_MS = 5000;
 const EXP_ROUTE_CACHE_TTL_MS = 15000;
 const EXP_GATEWAY_TRANSITION_LOCK_MS = 4500;
@@ -19763,6 +19764,16 @@ function getEngineReadinessSnapshot() {
     };
 }
 
+function getExpStartupGraceMs() {
+    const fallback = 8000;
+    try {
+        const fromWindow = Number(window.EXP_STARTUP_GRACE_MS_SAFE);
+        return Number.isFinite(fromWindow) && fromWindow >= 0 ? fromWindow : fallback;
+    } catch (e) {
+        return fallback;
+    }
+}
+
 function isGameBusyOrLoading(options = {}) {
     const now = Date.now();
     const cached = window.__expBusySnapshotCache;
@@ -19793,7 +19804,7 @@ function isGameBusyOrLoading(options = {}) {
         window.__expFastDistanceMapCache = null;
     }
 
-    if (!reason && now - Number(guard.createdAt || now) < EXP_STARTUP_GRACE_MS) reason = 'startup_grace';
+    if (!reason && now - Number(guard.createdAt || now) < getExpStartupGraceMs()) reason = 'startup_grace';
     if (!reason && now - Number(guard.lastMapChangedAt || 0) < EXP_ENGINE_STABLE_AFTER_MAP_CHANGE_MS) reason = 'map_change_grace';
     if (!reason && now - Number(guard.lastBusyAt || 0) < EXP_ENGINE_STABLE_AFTER_LOAD_MS) reason = 'wait_stable_after_busy';
 
@@ -22206,7 +22217,7 @@ function primeExpImmediateStartState(reason = 'manual_exp_start') {
     expRetargetEarliestAt = 0;
     nextAllowedClickTime = Math.min(Number(nextAllowedClickTime || 0), now + 80);
     const guard = window.expRuntimeGuard || (window.expRuntimeGuard = {});
-    guard.createdAt = Math.min(Number(guard.createdAt || now), now - EXP_STARTUP_GRACE_MS - 100);
+    guard.createdAt = Math.min(Number(guard.createdAt || now), now - getExpStartupGraceMs() - 100);
     guard.lastBusyAt = Math.min(Number(guard.lastBusyAt || now), now - EXP_ENGINE_STABLE_AFTER_LOAD_MS - 100);
     if (Engine?.map?.d?.name) {
         guard.lastMapName = Engine.map.d.name;
