@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         MargoNeuro - Optimized Edition
-// @version      64.8.17
+// @version      64.8.18
 // @description  Automatyczne wykrywanie, inteligentny zasięg, natywny auto-atak, poprawne limity poziomowe, naprawiony scroll.
 // @author       Ty & Gemini
 // @match        https://*.margonem.pl/*
@@ -16164,6 +16164,50 @@ bindChange('useTeleportsEq', (e) => { botSettings.exp.useTeleportsEq = e.target.
                 && Math.abs(hx - nx) <= 1
                 && Math.abs(hy - ny) <= 1;
         }
+        function getMargoneuroNpcChebDistance(npcData) {
+            const hx = Number(Engine?.hero?.d?.x);
+            const hy = Number(Engine?.hero?.d?.y);
+            const nx = Number(npcData?.x);
+            const ny = Number(npcData?.y);
+            if (!Number.isFinite(hx) || !Number.isFinite(hy) || !Number.isFinite(nx) || !Number.isFinite(ny)) return Infinity;
+            return Math.max(Math.abs(hx - nx), Math.abs(hy - ny));
+        }
+        function canSendMargoneuroQuickFightNow(entry, options = {}) {
+            if (!window.isExping) return true;
+            const now = Date.now();
+            if (Number(window.__margoneuroEngineBackUntil || 0) > now) return false;
+            const dist = getMargoneuroNpcChebDistance(entry?.data);
+            const snap = typeof getHeroMovementSnapshot === 'function' ? getHeroMovementSnapshot() : null;
+            const hardMoveBusy = !!(
+                snap?.locked ||
+                snap?.autoWalkLock ||
+                Number(snap?.stepsToSendLen || 0) > 0 ||
+                Number(snap?.visualOffset || 0) > 0.08
+            );
+            if (hardMoveBusy) return false;
+            if (dist > 1 && (
+                Number(snap?.pathLen || 0) > 0 ||
+                Number(snap?.autoPathCount || 0) > 0 ||
+                Number(snap?.roadLen || 0) > 0 ||
+                Number(snap?.roadNodesLen || 0) > 0
+            )) return false;
+            const state = window.__margoneuroQuickFightGate || (window.__margoneuroQuickFightGate = { at: 0, byTarget: {} });
+            const id = String(entry?.id ?? 'unknown');
+            if (now - Number(state.at || 0) < EXP_GLOBAL_ATTACK_COMMAND_GAP_MS) return false;
+            if (now - Number(state.byTarget?.[id] || 0) < EXP_ATTACK_SAME_TARGET_RETRY_MS) return false;
+            return true;
+        }
+        function noteMargoneuroQuickFightSent(entry, reason = 'quick_fight') {
+            const now = Date.now();
+            const state = window.__margoneuroQuickFightGate || (window.__margoneuroQuickFightGate = { at: 0, byTarget: {} });
+            state.at = now;
+            state.byTarget = state.byTarget || {};
+            state.byTarget[String(entry?.id ?? 'unknown')] = now;
+            state.reason = reason;
+            for (const [key, ts] of Object.entries(state.byTarget)) {
+                if (now - Number(ts || 0) > 15000) delete state.byTarget[key];
+            }
+        }
         function isMargoneuroQuickFightCandidate(npcData, options = {}) {
             const src = npcData?.d || npcData || {};
             if (!src || src.dead || src.del || src.delete) return false;
@@ -16239,8 +16283,10 @@ bindChange('useTeleportsEq', (e) => { botSettings.exp.useTeleportsEq = e.target.
                 if (entry.id === null || !entry.npc || !entry.data) continue;
                 if (!isMargoneuroQuickFightCandidate(entry.data, options)) continue;
                 if (!options.allowNonAdjacent && !isMargoneuroNpcAdjacent(entry.data)) continue;
+                if (!canSendMargoneuroQuickFightNow(entry, options)) continue;
                 const sent = executeMargoneuroQuickFight(entry, options.reason || 'quick_fight');
                 if (!sent) continue;
+                noteMargoneuroQuickFightSent(entry, options.reason || 'quick_fight');
                 window.__lastMargoneuroQuickFight = {
                     id: entry.id,
                     nick: entry.data.nick || entry.data.name || '',
@@ -19384,6 +19430,10 @@ function optimizeRoute() {
             return false;
         }
 
+        if (!options?.forceExact && Number(window.__margoneuroEngineBackUntil || 0) > now) {
+            return false;
+        }
+
         if (!bypassThrottle && now < nextAllowedClickTime) {
             if (!useRandom && isGlobalSmoothAutoWalkLeaseActive(x, y, options)) return true;
             return false;
@@ -19856,7 +19906,7 @@ const EXP_OPPORTUNISTIC_RETARGET_COOLDOWN_MS = 900;
 const EXP_OPPORTUNISTIC_NEAR_CHEB_DIST = 5;
 const EXP_OPPORTUNISTIC_MIN_PATH_GAIN = 3;
 const EXP_TARGET_SELECTION_INTERVAL_MS = 500;
-const EXP_TARGET_REPATH_INTERVAL_MS = 420;
+const EXP_TARGET_REPATH_INTERVAL_MS = 700;
 const EXP_TARGET_LOST_GRACE_MS = 550;
 const EXP_BETTER_TARGET_REQUIRED_GAIN = 16;
 const EXP_BETTER_TARGET_REQUIRED_RATIO = 0.35;
@@ -19864,11 +19914,11 @@ const EXP_CLEAN_GUARD_LOG_THROTTLE_MS = 30000;
 const EXP_TRANSIT_VISIBLE_SCAN_INTERVAL_MS = 2200;
 const EXP_TRANSIT_MOVING_SCAN_INTERVAL_MS = 4000;
 const EXP_TRANSIT_RUSH_REISSUE_MS = 2600;
-const EXP_ADJACENT_ATTACK_POKE_MS = 850;
+const EXP_ADJACENT_ATTACK_POKE_MS = 1150;
 const EXP_EARLY_ATTACK_CHEB_DIST = 2;
 const EXP_PASS_BY_ATTACK_CHEB_DIST = 1;
-const EXP_GLOBAL_ATTACK_COMMAND_GAP_MS = 720;
-const EXP_ATTACK_SAME_TARGET_RETRY_MS = 1800;
+const EXP_GLOBAL_ATTACK_COMMAND_GAP_MS = 1050;
+const EXP_ATTACK_SAME_TARGET_RETRY_MS = 2200;
 const EXP_FAST_DISTANCE_CACHE_TTL_MS = 1800;
 const EXP_FAST_PATH_CACHE_TTL_MS = 6000;
 const EXP_VISIBLE_MOB_HEAVY_FALLBACK_MS = 1300;
@@ -19881,9 +19931,9 @@ const EXP_FULL_VIS_MOVING_FAST_TARGET_TTL_MS = 450;
 const EXP_FULL_VIS_DISTANCE_CACHE_TTL_MS = 3500;
 const EXP_FULL_VIS_PATH_CACHE_TTL_MS = 5000;
 const EXP_MOVE_LEASE_MS = 9000;
-const EXP_MOVE_PROGRESS_LEASE_MS = 850;
-const EXP_MOVE_PROGRESS_HOLD_MS = 520;
-const EXP_MOVE_STALL_RETRY_MS = 450;
+const EXP_MOVE_PROGRESS_LEASE_MS = 1250;
+const EXP_MOVE_PROGRESS_HOLD_MS = 750;
+const EXP_MOVE_STALL_RETRY_MS = 900;
 const EXP_APPROACH_STANDSTILL_SWITCH_MS = 5200;
 const EXP_APPROACH_PULSE_MIN_MS = 180;
 const EXP_APPROACH_PULSE_MAX_MS = 340;
@@ -19908,8 +19958,8 @@ const EXP_GATEWAY_TRANSITION_TIMEOUT_MS = 6500;
 const EXP_GATEWAY_FAIL_COOLDOWN_MS = 8000;
 const HERO_SPEED_TILES_PER_SEC = 4.9;
 const ONE_TILE_MS = 1000 / HERO_SPEED_TILES_PER_SEC;
-const EXP_MOVE_COMMAND_MIN_GAP_MS = 220;
-const EXP_PATH_RECALC_MIN_GAP_MS = 700;
+const EXP_MOVE_COMMAND_MIN_GAP_MS = 320;
+const EXP_PATH_RECALC_MIN_GAP_MS = 900;
 const EXP_POST_MOVE_MIN_GAP_MS = 110;
 const EXP_ATTACK_AFTER_ARRIVAL_BUFFER_MS = 25;
 const EXP_ATTACK_SAME_TARGET_COOLDOWN_MS = 720;
@@ -20101,6 +20151,9 @@ const ExpMovementGuard = (() => {
     const getWaitReasonForAction = (action, options = {}) => {
         const snap = update();
         const now = Date.now();
+        if (Number(window.__margoneuroEngineBackUntil || 0) > now) {
+            return wait('engine_back_settle', snap, { action, until: Number(window.__margoneuroEngineBackUntil || 0) });
+        }
         if (state.freezeUntil && now < state.freezeUntil && !isHeroReadyForNextAction()) return wait('desync_wait', snap, { action, until: state.freezeUntil });
         if (snap.locked) return wait('lock', snap, { action });
         if (snap.autoWalkLock) return wait('autoWalkLock', snap, { action });
@@ -20209,6 +20262,49 @@ const ExpMovementGuard = (() => {
 })();
 window.ExpMovementGuard = ExpMovementGuard;
 
+function recordMargoneuroEngineBack(reason = 'console_back') {
+    const now = Date.now();
+    window.__margoneuroEngineBackAt = now;
+    window.__margoneuroEngineBackUntil = now + 1250;
+    window.__margoneuroEngineBackCount = Number(window.__margoneuroEngineBackCount || 0) + 1;
+    if (window.isExping) {
+        window.__expFastNextMobCache = null;
+        window.__currentVisibleExpMobsCache = null;
+        window.__expFastVisibleNpcCache = null;
+        window.__nextExpLogicAllowedAt = Math.max(Number(window.__nextExpLogicAllowedAt || 0), now + 650);
+        try { nextAllowedClickTime = Math.max(Number(nextAllowedClickTime || 0), now + 900); } catch (e) {}
+        if (typeof resetExpSmoothAutoWalkState === 'function') resetExpSmoothAutoWalkState(reason);
+    }
+    return true;
+}
+window.recordMargoneuroEngineBack = recordMargoneuroEngineBack;
+
+function installMargoneuroEngineBackDetector() {
+    if (window.__margoneuroEngineBackDetectorInstalled) return true;
+    window.__margoneuroEngineBackDetectorInstalled = true;
+    const patchConsole = (targetConsole) => {
+        if (!targetConsole || targetConsole.__margoneuroBackPatched || typeof targetConsole.log !== 'function') return;
+        const originalLog = targetConsole.log;
+        targetConsole.log = function margoneuroConsoleLogBackDetector(...args) {
+            try {
+                if (args.length === 1 && String(args[0]) === 'back') recordMargoneuroEngineBack('engine_back');
+            } catch (e) {}
+            return originalLog.apply(this, args);
+        };
+        try {
+            Object.defineProperty(targetConsole, '__margoneuroBackPatched', { value: true, configurable: true });
+        } catch (e) {}
+    };
+    patchConsole(console);
+    try {
+        if (typeof unsafeWindow !== 'undefined' && unsafeWindow?.console && unsafeWindow.console !== console) {
+            patchConsole(unsafeWindow.console);
+        }
+    } catch (e) {}
+    return true;
+}
+installMargoneuroEngineBackDetector();
+
 function issueExpGuardedSafeGoTo(x, y, reason = 'exp_move', targetId = null, safeOptions = {}) {
     const guard = window.isExping && typeof window.ExpMovementGuard?.canIssuePathCommand === 'function'
         ? window.ExpMovementGuard.canIssuePathCommand({ x, y, targetId: targetId ?? reason, reason })
@@ -20288,6 +20384,21 @@ function issueSmoothExpAutoGoTo(x, y, targetId = null, reason = 'smooth_exp_move
     }
 
     const now = Date.now();
+    if (Number(window.__margoneuroEngineBackUntil || 0) > now) {
+        return { ok: false, sent: false, skipped: true, reason: 'engine_back_settle' };
+    }
+    const snapBeforeMove = typeof getHeroMovementSnapshot === 'function' ? getHeroMovementSnapshot() : null;
+    if (
+        !options.force &&
+        (
+            snapBeforeMove?.locked ||
+            snapBeforeMove?.autoWalkLock ||
+            Number(snapBeforeMove?.stepsToSendLen || 0) > 0 ||
+            Number(snapBeforeMove?.visualOffset || 0) > EXP_MOVE_DESYNC_OFFSET
+        )
+    ) {
+        return { ok: true, sent: false, skipped: true, reason: 'engine_step_in_progress' };
+    }
     const mapName = Engine?.map?.d?.name || '';
     const targetKey = targetId ?? reason;
     if (!options.force && isSmoothExpAutoWalkLeaseActive(targetKey, { x: tx, y: ty }, { maxAgeMs: cfg.reissueMs, destTolerance: 0 })) {
@@ -26826,8 +26937,32 @@ function getMargoneuroRuntimeElement(ref, depth = 0, seen = new Set()) {
     return null;
 }
 
+function getMargoneuroProjectedHeroScreenAnchor(viewport = getMargoneuroRouteViewportRect()) {
+    const hx = Number(Engine?.hero?.d?.x);
+    const hy = Number(Engine?.hero?.d?.y);
+    const mapW = Number(Engine?.map?.d?.x || Engine?.map?.d?.width || 0);
+    const mapH = Number(Engine?.map?.d?.y || Engine?.map?.d?.height || 0);
+    if (!Number.isFinite(hx) || !Number.isFinite(hy) || !Number.isFinite(mapW) || !Number.isFinite(mapH) || mapW <= 0 || mapH <= 0) return null;
+    const tile = 32;
+    const worldW = mapW * tile;
+    const worldH = mapH * tile;
+    const worldX = hx * tile + tile / 2;
+    const worldY = hy * tile + tile / 2;
+    const vw = Math.max(tile, Number(viewport.width || window.innerWidth));
+    const vh = Math.max(tile, Number(viewport.height || window.innerHeight));
+    const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+    const scrollX = worldW <= vw ? 0 : clamp(worldX - vw / 2, 0, Math.max(0, worldW - vw));
+    const scrollY = worldH <= vh ? 0 : clamp(worldY - vh / 2, 0, Math.max(0, worldH - vh));
+    return {
+        x: Number(viewport.left || 0) + worldX - scrollX,
+        y: Number(viewport.top || 0) + worldY - scrollY,
+        source: 'camera_projection'
+    };
+}
+
 function getMargoneuroHeroScreenAnchor() {
     const viewport = getMargoneuroRouteViewportRect();
+    const projected = getMargoneuroProjectedHeroScreenAnchor(viewport);
     const center = {
         x: viewport.left + viewport.width / 2,
         y: viewport.top + viewport.height / 2
@@ -26883,24 +27018,70 @@ function getMargoneuroHeroScreenAnchor() {
     }
     if (candidates.length) {
         candidates.sort((a, b) => a.score - b.score);
-        return { x: candidates[0].x, y: candidates[0].y, source: candidates[0].source || 'dom' };
+        const best = candidates[0];
+        if (best.source === 'engine') return { x: best.x, y: best.y, source: best.source };
+        if (projected) {
+            const dist = Math.abs(best.x - projected.x) + Math.abs(best.y - projected.y);
+            if (dist <= 96) return { x: best.x, y: best.y, source: best.source || 'dom' };
+            return projected;
+        }
+        return { x: best.x, y: best.y, source: best.source || 'dom' };
     }
-    return { x: center.x, y: center.y, source: 'viewport_center' };
+    return projected || { x: center.x, y: center.y, source: 'viewport_center' };
 }
 
 function normalizeMargoneuroRoutePoint(step) {
     if (!step) return null;
-    const x = Array.isArray(step) ? Number(step[0]) : Number(step.x ?? step.tx ?? step.mx);
-    const y = Array.isArray(step) ? Number(step[1]) : Number(step.y ?? step.ty ?? step.my);
+    if (typeof step === 'string') {
+        const match = step.match(/(-?\d+)\D+(-?\d+)/);
+        if (!match) return null;
+        const sx = Number(match[1]);
+        const sy = Number(match[2]);
+        return Number.isFinite(sx) && Number.isFinite(sy) ? [Math.round(sx), Math.round(sy)] : null;
+    }
+    const x = Array.isArray(step) ? Number(step[0]) : Number(step.x ?? step.tx ?? step.mx ?? step.d?.x);
+    const y = Array.isArray(step) ? Number(step[1]) : Number(step.y ?? step.ty ?? step.my ?? step.d?.y);
     if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
     return [Math.round(x), Math.round(y)];
 }
 
+function orthogonalizeMargoneuroRoutePath(path, limit = 220) {
+    const input = Array.isArray(path) ? path : [];
+    if (input.length < 2) return input;
+    const out = [];
+    for (const point of input) {
+        const normalized = normalizeMargoneuroRoutePoint(point);
+        if (!normalized) continue;
+        if (!out.length) {
+            out.push(normalized);
+            continue;
+        }
+        let [cx, cy] = out[out.length - 1];
+        const [tx, ty] = normalized;
+        let safety = 0;
+        while ((cx !== tx || cy !== ty) && safety++ < 64 && out.length < limit) {
+            const dx = tx - cx;
+            const dy = ty - cy;
+            if (Math.abs(dx) >= Math.abs(dy) && dx !== 0) cx += Math.sign(dx);
+            else if (dy !== 0) cy += Math.sign(dy);
+            else if (dx !== 0) cx += Math.sign(dx);
+            const last = out[out.length - 1];
+            if (!last || last[0] !== cx || last[1] !== cy) out.push([cx, cy]);
+        }
+        if (out.length >= limit) break;
+    }
+    return out;
+}
+
 function getMargoneuroLiveHeroRoutePath() {
     if (typeof Engine === 'undefined' || !Engine?.hero?.d) return null;
-    const rawPath = Array.isArray(Engine.hero.d.path)
-        ? Engine.hero.d.path
-        : (Array.isArray(Engine.hero.path) ? Engine.hero.path : []);
+    const rawPath = [
+        Engine?.stepsToSend?.steps,
+        Engine.hero.d.path,
+        Engine.hero.path,
+        Engine.hero.autoPath?.road,
+        Engine.hero.autoPath?.roadNodes
+    ].find(candidate => Array.isArray(candidate) && candidate.length) || [];
     if (!rawPath.length) return null;
     const hx = Number(Engine.hero.d.x);
     const hy = Number(Engine.hero.d.y);
@@ -26913,10 +27094,11 @@ function getMargoneuroLiveHeroRoutePath() {
         if (last && last[0] === step[0] && last[1] === step[1]) continue;
         path.push(step);
     }
-    if (path.length < 2) return null;
-    const target = path[path.length - 1];
+    const finalPath = orthogonalizeMargoneuroRoutePath(path);
+    if (finalPath.length < 2) return null;
+    const target = finalPath[finalPath.length - 1];
     return {
-        path,
+        path: finalPath,
         target: { x: target[0], y: target[1], at: Date.now(), source: 'engine_path' }
     };
 }
@@ -27007,7 +27189,7 @@ function getMargoneuroRouteOverlayPath() {
         : (typeof buildDistanceMapFromHero === 'function' ? buildDistanceMapFromHero() : null);
     const path = buildPathToTileFromDistanceMap(target.x, target.y, distMap);
     if (!Array.isArray(path) || path.length < 2) return null;
-    return { path, target };
+    return { path: orthogonalizeMargoneuroRoutePath(path), target };
 }
 
 function drawMargoneuroRouteOverlay() {
@@ -27061,7 +27243,7 @@ function startMargoneuroRouteOverlayLoop() {
     window.__margoneuroRouteOverlayLoopStarted = true;
     const tick = () => {
         try { drawMargoneuroRouteOverlay(); } catch (e) {}
-        window.__margoneuroRouteOverlayTimer = setTimeout(tick, isMargoneuroRouteOverlayEnabled() ? 1000 : 1200);
+        window.__margoneuroRouteOverlayTimer = setTimeout(tick, isMargoneuroRouteOverlayEnabled() ? 350 : 1200);
     };
     tick();
     return true;
@@ -28027,6 +28209,14 @@ function pokeExpAdjacentTarget(mob, reason = 'adjacent_target') {
     const hx = Number(Engine?.hero?.d?.x);
     const hy = Number(Engine?.hero?.d?.y);
     const targetDist = Math.max(Math.abs(hx - Number(mob?.x ?? liveTarget?.x)), Math.abs(hy - Number(mob?.y ?? liveTarget?.y)));
+    const moveSnapBeforeAttack = typeof getHeroMovementSnapshot === 'function' ? getHeroMovementSnapshot() : null;
+    const hardMoveBusyBeforeAttack = !!(
+        moveSnapBeforeAttack?.locked ||
+        moveSnapBeforeAttack?.autoWalkLock ||
+        Number(moveSnapBeforeAttack?.stepsToSendLen || 0) > 0 ||
+        Number(moveSnapBeforeAttack?.visualOffset || 0) > 0.08
+    );
+    if (hardMoveBusyBeforeAttack) return false;
     const passByAttack = /pass_by/i.test(String(reason || ''));
     const earlyAttackDist = passByAttack
         ? Math.max(1, Number(EXP_PASS_BY_ATTACK_CHEB_DIST || 1))
@@ -28034,7 +28224,7 @@ function pokeExpAdjacentTarget(mob, reason = 'adjacent_target') {
     if (!Number.isFinite(targetDist) || targetDist > earlyAttackDist) return false;
     const attackGuard = typeof window.ExpMovementGuard?.canAttack === 'function'
         ? window.ExpMovementGuard.canAttack(id, {
-            immediateRangeStable: targetDist <= earlyAttackDist && (targetDist > 1 || (typeof isHeroVisuallyArrived !== 'function' || isHeroVisuallyArrived(0.08))),
+            immediateRangeStable: targetDist <= earlyAttackDist && (typeof isHeroVisuallyArrived !== 'function' || isHeroVisuallyArrived(0.08)),
             arrivalBufferMs: targetDist > 1 ? 1 : EXP_ATTACK_AFTER_ARRIVAL_BUFFER_MS,
             cooldownMs: EXP_ATTACK_SAME_TARGET_COOLDOWN_MS
         })
@@ -32460,6 +32650,11 @@ runExpLogic = function runExpLogicMeasured() {
         window.expLogicRunning = false;
         const elapsed = ((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) - started;
         diag.lastTickMs = Math.round(elapsed * 10) / 10;
+        if (window.isExping && elapsed > 180) {
+            const coolDownMs = Math.min(950, Math.max(220, Math.round(elapsed * 1.25)));
+            window.__nextExpLogicAllowedAt = Math.max(Number(window.__nextExpLogicAllowedAt || 0), Date.now() + coolDownMs);
+            diag.lastHeavyTickCooldownMs = coolDownMs;
+        }
         recordPerformanceSample('expTick', elapsed, { mapName: Engine?.map?.d?.name || null, runId: activeRunId }, 28);
         if (typeof logMargoneuroLongTask === 'function') {
             logMargoneuroLongTask('runExpLogic', elapsed, { mapName: Engine?.map?.d?.name || null, runId: activeRunId, delay: minInterval }, 50);
