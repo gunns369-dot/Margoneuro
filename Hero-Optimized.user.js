@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         MargoNeuro - Optimized Edition
-// @version      64.8.16
+// @version      64.8.17
 // @description  Automatyczne wykrywanie, inteligentny zasięg, natywny auto-atak, poprawne limity poziomowe, naprawiony scroll.
 // @author       Ty & Gemini
 // @match        https://*.margonem.pl/*
@@ -21,6 +21,14 @@
 
 (async function() {
     'use strict';
+
+    if (
+        location.hostname === 'commons.margonem.pl' &&
+        (/\/cross-storage\//i.test(location.pathname) || window.top !== window)
+    ) {
+        console.log('[Margoneuro] Pomijam ramke cross-storage - bez mapy i postaci.');
+        return;
+    }
 
     const MARGONEURO_LICENSE_API_BASE_URL = 'https://www.margoneuro.pl';
     const MARGONEURO_LICENSE_PRODUCT_SLUG = 'margoneuro';
@@ -743,6 +751,9 @@
             const meta = readRemoteBootstrapMeta();
             const currentStats = debug.getStaticGraphStats ? debug.getStaticGraphStats() : { loaded: false, maps: 0, graphEdges: 0 };
             const now = Date.now();
+            if (!force && Number(meta.remoteFailBackoffUntil || 0) > now) {
+                return { ok: false, skipped: true, reason: 'remote_fail_backoff', meta, currentStats };
+            }
             if (!force && currentStats.loaded && Number(meta.lastCheckAt || 0) && now - Number(meta.lastCheckAt || 0) < MARGONEURO_REMOTE_BOOTSTRAP_MIN_INTERVAL_MS) {
                 return { ok: true, skipped: true, reason: 'fresh', meta, currentStats };
             }
@@ -814,6 +825,13 @@
                     error: staticResult.error || ''
                 }
             };
+            if (!staticResult.ok && !storage.applied.length) {
+                nextMeta.remoteFailBackoffUntil = now + 6 * 60 * 60 * 1000;
+                nextMeta.lastError = staticResult.error || manifest.manifestError || 'remote_unavailable';
+            } else {
+                nextMeta.remoteFailBackoffUntil = 0;
+                nextMeta.lastError = '';
+            }
             writeRemoteBootstrapMeta(nextMeta);
             console.log('[REMOTE-DB] bootstrap result', { storage, staticResult, nextMeta });
             return { ok: !!(staticResult.ok || storage.applied.length), manifest, storage, staticResult, meta: nextMeta };
@@ -19838,7 +19856,7 @@ const EXP_OPPORTUNISTIC_RETARGET_COOLDOWN_MS = 900;
 const EXP_OPPORTUNISTIC_NEAR_CHEB_DIST = 5;
 const EXP_OPPORTUNISTIC_MIN_PATH_GAIN = 3;
 const EXP_TARGET_SELECTION_INTERVAL_MS = 500;
-const EXP_TARGET_REPATH_INTERVAL_MS = 850;
+const EXP_TARGET_REPATH_INTERVAL_MS = 420;
 const EXP_TARGET_LOST_GRACE_MS = 550;
 const EXP_BETTER_TARGET_REQUIRED_GAIN = 16;
 const EXP_BETTER_TARGET_REQUIRED_RATIO = 0.35;
@@ -19846,11 +19864,11 @@ const EXP_CLEAN_GUARD_LOG_THROTTLE_MS = 30000;
 const EXP_TRANSIT_VISIBLE_SCAN_INTERVAL_MS = 2200;
 const EXP_TRANSIT_MOVING_SCAN_INTERVAL_MS = 4000;
 const EXP_TRANSIT_RUSH_REISSUE_MS = 2600;
-const EXP_ADJACENT_ATTACK_POKE_MS = 650;
+const EXP_ADJACENT_ATTACK_POKE_MS = 850;
 const EXP_EARLY_ATTACK_CHEB_DIST = 2;
 const EXP_PASS_BY_ATTACK_CHEB_DIST = 1;
-const EXP_GLOBAL_ATTACK_COMMAND_GAP_MS = 520;
-const EXP_ATTACK_SAME_TARGET_RETRY_MS = 1400;
+const EXP_GLOBAL_ATTACK_COMMAND_GAP_MS = 720;
+const EXP_ATTACK_SAME_TARGET_RETRY_MS = 1800;
 const EXP_FAST_DISTANCE_CACHE_TTL_MS = 1800;
 const EXP_FAST_PATH_CACHE_TTL_MS = 6000;
 const EXP_VISIBLE_MOB_HEAVY_FALLBACK_MS = 1300;
@@ -19863,19 +19881,19 @@ const EXP_FULL_VIS_MOVING_FAST_TARGET_TTL_MS = 450;
 const EXP_FULL_VIS_DISTANCE_CACHE_TTL_MS = 3500;
 const EXP_FULL_VIS_PATH_CACHE_TTL_MS = 5000;
 const EXP_MOVE_LEASE_MS = 9000;
-const EXP_MOVE_PROGRESS_LEASE_MS = 1500;
-const EXP_MOVE_PROGRESS_HOLD_MS = 900;
-const EXP_MOVE_STALL_RETRY_MS = 700;
+const EXP_MOVE_PROGRESS_LEASE_MS = 850;
+const EXP_MOVE_PROGRESS_HOLD_MS = 520;
+const EXP_MOVE_STALL_RETRY_MS = 450;
 const EXP_APPROACH_STANDSTILL_SWITCH_MS = 5200;
 const EXP_APPROACH_PULSE_MIN_MS = 180;
 const EXP_APPROACH_PULSE_MAX_MS = 340;
 const EXP_APPROACH_PULSE_GUARD_NOTE_MS = 450;
 const EXP_APPROACH_PULSE_MAX_TARGET_DIST = 32;
 const EXP_TICK_IDLE_MS = 1000;
-const EXP_TICK_MOVING_MS = 180;
+const EXP_TICK_MOVING_MS = 240;
 const EXP_TICK_TRANSIT_MS = 1200;
 const EXP_TICK_PVP_MS = 250;
-const EXP_TICK_FAST_MS = 95;
+const EXP_TICK_FAST_MS = 180;
 const EXP_TICK_EMPTY_MS = 650;
 const EXP_TICK_LOADING_MS = 1600;
 const EXP_TICK_ENGINE_WAIT_MS = 2000;
@@ -26789,12 +26807,66 @@ function getMargoneuroRouteViewportRect() {
     return { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
 }
 
+function getMargoneuroRuntimeElement(ref, depth = 0, seen = new Set()) {
+    if (!ref || depth > 2) return null;
+    if (seen.has(ref)) return null;
+    if (ref.nodeType === 1 && typeof ref.getBoundingClientRect === 'function') return ref;
+    if (typeof ref !== 'object') return null;
+    seen.add(ref);
+    const keys = ['el', 'element', 'node', 'dom', 'html', 'img', 'image', 'sprite', 'container', '$el', '$'];
+    for (const key of keys) {
+        try {
+            const nested = ref[key];
+            if (!nested) continue;
+            if (nested.nodeType === 1 && typeof nested.getBoundingClientRect === 'function') return nested;
+            const found = getMargoneuroRuntimeElement(nested, depth + 1, seen);
+            if (found) return found;
+        } catch (e) {}
+    }
+    return null;
+}
+
 function getMargoneuroHeroScreenAnchor() {
     const viewport = getMargoneuroRouteViewportRect();
     const center = {
         x: viewport.left + viewport.width / 2,
         y: viewport.top + viewport.height / 2
     };
+    const candidates = [];
+    const addCandidate = (el, source = 'dom', priority = 0) => {
+        if (!el || el.closest?.('.hero-window') || el.closest?.('#margoRadarWindow') || el.closest?.(`#${MARGONEURO_ROUTE_OVERLAY_ID}`)) return;
+        const st = getComputedStyle(el);
+        const rect = el.getBoundingClientRect?.();
+        if (!rect || st.display === 'none' || st.visibility === 'hidden') return;
+        if (rect.width < 8 || rect.height < 8 || rect.width > 140 || rect.height > 180) return;
+        if (rect.right < viewport.left || rect.bottom < viewport.top || rect.left > viewport.left + viewport.width || rect.top > viewport.top + viewport.height) return;
+        const x = rect.left + rect.width / 2;
+        const y = rect.top + rect.height / 2;
+        candidates.push({
+            x,
+            y,
+            source,
+            score: priority + Math.abs(x - center.x) + Math.abs(y - center.y)
+        });
+    };
+
+    try {
+        const hero = Engine?.hero || {};
+        [
+            hero.sprite,
+            hero.el,
+            hero.element,
+            hero.dom,
+            hero.html,
+            hero.img,
+            hero.container,
+            hero.d?.sprite,
+            hero.d?.el,
+            hero.d?.element,
+            hero.d?.dom
+        ].forEach(ref => addCandidate(getMargoneuroRuntimeElement(ref), 'engine', -1000));
+    } catch (e) {}
+
     const selectors = [
         '#hero',
         '[id="hero"]',
@@ -26802,27 +26874,51 @@ function getMargoneuroHeroScreenAnchor() {
         '.hero:not(.hero-window)',
         '[class~="hero"]:not(.hero-window)'
     ];
-    const candidates = [];
     for (const selector of selectors) {
         try {
             document.querySelectorAll(selector).forEach(el => {
-                if (!el || el.closest?.('.hero-window')) return;
-                const st = getComputedStyle(el);
-                const rect = el.getBoundingClientRect?.();
-                if (!rect || st.display === 'none' || st.visibility === 'hidden') return;
-                if (rect.width < 8 || rect.height < 8 || rect.width > 140 || rect.height > 180) return;
-                if (rect.right < 0 || rect.bottom < 0 || rect.left > window.innerWidth || rect.top > window.innerHeight) return;
-                const x = rect.left + rect.width / 2;
-                const y = rect.top + rect.height / 2;
-                candidates.push({ x, y, score: Math.abs(x - center.x) + Math.abs(y - center.y) });
+                addCandidate(el, 'selector', 0);
             });
         } catch (e) {}
     }
     if (candidates.length) {
         candidates.sort((a, b) => a.score - b.score);
-        return { x: candidates[0].x, y: candidates[0].y, source: 'dom' };
+        return { x: candidates[0].x, y: candidates[0].y, source: candidates[0].source || 'dom' };
     }
     return { x: center.x, y: center.y, source: 'viewport_center' };
+}
+
+function normalizeMargoneuroRoutePoint(step) {
+    if (!step) return null;
+    const x = Array.isArray(step) ? Number(step[0]) : Number(step.x ?? step.tx ?? step.mx);
+    const y = Array.isArray(step) ? Number(step[1]) : Number(step.y ?? step.ty ?? step.my);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    return [Math.round(x), Math.round(y)];
+}
+
+function getMargoneuroLiveHeroRoutePath() {
+    if (typeof Engine === 'undefined' || !Engine?.hero?.d) return null;
+    const rawPath = Array.isArray(Engine.hero.d.path)
+        ? Engine.hero.d.path
+        : (Array.isArray(Engine.hero.path) ? Engine.hero.path : []);
+    if (!rawPath.length) return null;
+    const hx = Number(Engine.hero.d.x);
+    const hy = Number(Engine.hero.d.y);
+    const path = [];
+    if (Number.isFinite(hx) && Number.isFinite(hy)) path.push([Math.round(hx), Math.round(hy)]);
+    for (const rawStep of rawPath) {
+        const step = normalizeMargoneuroRoutePoint(rawStep);
+        if (!step) continue;
+        const last = path[path.length - 1];
+        if (last && last[0] === step[0] && last[1] === step[1]) continue;
+        path.push(step);
+    }
+    if (path.length < 2) return null;
+    const target = path[path.length - 1];
+    return {
+        path,
+        target: { x: target[0], y: target[1], at: Date.now(), source: 'engine_path' }
+    };
 }
 
 function buildPathToTileFromDistanceMap(targetX, targetY, distMap = null) {
@@ -26841,19 +26937,23 @@ function buildPathToTileFromDistanceMap(targetX, targetY, distMap = null) {
     let cx = dest.x;
     let cy = dest.y;
     let safety = 0;
-    const dirs = [[0,1],[0,-1],[1,0],[-1,0],[1,1],[-1,-1],[-1,1],[1,-1]];
+    const primaryDirs = [[0,1],[0,-1],[1,0],[-1,0]];
+    const fallbackDirs = [[1,1],[-1,-1],[-1,1],[1,-1]];
     while (safety++ < 2000) {
         path.push([cx, cy]);
         const cd = Number(map.get(`${cx}_${cy}`));
         if (!Number.isFinite(cd) || cd <= 0) break;
         let next = null;
-        for (const [dx, dy] of dirs) {
-            const nx = cx + dx;
-            const ny = cy + dy;
-            const key = `${nx}_${ny}`;
-            if (!map.has(key)) continue;
-            const nd = Number(map.get(key));
-            if (Number.isFinite(nd) && nd < cd && (!next || nd < next.d)) next = { x: nx, y: ny, d: nd };
+        for (const dirs of [primaryDirs, fallbackDirs]) {
+            for (const [dx, dy] of dirs) {
+                const nx = cx + dx;
+                const ny = cy + dy;
+                const key = `${nx}_${ny}`;
+                if (!map.has(key)) continue;
+                const nd = Number(map.get(key));
+                if (Number.isFinite(nd) && nd < cd && (!next || nd < next.d)) next = { x: nx, y: ny, d: nd };
+            }
+            if (next) break;
         }
         if (!next) break;
         cx = next.x;
@@ -26867,6 +26967,8 @@ window.buildPathToTileFromDistanceMap = buildPathToTileFromDistanceMap;
 function getMargoneuroRouteOverlayPath() {
     if (typeof Engine === 'undefined' || !Engine?.hero?.d || !Engine?.map?.d) return null;
     const now = Date.now();
+    const livePath = getMargoneuroLiveHeroRoutePath();
+    if (livePath?.path?.length) return livePath;
     const targets = [];
     if (Number.isFinite(Number(window.expLastMoveTx)) && Number.isFinite(Number(window.expLastMoveTy))) {
         targets.push({
@@ -26874,6 +26976,15 @@ function getMargoneuroRouteOverlayPath() {
             y: Number(window.expLastMoveTy),
             at: Number(window.expLastMoveAt || window.expLastMoveCommandAt || 0),
             source: 'exp'
+        });
+    }
+    const lastMove = window.expLastMoveCommand || null;
+    if (Number.isFinite(Number(lastMove?.x)) && Number.isFinite(Number(lastMove?.y))) {
+        targets.push({
+            x: Number(lastMove.x),
+            y: Number(lastMove.y),
+            at: Number(lastMove.issuedAt || 0),
+            source: 'expMoveCommand'
         });
     }
     const safeLast = window.__safeGoToLast || null;
@@ -26886,7 +26997,7 @@ function getMargoneuroRouteOverlayPath() {
         });
     }
     targets.sort((a, b) => Number(b.at || 0) - Number(a.at || 0));
-    const target = targets.find(t => Number.isFinite(t.x) && Number.isFinite(t.y) && (!t.at || now - Number(t.at || 0) < 15000));
+    const target = targets.find(t => Number.isFinite(t.x) && Number.isFinite(t.y) && (!t.at || now - Number(t.at || 0) < 5500));
     if (!target) return null;
     const hx = Number(Engine.hero.d.x);
     const hy = Number(Engine.hero.d.y);
@@ -26902,17 +27013,11 @@ function getMargoneuroRouteOverlayPath() {
 function drawMargoneuroRouteOverlay() {
     if (!isMargoneuroRouteOverlayEnabled()) return clearMargoneuroRouteOverlay();
     const route = getMargoneuroRouteOverlayPath();
-    if (route?.path?.length && drawMargoneuroRouteOnMapPlane(route)) {
-        const canvas = document.getElementById(MARGONEURO_ROUTE_OVERLAY_ID);
-        if (canvas) {
-            const ctx = canvas.getContext('2d');
-            if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
-            canvas.style.display = 'none';
-        }
-        return true;
-    }
     const tileOverlay = document.getElementById(MARGONEURO_ROUTE_TILE_OVERLAY_ID);
-    if (tileOverlay) tileOverlay.style.display = 'none';
+    if (tileOverlay) {
+        tileOverlay.style.display = 'none';
+        tileOverlay.innerHTML = '';
+    }
     const canvas = ensureMargoneuroRouteOverlayCanvas();
     const ctx = canvas.getContext('2d');
     if (!ctx) return false;
@@ -26926,8 +27031,8 @@ function drawMargoneuroRouteOverlay() {
     canvas.style.display = 'block';
     const anchor = getMargoneuroHeroScreenAnchor();
     const hero = Engine?.hero || {};
-    const heroTileX = Number(hero.rx ?? hero.d?.rx ?? hero.d?.x);
-    const heroTileY = Number(hero.ry ?? hero.d?.ry ?? hero.d?.y);
+    const heroTileX = Number(hero.d?.x ?? hero.rx ?? hero.d?.rx);
+    const heroTileY = Number(hero.d?.y ?? hero.ry ?? hero.d?.ry);
     if (!Number.isFinite(heroTileX) || !Number.isFinite(heroTileY)) return false;
     const tile = 32;
     const half = tile / 2;
@@ -26956,7 +27061,7 @@ function startMargoneuroRouteOverlayLoop() {
     window.__margoneuroRouteOverlayLoopStarted = true;
     const tick = () => {
         try { drawMargoneuroRouteOverlay(); } catch (e) {}
-        window.__margoneuroRouteOverlayTimer = setTimeout(tick, isMargoneuroRouteOverlayEnabled() ? 90 : 650);
+        window.__margoneuroRouteOverlayTimer = setTimeout(tick, isMargoneuroRouteOverlayEnabled() ? 1000 : 1200);
     };
     tick();
     return true;
