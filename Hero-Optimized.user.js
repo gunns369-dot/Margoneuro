@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         MargoNeuro - Optimized Edition
-// @version      64.8.13
+// @version      64.8.14
 // @description  Automatyczne wykrywanie, inteligentny zasięg, natywny auto-atak, poprawne limity poziomowe, naprawiony scroll.
 // @author       Ty & Gemini
 // @match        https://*.margonem.pl/*
@@ -3524,7 +3524,8 @@ let opacityValue = 0.95;
             loadingOverlayGraceMs: 900,
             longTaskCooldownMs: 700,
             smoothAutowalk: true,
-            smoothAutowalkReissueMs: 5200
+            smoothAutowalkReissueMs: 5200,
+            showRouteOverlay: false
         },
         eventHeroes: {
             dwellMs: 1600
@@ -6711,6 +6712,7 @@ function loadData() {
             longTaskCooldownMs: 700,
             smoothAutowalk: true,
             smoothAutowalkReissueMs: 5200,
+            showRouteOverlay: false,
             ...(botSettings.performance || {})
         };
         botSettings.eventHeroes = { dwellMs: 1600, ...(botSettings.eventHeroes || {}) };
@@ -14947,6 +14949,7 @@ function initGUI() {
                 <div id="accPerformanceContent" style="display:none; padding:5px; background:rgba(0,0,0,0.2); border:1px solid #333; margin-bottom:10px;">
                     <label style="display:block; font-size:11px; color:#e0d8c0; margin-bottom:5px;"><input type="checkbox" id="perfPerformanceMode" ${botSettings.performance?.performanceMode !== false ? 'checked' : ''}> Tryb plynnosci (pauza po przejsciu + mniej skanow)</label>
                     <label style="display:block; font-size:11px; color:#e0d8c0; margin-bottom:5px;"><input type="checkbox" id="perfSmoothAutowalk" ${botSettings.performance?.smoothAutowalk !== false ? 'checked' : ''}> Plynne chodzenie do celu (autoGoTo)</label>
+                    <label style="display:block; font-size:11px; color:#e0d8c0; margin-bottom:5px;"><input type="checkbox" id="perfShowRouteOverlay" ${botSettings.performance?.showRouteOverlay ? 'checked' : ''}> Maluj trase na mapie</label>
                     <label style="display:block; font-size:11px; color:#e0d8c0; margin-bottom:5px;"><input type="checkbox" id="perfReduceUiAnimations" ${botSettings.performance?.reduceUiAnimations !== false ? 'checked' : ''}> Ogranicz animacje UI bota</label>
                     <label style="display:block; font-size:11px; color:#e0d8c0; margin-bottom:5px;"><input type="checkbox" id="perfReduceGameEffects" ${botSettings.performance?.reduceGameEffects !== false ? 'checked' : ''}> Ogranicz efekty gry, gdy silnik pozwala</label>
                     <div class="nav-row"><label>Pauza po zmianie mapy (ms):</label><input type="number" id="perfMapTransitionGrace" value="${botSettings.performance?.mapTransitionGraceMs || 650}" min="450" max="2000"></div>
@@ -15749,6 +15752,7 @@ if (!botSettings.berserk) {
             longTaskCooldownMs: 700,
             smoothAutowalk: true,
             smoothAutowalkReissueMs: 5200,
+            showRouteOverlay: false,
             ...(botSettings.performance || {})
         };
         bindChange('perfPerformanceMode', (e) => {
@@ -15760,6 +15764,12 @@ if (!botSettings.berserk) {
             botSettings.performance.smoothAutowalk = !!e.target.checked;
             if (typeof resetExpSmoothAutoWalkState === 'function') resetExpSmoothAutoWalkState('settings_toggle');
             if (typeof saveSettings === 'function') saveSettings();
+        });
+        bindChange('perfShowRouteOverlay', (e) => {
+            botSettings.performance.showRouteOverlay = !!e.target.checked;
+            if (typeof saveSettings === 'function') saveSettings();
+            if (typeof startMargoneuroRouteOverlayLoop === 'function') startMargoneuroRouteOverlayLoop();
+            if (!e.target.checked && typeof clearMargoneuroRouteOverlay === 'function') clearMargoneuroRouteOverlay();
         });
         bindChange('perfReduceUiAnimations', (e) => {
             botSettings.performance.reduceUiAnimations = !!e.target.checked;
@@ -20407,7 +20417,8 @@ function getMargoneuroPerformanceModeSettings() {
         loadingOverlayGraceMs: clampMargoneuroPerfMs(perf.loadingOverlayGraceMs, 900, 450, 2500),
         longTaskCooldownMs: clampMargoneuroPerfMs(perf.longTaskCooldownMs, 700, 250, 2500),
         smoothAutowalk: perf.smoothAutowalk !== false,
-        smoothAutowalkReissueMs: clampMargoneuroPerfMs(perf.smoothAutowalkReissueMs, 5200, 1800, 12000)
+        smoothAutowalkReissueMs: clampMargoneuroPerfMs(perf.smoothAutowalkReissueMs, 5200, 1800, 12000),
+        showRouteOverlay: !!perf.showRouteOverlay
     };
 }
 window.getMargoneuroPerformanceModeSettings = getMargoneuroPerformanceModeSettings;
@@ -22950,7 +22961,10 @@ function confirmExpKillSignal(reason = 'kill_signal', details = {}) {
         missing: !!details.missing,
         at: now
     };
-    requestImmediateExpRetargetTick(reason);
+    const pipelineHandled = typeof consumeExpNextTargetPipeline === 'function'
+        ? consumeExpNextTargetPipeline(reason)
+        : false;
+    requestImmediateExpRetargetTick(pipelineHandled ? `${reason}_pipeline` : reason);
     return changed;
 }
 window.confirmExpKillSignal = confirmExpKillSignal;
@@ -26570,6 +26584,236 @@ function getStablePathToExpTarget(mob, distMap) {
 }
 window.getStablePathToExpTarget = getStablePathToExpTarget;
 
+const MARGONEURO_ROUTE_OVERLAY_ID = 'margoneuroRouteOverlayCanvas';
+
+function isMargoneuroRouteOverlayEnabled() {
+    return !!botSettings?.performance?.showRouteOverlay;
+}
+
+function clearMargoneuroRouteOverlay() {
+    const canvas = document.getElementById(MARGONEURO_ROUTE_OVERLAY_ID);
+    if (!canvas) return false;
+    const ctx = canvas.getContext('2d');
+    if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+    canvas.style.display = 'none';
+    return true;
+}
+window.clearMargoneuroRouteOverlay = clearMargoneuroRouteOverlay;
+
+function ensureMargoneuroRouteOverlayCanvas() {
+    let canvas = document.getElementById(MARGONEURO_ROUTE_OVERLAY_ID);
+    if (!canvas) {
+        canvas = document.createElement('canvas');
+        canvas.id = MARGONEURO_ROUTE_OVERLAY_ID;
+        canvas.style.cssText = [
+            'position:fixed',
+            'left:0',
+            'top:0',
+            'width:100vw',
+            'height:100vh',
+            'pointer-events:none',
+            'z-index:9990',
+            'display:none'
+        ].join(';');
+        document.body.appendChild(canvas);
+    }
+    const dpr = Math.max(1, Math.min(2, Number(window.devicePixelRatio || 1)));
+    const width = Math.max(1, Math.floor(window.innerWidth * dpr));
+    const height = Math.max(1, Math.floor(window.innerHeight * dpr));
+    if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+    }
+    canvas.dataset.dpr = String(dpr);
+    return canvas;
+}
+
+function getMargoneuroRouteViewportRect() {
+    const selectors = [
+        '#centerbox',
+        '#game',
+        '#map',
+        '#margoMap',
+        '.game-window',
+        '.game',
+        '.map'
+    ];
+    for (const selector of selectors) {
+        const el = document.querySelector(selector);
+        if (!el || el.closest?.('.hero-window')) continue;
+        const rect = el.getBoundingClientRect?.();
+        if (!rect || rect.width < 320 || rect.height < 240) continue;
+        return rect;
+    }
+    return { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
+}
+
+function getMargoneuroHeroScreenAnchor() {
+    const viewport = getMargoneuroRouteViewportRect();
+    const center = {
+        x: viewport.left + viewport.width / 2,
+        y: viewport.top + viewport.height / 2
+    };
+    const selectors = [
+        '#hero',
+        '[id="hero"]',
+        '.main-hero',
+        '.hero:not(.hero-window)',
+        '[class~="hero"]:not(.hero-window)'
+    ];
+    const candidates = [];
+    for (const selector of selectors) {
+        try {
+            document.querySelectorAll(selector).forEach(el => {
+                if (!el || el.closest?.('.hero-window')) return;
+                const st = getComputedStyle(el);
+                const rect = el.getBoundingClientRect?.();
+                if (!rect || st.display === 'none' || st.visibility === 'hidden') return;
+                if (rect.width < 8 || rect.height < 8 || rect.width > 140 || rect.height > 180) return;
+                if (rect.right < 0 || rect.bottom < 0 || rect.left > window.innerWidth || rect.top > window.innerHeight) return;
+                const x = rect.left + rect.width / 2;
+                const y = rect.top + rect.height / 2;
+                candidates.push({ x, y, score: Math.abs(x - center.x) + Math.abs(y - center.y) });
+            });
+        } catch (e) {}
+    }
+    if (candidates.length) {
+        candidates.sort((a, b) => a.score - b.score);
+        return { x: candidates[0].x, y: candidates[0].y, source: 'dom' };
+    }
+    return { x: center.x, y: center.y, source: 'viewport_center' };
+}
+
+function buildPathToTileFromDistanceMap(targetX, targetY, distMap = null) {
+    const tx = Number(targetX);
+    const ty = Number(targetY);
+    if (!Number.isFinite(tx) || !Number.isFinite(ty)) return null;
+    const map = distMap || (typeof buildDistanceMapFromHero === 'function' ? buildDistanceMapFromHero() : null);
+    if (!map || typeof map.has !== 'function') return null;
+    let dest = { x: tx, y: ty };
+    if (!map.has(`${tx}_${ty}`)) {
+        const adjacent = typeof getPathToAdjacentTile === 'function' ? getPathToAdjacentTile(tx, ty, map) : null;
+        if (adjacent?.path?.length) return adjacent.path;
+        return null;
+    }
+    const path = [];
+    let cx = dest.x;
+    let cy = dest.y;
+    let safety = 0;
+    const dirs = [[0,1],[0,-1],[1,0],[-1,0],[1,1],[-1,-1],[-1,1],[1,-1]];
+    while (safety++ < 2000) {
+        path.push([cx, cy]);
+        const cd = Number(map.get(`${cx}_${cy}`));
+        if (!Number.isFinite(cd) || cd <= 0) break;
+        let next = null;
+        for (const [dx, dy] of dirs) {
+            const nx = cx + dx;
+            const ny = cy + dy;
+            const key = `${nx}_${ny}`;
+            if (!map.has(key)) continue;
+            const nd = Number(map.get(key));
+            if (Number.isFinite(nd) && nd < cd && (!next || nd < next.d)) next = { x: nx, y: ny, d: nd };
+        }
+        if (!next) break;
+        cx = next.x;
+        cy = next.y;
+    }
+    path.reverse();
+    return path.length ? path : null;
+}
+window.buildPathToTileFromDistanceMap = buildPathToTileFromDistanceMap;
+
+function getMargoneuroRouteOverlayPath() {
+    if (typeof Engine === 'undefined' || !Engine?.hero?.d || !Engine?.map?.d) return null;
+    const now = Date.now();
+    const targets = [];
+    if (Number.isFinite(Number(window.expLastMoveTx)) && Number.isFinite(Number(window.expLastMoveTy))) {
+        targets.push({
+            x: Number(window.expLastMoveTx),
+            y: Number(window.expLastMoveTy),
+            at: Number(window.expLastMoveAt || window.expLastMoveCommandAt || 0),
+            source: 'exp'
+        });
+    }
+    const safeLast = window.__safeGoToLast || null;
+    if (Number.isFinite(Number(safeLast?.x)) && Number.isFinite(Number(safeLast?.y))) {
+        targets.push({
+            x: Number(safeLast.x),
+            y: Number(safeLast.y),
+            at: Number(safeLast.at || 0),
+            source: 'safeGoTo'
+        });
+    }
+    targets.sort((a, b) => Number(b.at || 0) - Number(a.at || 0));
+    const target = targets.find(t => Number.isFinite(t.x) && Number.isFinite(t.y) && (!t.at || now - Number(t.at || 0) < 15000));
+    if (!target) return null;
+    const hx = Number(Engine.hero.d.x);
+    const hy = Number(Engine.hero.d.y);
+    if (Number.isFinite(hx) && Number.isFinite(hy) && hx === target.x && hy === target.y) return null;
+    const distMap = typeof getCachedExpDistanceMap === 'function'
+        ? getCachedExpDistanceMap(EXP_FAST_DISTANCE_CACHE_TTL_MS)
+        : (typeof buildDistanceMapFromHero === 'function' ? buildDistanceMapFromHero() : null);
+    const path = buildPathToTileFromDistanceMap(target.x, target.y, distMap);
+    if (!Array.isArray(path) || path.length < 2) return null;
+    return { path, target };
+}
+
+function drawMargoneuroRouteOverlay() {
+    if (!isMargoneuroRouteOverlayEnabled()) return clearMargoneuroRouteOverlay();
+    const route = getMargoneuroRouteOverlayPath();
+    const canvas = ensureMargoneuroRouteOverlayCanvas();
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return false;
+    const dpr = Number(canvas.dataset.dpr || window.devicePixelRatio || 1) || 1;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+    if (!route?.path?.length) {
+        canvas.style.display = 'none';
+        return false;
+    }
+    canvas.style.display = 'block';
+    const anchor = getMargoneuroHeroScreenAnchor();
+    const hero = Engine?.hero || {};
+    const heroTileX = Number(hero.rx ?? hero.d?.rx ?? hero.d?.x);
+    const heroTileY = Number(hero.ry ?? hero.d?.ry ?? hero.d?.y);
+    if (!Number.isFinite(heroTileX) || !Number.isFinite(heroTileY)) return false;
+    const tile = 32;
+    const half = tile / 2;
+    ctx.save();
+    ctx.globalAlpha = 0.78;
+    ctx.fillStyle = 'rgba(0, 188, 224, 0.62)';
+    ctx.strokeStyle = 'rgba(0, 88, 122, 0.34)';
+    ctx.lineWidth = 1;
+    for (const step of route.path) {
+        const x = Array.isArray(step) ? Number(step[0]) : Number(step?.x);
+        const y = Array.isArray(step) ? Number(step[1]) : Number(step?.y);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+        const sx = anchor.x + (x - heroTileX) * tile;
+        const sy = anchor.y + (y - heroTileY) * tile;
+        if (sx < -tile || sy < -tile || sx > window.innerWidth + tile || sy > window.innerHeight + tile) continue;
+        ctx.fillRect(Math.round(sx - half), Math.round(sy - half), tile, tile);
+        ctx.strokeRect(Math.round(sx - half) + 0.5, Math.round(sy - half) + 0.5, tile - 1, tile - 1);
+    }
+    ctx.restore();
+    return true;
+}
+window.drawMargoneuroRouteOverlay = drawMargoneuroRouteOverlay;
+
+function startMargoneuroRouteOverlayLoop() {
+    if (window.__margoneuroRouteOverlayLoopStarted) return true;
+    window.__margoneuroRouteOverlayLoopStarted = true;
+    const tick = () => {
+        try { drawMargoneuroRouteOverlay(); } catch (e) {}
+        window.__margoneuroRouteOverlayTimer = setTimeout(tick, isMargoneuroRouteOverlayEnabled() ? 90 : 650);
+    };
+    tick();
+    return true;
+}
+window.startMargoneuroRouteOverlayLoop = startMargoneuroRouteOverlayLoop;
+setTimeout(() => {
+    try { startMargoneuroRouteOverlayLoop(); } catch (e) {}
+}, 1800);
+
 function logExpApproachTarget(mob, moveDest = null, reason = 'approach') {
     if (!mob || !window.logExp) return;
     const key = String(mob.cacheKey ?? mob.id ?? `${mob.nick || mob.name || 'mob'}:${mob.x}:${mob.y}`);
@@ -27557,6 +27801,9 @@ function pokeExpAdjacentTarget(mob, reason = 'adjacent_target') {
         startExpKillSignalWatcher(mob, { reason, baselineSnapshot: expBeforeAttack });
     }
     if (sent && typeof window.ExpMovementGuard?.noteAttack === 'function') window.ExpMovementGuard.noteAttack(id, { reason });
+    if (sent && typeof primeExpNextTargetPipeline === 'function') {
+        try { primeExpNextTargetPipeline(mob, `${reason}_attack_prime`); } catch (e) {}
+    }
     if (sent && typeof window.requestExpLogicSoon === 'function') window.requestExpLogicSoon(35, `${reason}_quick_fight`);
     return sent;
 }
@@ -28064,6 +28311,227 @@ function maybeHandleExpOpportunisticRetarget(mapName, lock = getExpTargetLock(),
 }
 window.maybeHandleExpOpportunisticRetarget = maybeHandleExpOpportunisticRetarget;
 
+function isSameExpPipelineTarget(a, b) {
+    if (!a || !b) return false;
+    try {
+        if (typeof isSameExpTarget === 'function' && isSameExpTarget(a, b)) return true;
+    } catch (e) {}
+    const aid = a.id ?? a.npcId ?? a.targetId;
+    const bid = b.id ?? b.npcId ?? b.targetId;
+    if (aid != null && bid != null && String(aid) === String(bid)) return true;
+    const ax = Number(a.x ?? a.mobX);
+    const ay = Number(a.y ?? a.mobY);
+    const bx = Number(b.x ?? b.mobX);
+    const by = Number(b.y ?? b.mobY);
+    if (Number.isFinite(ax) && Number.isFinite(ay) && Number.isFinite(bx) && Number.isFinite(by) && ax === bx && ay === by) {
+        const an = cleanMobName(a.nick || a.name || '');
+        const bn = cleanMobName(b.nick || b.name || '');
+        return !an || !bn || an === bn;
+    }
+    return false;
+}
+
+function getExpPipelineNextTarget(currentMob = null, options = {}) {
+    if (!window.isExping || typeof Engine === 'undefined' || !Engine?.hero?.d || !Engine?.map?.d) return null;
+    const mapName = options.mapName || Engine.map.d.name || '';
+    const visible = Array.isArray(options.visibleMobs)
+        ? options.visibleMobs
+        : (typeof getCurrentVisibleExpMobs === 'function'
+            ? getCurrentVisibleExpMobs({
+                mapName,
+                includeTemporarilyIgnored: false,
+                forceFresh: true,
+                cacheTtlMs: 0,
+                recordSeen: false,
+                checkLevelRange: options.checkLevelRange
+            })
+            : []);
+    if (!Array.isArray(visible) || visible.length === 0) return null;
+    const hx = Number(Engine.hero.d.x);
+    const hy = Number(Engine.hero.d.y);
+    const distMap = typeof getCachedExpDistanceMap === 'function'
+        ? getCachedExpDistanceMap(Number(options.distanceCacheTtlMs || 80))
+        : (typeof buildDistanceMapFromHero === 'function' ? buildDistanceMapFromHero() : null);
+    if (!distMap || typeof distMap.has !== 'function') return null;
+    const candidates = [];
+    for (const raw of visible) {
+        if (!raw || isSameExpPipelineTarget(raw, currentMob)) continue;
+        const typeEscortDecision = typeof getTypeBasedE2EscortDecision === 'function'
+            ? getTypeBasedE2EscortDecision(raw, visible)
+            : { e2Leader: false, escort: false };
+        if (typeEscortDecision.e2Leader || typeEscortDecision.escort) continue;
+        if (typeof isDangerousEliteLikeMob === 'function' && isDangerousEliteLikeMob(raw)) continue;
+        if (typeof isFastBasicExpMobCandidate === 'function' && !isFastBasicExpMobCandidate(raw, options)) continue;
+        if (typeof isTargetIgnoredOnMap === 'function' && isTargetIgnoredOnMap(mapName, raw)) continue;
+        const decision = typeof getExpMobFilterDecision === 'function'
+            ? getExpMobFilterDecision(raw, { nearbyMobs: visible, currentMap: mapName, checkLevelRange: options.checkLevelRange })
+            : { valid: true, rank: (typeof getMobRank === 'function' ? getMobRank(raw) : 'normal') };
+        if (!decision.valid) continue;
+        const x = Number(raw.x);
+        const y = Number(raw.y);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+        const mob = {
+            ...raw,
+            id: raw.id,
+            x,
+            y,
+            lvl: getMobLevelValue(raw),
+            ranga: decision.rank || (typeof getMobRank === 'function' ? getMobRank(raw) : 'normal'),
+            nick: cleanMobName(raw.nick || raw.name || 'Potwor'),
+            cheapDistance: Number.isFinite(hx) && Number.isFinite(hy) ? Math.max(Math.abs(hx - x), Math.abs(hy - y)) : 9999,
+            manhattan: Number.isFinite(hx) && Number.isFinite(hy) ? Math.abs(hx - x) + Math.abs(hy - y) : 9999
+        };
+        const pathData = typeof getStablePathToExpTarget === 'function'
+            ? getStablePathToExpTarget(mob, distMap)
+            : (typeof getPathToAdjacentTile === 'function' ? getPathToAdjacentTile(mob.x, mob.y, distMap) : null);
+        if (!pathData?.stand) continue;
+        const pathDist = Number(pathData.stand.dist ?? mob.cheapDistance);
+        candidates.push({
+            mob,
+            pathData,
+            distMap,
+            score: (Number.isFinite(pathDist) ? pathDist : 9999) + (mob.cheapDistance * 0.05),
+            pathDist
+        });
+    }
+    if (!candidates.length) return null;
+    candidates.sort((a, b) => (a.score - b.score) || (a.mob.manhattan - b.mob.manhattan));
+    const best = candidates[0];
+    best.reason = options.reason || 'pipeline_next_target';
+    best.candidates = candidates.length;
+    return best;
+}
+window.getExpPipelineNextTarget = getExpPipelineNextTarget;
+
+function primeExpNextTargetPipeline(currentMob = null, reason = 'prime_next_target') {
+    const battleActive = typeof Engine !== 'undefined' && Engine?.battle && (Engine.battle.show || Engine.battle.d);
+    if (!window.isExping || window.__expStopRequested || battleActive) return false;
+    const now = Date.now();
+    if (now - Number(window.__expNextTargetPipelinePrimedAt || 0) < 45) return false;
+    const currentMap = Engine?.map?.d?.name || '';
+    const next = getExpPipelineNextTarget(currentMob, { mapName: currentMap, reason });
+    if (!next?.mob || !next?.pathData?.stand) return false;
+    window.__expNextTargetPipelinePrimedAt = now;
+    window.__expNextTargetPipeline = {
+        mapName: currentMap,
+        mob: next.mob,
+        pathData: next.pathData,
+        distMap: next.distMap,
+        candidates: next.candidates || 1,
+        targetId: next.mob.id ?? null,
+        targetKey: typeof getExpMobStableKey === 'function' ? getExpMobStableKey(next.mob) : null,
+        afterTargetId: currentMob?.id ?? currentMob?.npcId ?? null,
+        afterTargetKey: typeof getExpMobStableKey === 'function' && currentMob ? getExpMobStableKey(currentMob) : null,
+        primedAt: now,
+        reason
+    };
+    return true;
+}
+window.primeExpNextTargetPipeline = primeExpNextTargetPipeline;
+
+function consumeExpNextTargetPipeline(reason = 'consume_pipeline') {
+    const rec = window.__expNextTargetPipeline;
+    window.__expNextTargetPipeline = null;
+    if (!rec || !window.isExping || window.__expStopRequested) return false;
+    const now = Date.now();
+    if (now - Number(rec.primedAt || 0) > 4500) return false;
+    const mapName = Engine?.map?.d?.name || '';
+    if (!mapName || normMapName(mapName) !== normMapName(rec.mapName || '')) return false;
+    if (Engine?.battle && (Engine.battle.show || Engine.battle.d)) return false;
+    if ((window.autoSellState && window.autoSellState.active) || (window.autoPotState && window.autoPotState.active)) return false;
+
+    const visible = typeof getCurrentVisibleExpMobs === 'function'
+        ? getCurrentVisibleExpMobs({ mapName, includeTemporarilyIgnored: false, forceFresh: true, cacheTtlMs: 0, recordSeen: false })
+        : [];
+    const liveMob = Array.isArray(visible)
+        ? visible.find(m => isSameExpPipelineTarget(m, rec.mob))
+        : null;
+    if (!liveMob) return false;
+    const distMap = typeof getCachedExpDistanceMap === 'function'
+        ? getCachedExpDistanceMap(0)
+        : (typeof buildDistanceMapFromHero === 'function' ? buildDistanceMapFromHero() : null);
+    const pathData = typeof getStablePathToExpTarget === 'function'
+        ? getStablePathToExpTarget(liveMob, distMap)
+        : rec.pathData;
+    if (!pathData?.stand || typeof handleFastExpMobTarget !== 'function') return false;
+    window.__expFastNextMobCache = null;
+    const handled = handleFastExpMobTarget({
+        mob: { ...rec.mob, ...liveMob },
+        pathData,
+        distMap,
+        reason: `pipeline_after_kill:${reason}`,
+        candidates: rec.candidates || 1,
+        ignoredDangerous: 0
+    }, { currentMap: mapName, isExpMap: true, pipeline: true, reason });
+    if (handled) {
+        expLastActionTime = 0;
+        window.__lastExpLogicRunAt = 0;
+        if (typeof window.requestExpLogicSoon === 'function') window.requestExpLogicSoon(15, `pipeline_followup:${reason}`);
+        return true;
+    }
+    return false;
+}
+window.consumeExpNextTargetPipeline = consumeExpNextTargetPipeline;
+
+function tryExpPassByMobAttack(mapName, reason = 'pass_by_attack', options = {}) {
+    if (!window.isExping || window.__expStopRequested) return false;
+    if (typeof Engine === 'undefined' || !Engine?.hero?.d || !Engine?.map?.d) return false;
+    if (Engine?.battle && (Engine.battle.show || Engine.battle.d)) return false;
+    if ((window.autoSellState && window.autoSellState.active) || (window.autoPotState && window.autoPotState.active)) return false;
+    const now = Date.now();
+    if (now - Number(window.__expLastPassByAttackProbeAt || 0) < Number(options.throttleMs || 70)) return false;
+    window.__expLastPassByAttackProbeAt = now;
+    const currentMap = mapName || Engine?.map?.d?.name || '';
+    const hx = Number(Engine?.hero?.d?.x);
+    const hy = Number(Engine?.hero?.d?.y);
+    if (!Number.isFinite(hx) || !Number.isFinite(hy)) return false;
+    const visible = Array.isArray(options.visibleMobs)
+        ? options.visibleMobs
+        : (typeof getCurrentVisibleExpMobs === 'function'
+            ? getCurrentVisibleExpMobs({ mapName: currentMap, includeTemporarilyIgnored: false, cacheTtlMs: Number(options.cacheTtlMs || 80), recordSeen: false })
+            : []);
+    if (!Array.isArray(visible) || !visible.length) return false;
+    const maxDist = Math.max(1, Number(options.maxDist || EXP_EARLY_ATTACK_CHEB_DIST || 2));
+    const candidates = [];
+    for (const raw of visible) {
+        if (!raw) continue;
+        if (typeof isDangerousEliteLikeMob === 'function' && isDangerousEliteLikeMob(raw)) continue;
+        if (typeof isFastBasicExpMobCandidate === 'function' && !isFastBasicExpMobCandidate(raw, options)) continue;
+        if (typeof isTargetIgnoredOnMap === 'function' && isTargetIgnoredOnMap(currentMap, raw)) continue;
+        const decision = typeof getExpMobFilterDecision === 'function'
+            ? getExpMobFilterDecision(raw, { nearbyMobs: visible, currentMap, checkLevelRange: options.checkLevelRange })
+            : { valid: true };
+        if (!decision.valid) continue;
+        const x = Number(raw.x);
+        const y = Number(raw.y);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+        const cheb = Math.max(Math.abs(hx - x), Math.abs(hy - y));
+        if (cheb > maxDist) continue;
+        candidates.push({
+            ...raw,
+            x,
+            y,
+            cheapDistance: cheb,
+            manhattan: Math.abs(hx - x) + Math.abs(hy - y),
+            lvl: getMobLevelValue(raw),
+            nick: cleanMobName(raw.nick || raw.name || 'Potwor')
+        });
+    }
+    if (!candidates.length) return false;
+    candidates.sort((a, b) => (a.cheapDistance - b.cheapDistance) || (a.manhattan - b.manhattan));
+    for (const mob of candidates.slice(0, 3)) {
+        if (pokeExpAdjacentTarget(mob, reason)) {
+            if (typeof primeExpNextTargetPipeline === 'function') primeExpNextTargetPipeline(mob, `${reason}_prime`);
+            expLastActionTime = 0;
+            window.__lastExpLogicRunAt = 0;
+            if (typeof window.requestExpLogicSoon === 'function') window.requestExpLogicSoon(0, `${reason}_sent`);
+            return true;
+        }
+    }
+    return false;
+}
+window.tryExpPassByMobAttack = tryExpPassByMobAttack;
+
 function handleFastExpMobTarget(fast, context = {}) {
     if (!fast?.mob || !fast?.pathData?.stand) return false;
     if (window.expPvpEscapeActive || window.__pvpEscapeActive || window.__pvpFleeActive) return false;
@@ -28115,6 +28583,9 @@ function handleFastExpMobTarget(fast, context = {}) {
     };
     window.expDecisionInfo = `Fast mob: ${(mob.nick || mob.name || 'Potwor')} [${mob.x},${mob.y}]`;
     HeroLogger.emit('DEBUG', 'EXP_FAST_NEXT_MOB', `[EXP-FAST] next mob name=${mob.nick || mob.name || mob.id} lvl=${mob.lvl || mob.level || '?'} dist=${mob.cheapDistance ?? '?'} pathLen=${fast.pathData?.stand?.dist ?? '?'}`, "#81d4fa", { category: 'EXP', dedupeMs: 2500 });
+    if (typeof primeExpNextTargetPipeline === 'function') {
+        try { primeExpNextTargetPipeline(mob, 'fast_target_prime'); } catch (e) {}
+    }
 
     const hx = Number(Engine.hero.d.x);
     const hy = Number(Engine.hero.d.y);
@@ -29992,6 +30463,12 @@ function runExpLogic() {
     }
     if (cheapMoveHoldPre && !lockedTargetGonePre && !(adjacentToLockedMobPre && !earlyMovementBusyPre)) {
         if (
+            typeof tryExpPassByMobAttack === 'function' &&
+            tryExpPassByMobAttack(currMapEarly, `move_hold_pass_by:${cheapMoveHoldPre.reason || 'active'}`)
+        ) {
+            return;
+        }
+        if (
             typeof maybeHandleExpOpportunisticRetarget === 'function' &&
             maybeHandleExpOpportunisticRetarget(currMapEarly, earlyTargetLockPre, `move_hold:${cheapMoveHoldPre.reason || 'active'}`)
         ) {
@@ -30026,6 +30503,12 @@ function runExpLogic() {
         // While the client is already walking to a visible locked target, do not
         // rebuild memory/route state every tick. That repeated work was the main
         // source of the "one step, pause, one step" movement on red maps.
+        if (
+            typeof tryExpPassByMobAttack === 'function' &&
+            tryExpPassByMobAttack(currMapEarly, 'red_visible_light_move_pass_by')
+        ) {
+            return;
+        }
         if (typeof tryExpApproachPulse === 'function') {
             const pulseTarget = typeof getExpApproachPulseTargetFromLock === 'function'
                 ? getExpApproachPulseTargetFromLock(earlyTargetLockPre, earlyMoveCommandPre)
@@ -30055,6 +30538,12 @@ function runExpLogic() {
     if (activeMoveLease?.hold) {
         // Hot path: a valid target is locked and the hero is already progressing.
         // Do not run memory writes/BFS/ranking/route recovery this tick, because it visibly resets movement.
+        if (
+            typeof tryExpPassByMobAttack === 'function' &&
+            tryExpPassByMobAttack(currMapEarly, `move_lease_pass_by:${activeMoveLease.reason || 'active'}`, { visibleMobs: visibleTruthEarly })
+        ) {
+            return;
+        }
         if (typeof tryExpApproachPulse === 'function') {
             const leaseLock = earlyTargetLockPre || (typeof getExpTargetLock === 'function' ? getExpTargetLock() : null);
             const leaseMob = leaseLock
@@ -30084,6 +30573,12 @@ function runExpLogic() {
         (earlyMovementBusy || now - Number(earlyMoveCommand.issuedAt || 0) < 900) &&
         !(Engine?.battle && (Engine.battle.show || Engine.battle.d))
     ) {
+        if (
+            typeof tryExpPassByMobAttack === 'function' &&
+            tryExpPassByMobAttack(currMapEarly, 'move_eta_lease_pass_by', { visibleMobs: visibleTruthEarly })
+        ) {
+            return;
+        }
         if (typeof tryExpApproachPulse === 'function' && visibleTruthEarly.length > 0) {
             const etaMob = visibleTruthEarly.find(m => typeof isSameExpTarget === 'function' && isSameExpTarget(m, earlyMoveLock)) || null;
             const etaDest = Number.isFinite(Number(earlyMoveLock?.standX)) && Number.isFinite(Number(earlyMoveLock?.standY))
@@ -30106,6 +30601,12 @@ function runExpLogic() {
     ) {
         // Full-visibility maps already expose all live mobs. While the client is walking,
         // keep the current target and skip the expensive route/memory scan that can reset movement cadence.
+        if (
+            typeof tryExpPassByMobAttack === 'function' &&
+            tryExpPassByMobAttack(currMapEarly, 'full_visible_light_move_pass_by', { visibleMobs: visibleTruthEarly })
+        ) {
+            return;
+        }
         if (typeof tryExpApproachPulse === 'function') {
             const fullMob = visibleTruthEarly.find(m => typeof isSameExpTarget === 'function' && isSameExpTarget(m, earlyMoveLock)) || null;
             const fullDest = Number.isFinite(Number(earlyMoveLock?.standX)) && Number.isFinite(Number(earlyMoveLock?.standY))
@@ -30167,6 +30668,12 @@ function runExpLogic() {
         earlyTargetLock?.key &&
         now - Number(earlyTargetLock.lastSeenAt || 0) < Math.max(EXP_TARGET_LOST_GRACE_MS, 2200)
     ) {
+        if (
+            typeof tryExpPassByMobAttack === 'function' &&
+            tryExpPassByMobAttack(currMapEarly, 'active_move_pass_by', { visibleMobs: visibleTruthEarly })
+        ) {
+            return;
+        }
         window.__targetSelectionThrottled = true;
         return;
     }
