@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         MargoNeuro - Optimized Edition
-// @version      64.8.12
+// @version      64.8.13
 // @description  Automatyczne wykrywanie, inteligentny zasięg, natywny auto-atak, poprawne limity poziomowe, naprawiony scroll.
 // @author       Ty & Gemini
 // @match        https://*.margonem.pl/*
@@ -19219,7 +19219,7 @@ function optimizeRoute() {
             enabled: perf.smoothAutowalk !== false,
             reissueMs: clamp(perf.smoothAutowalkReissueMs, 5200, 1800, 12000),
             progressLeaseMs: 11000,
-            sameDestinationWarmupMs: 900
+            sameDestinationWarmupMs: 260
         };
     }
     window.getGlobalSmoothAutoWalkSettings = getGlobalSmoothAutoWalkSettings;
@@ -19295,12 +19295,7 @@ function optimizeRoute() {
             ? isExpSnapshotActivelyMoving(snap, { ageMs: age, staleMinAgeMs: 900 })
             : !!(snap?.movementBusy || snap?.autoWalkLock || snap?.locked);
         if (activeMove) return true;
-        const hx = Number(Engine?.hero?.d?.x);
-        const hy = Number(Engine?.hero?.d?.y);
-        const progressed = Number.isFinite(hx) && Number.isFinite(hy) && (
-            Number(state.heroXAtIssue) !== hx || Number(state.heroYAtIssue) !== hy
-        );
-        return progressed && age < cfg.progressLeaseMs;
+        return false;
     }
     window.isGlobalSmoothAutoWalkLeaseActive = isGlobalSmoothAutoWalkLeaseActive;
 
@@ -19383,7 +19378,7 @@ function optimizeRoute() {
                     Number(last.heroXAtIssue) !== hx || Number(last.heroYAtIssue) !== hy
                 );
                 if (sameDest && movementBusy && (pathEndsNear || !currentPath.length) && lastAge < EXP_MOVE_LEASE_MS) return false;
-                if (sameDest && progressing && lastAge < EXP_MOVE_PROGRESS_LEASE_MS) return false;
+                if (sameDest && progressing && movementBusy && lastAge < EXP_MOVE_PROGRESS_LEASE_MS) return false;
                 last.x = x;
                 last.y = y;
                 last.at = now;
@@ -19840,9 +19835,9 @@ const EXP_FULL_VIS_MOVING_FAST_TARGET_TTL_MS = 450;
 const EXP_FULL_VIS_DISTANCE_CACHE_TTL_MS = 3500;
 const EXP_FULL_VIS_PATH_CACHE_TTL_MS = 5000;
 const EXP_MOVE_LEASE_MS = 9000;
-const EXP_MOVE_PROGRESS_LEASE_MS = 11000;
-const EXP_MOVE_PROGRESS_HOLD_MS = 6500;
-const EXP_MOVE_STALL_RETRY_MS = 5000;
+const EXP_MOVE_PROGRESS_LEASE_MS = 1500;
+const EXP_MOVE_PROGRESS_HOLD_MS = 900;
+const EXP_MOVE_STALL_RETRY_MS = 700;
 const EXP_APPROACH_STANDSTILL_SWITCH_MS = 5200;
 const EXP_APPROACH_PULSE_MIN_MS = 180;
 const EXP_APPROACH_PULSE_MAX_MS = 340;
@@ -20188,7 +20183,7 @@ function getSmoothExpAutoWalkSettings() {
     return {
         enabled: perf.smoothAutowalk !== false,
         reissueMs: clampMargoneuroPerfMs(perf.smoothAutowalkReissueMs, 5200, 1800, 12000),
-        warmupMs: 900
+        warmupMs: 260
     };
 }
 window.getSmoothExpAutoWalkSettings = getSmoothExpAutoWalkSettings;
@@ -20228,12 +20223,7 @@ function isSmoothExpAutoWalkLeaseActive(targetId = null, dest = null, options = 
         ? isExpSnapshotActivelyMoving(snap, { ageMs: age, staleMinAgeMs: 900 })
         : !!snap?.movementBusy;
     if (activeMove) return true;
-    const hx = Number(Engine?.hero?.d?.x);
-    const hy = Number(Engine?.hero?.d?.y);
-    const progressed = Number.isFinite(hx) && Number.isFinite(hy) && (
-        Number(state.heroXAtIssue) !== hx || Number(state.heroYAtIssue) !== hy
-    );
-    return progressed && age < EXP_MOVE_PROGRESS_LEASE_MS;
+    return false;
 }
 window.isSmoothExpAutoWalkLeaseActive = isSmoothExpAutoWalkLeaseActive;
 
@@ -27256,7 +27246,16 @@ function shouldIssueExpMoveCommand(x, y, targetId, options = {}) {
         last.stallSince = 0;
     }
     const stalledMs = last.stallSince ? now - Number(last.stallSince || 0) : 0;
-    const allowStallRetry = movementBusy && stalledMs >= Number(options.stallRetryMs || EXP_MOVE_STALL_RETRY_MS);
+    const stoppedSameTarget = sameTile && sameTarget &&
+        !movementBusy &&
+        currentPath.length === 0 &&
+        Number(moveSnap?.stepsToSendLen || 0) === 0 &&
+        Number(moveSnap?.visualOffset || 0) <= EXP_MOVE_VISUAL_OFFSET_WAIT &&
+        !moveSnap?.locked &&
+        !moveSnap?.autoWalkLock;
+    const stoppedRetryMs = Number(options.stoppedRetryMs || 420);
+    const allowStoppedRetry = stoppedSameTarget && now - Number(last.issuedAt || 0) >= stoppedRetryMs;
+    const allowStallRetry = (movementBusy && stalledMs >= Number(options.stallRetryMs || EXP_MOVE_STALL_RETRY_MS)) || allowStoppedRetry;
     if (sameTile && sameTarget && heroMovedSinceIssue) last.progressAt = now;
     const pathEndsNear = !!(lastStep && Math.abs(Number(lastStep.x) - tx) <= 1 && Math.abs(Number(lastStep.y) - ty) <= 1);
     const movingSuppressMs = Number(options.movingSuppressMs || Math.max(minInterval, EXP_MOVE_LEASE_MS));
@@ -27286,7 +27285,7 @@ function shouldIssueExpMoveCommand(x, y, targetId, options = {}) {
     }
     // If the hero is making progress toward the same mob, do not reset autoGoTo.
     // Reissuing during this window is what causes the visible "one tile, stop, click again" gait.
-    if (!allowStallRetry && sameTile && sameTarget && heroMovedSinceIssue && now - Number(last.issuedAt || 0) < progressSuppressMs) {
+    if (!allowStallRetry && sameTile && sameTarget && heroMovedSinceIssue && movementBusy && now - Number(last.issuedAt || 0) < progressSuppressMs) {
         window.__lastRejectedMoveCommandReason = 'movement_progress_lease';
         return false;
     }
@@ -27415,10 +27414,10 @@ function shouldHoldExpMoveLease(mapName, visibleMobs = []) {
         move.stallSince = 0;
     }
     const stalledMs = move.stallSince ? now - Number(move.stallSince || 0) : 0;
-    if (sameTarget && Number(move.expectedArriveAt || 0) > now && stalledMs < EXP_MOVE_STALL_RETRY_MS && (movementBusy || movedSinceIssue || age < 900)) {
+    if (sameTarget && Number(move.expectedArriveAt || 0) > now && stalledMs < EXP_MOVE_STALL_RETRY_MS && (movementBusy || age < 420)) {
         return { hold: true, reason: 'expected_arrival_lease', lock, move };
     }
-    if (currentPath.length === 0 && age < 900 && (movementBusy || movedSinceIssue)) {
+    if (currentPath.length === 0 && age < 420 && movementBusy) {
         return { hold: true, reason: 'move_command_warmup', lock, move };
     }
     if (movementBusy && stalledMs >= EXP_MOVE_STALL_RETRY_MS && age >= 650) {
@@ -27427,8 +27426,8 @@ function shouldHoldExpMoveLease(mapName, visibleMobs = []) {
     const progressAge = now - Number(move.progressAt || move.issuedAt || 0);
     if (movementBusy && progressAge < EXP_MOVE_PROGRESS_HOLD_MS) return { hold: true, reason: 'path_active_progressing', lock, move };
     if (movementBusy && age < EXP_MOVE_LEASE_MS) return { hold: true, reason: 'path_active_initial', lock, move };
-    if (currentPath.length === 0 && progressAge < 2400) return { hold: true, reason: 'path_gap_after_progress', lock, move };
-    if (movedSinceIssue && progressAge < EXP_MOVE_PROGRESS_LEASE_MS) return { hold: true, reason: 'progressing', lock, move };
+    if (movementBusy && currentPath.length === 0 && progressAge < 420) return { hold: true, reason: 'path_gap_after_progress', lock, move };
+    if (movementBusy && movedSinceIssue && progressAge < EXP_MOVE_PROGRESS_LEASE_MS) return { hold: true, reason: 'progressing', lock, move };
     return { hold: false, reason: 'lease_expired' };
 }
 window.shouldHoldExpMoveLease = shouldHoldExpMoveLease;
@@ -27457,9 +27456,8 @@ function getExpActiveMoveHoldReason(now = Date.now()) {
     const age = now - Number(move.issuedAt || 0);
     const progressAge = Number(move.progressAt || 0) ? now - Number(move.progressAt || 0) : Infinity;
     const hasObservedProgress = Number(move.progressAt || 0) > Number(move.issuedAt || 0) + 50;
-    if (Number(move.expectedArriveAt || 0) > now && (age < 900 || (hasObservedProgress && progressAge < 1400))) return { reason: 'expected_arrival_active', snapshot: snap, move, age };
-    if (hasObservedProgress && Number.isFinite(progressAge) && progressAge < EXP_MOVE_PROGRESS_HOLD_MS) return { reason: 'recent_progress', snapshot: snap, move, age };
-    if (age < Math.max(EXP_TARGET_REPATH_INTERVAL_MS, 1800)) return { reason: 'recent_move_command', snapshot: snap, move, age };
+    if (Number(move.expectedArriveAt || 0) > now && age < 420) return { reason: 'expected_arrival_active', snapshot: snap, move, age };
+    if (age < 420) return { reason: 'recent_move_command', snapshot: snap, move, age };
     return null;
 }
 window.getExpActiveMoveHoldReason = getExpActiveMoveHoldReason;
@@ -28172,7 +28170,7 @@ function handleFastExpMobTarget(fast, context = {}) {
     }
     const sameDestinationLease = !targetChanged &&
         moveCommandAge < EXP_MOVE_LEASE_MS &&
-        (activeEngineMove || currentPath.length > 0 || moveCommandAge < 2500);
+        (activeEngineMove || currentPath.length > 0 || moveCommandAge < 260);
     let canIssueMove = targetChanged || !pathEndsAtStand || now - Number(window.expLastMoveCommandAt || 0) > EXP_TARGET_REPATH_INTERVAL_MS;
     if (sameDestinationLease && !firstTargetForce) {
         canIssueMove = false;
