@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         MargoNeuro - Optimized Edition
-// @version      64.8.18
+// @version      64.8.19
 // @description  Automatyczne wykrywanie, inteligentny zasięg, natywny auto-atak, poprawne limity poziomowe, naprawiony scroll.
 // @author       Ty & Gemini
 // @match        https://*.margonem.pl/*
@@ -19941,6 +19941,7 @@ const EXP_APPROACH_PULSE_GUARD_NOTE_MS = 450;
 const EXP_APPROACH_PULSE_MAX_TARGET_DIST = 32;
 const EXP_TICK_IDLE_MS = 1000;
 const EXP_TICK_MOVING_MS = 240;
+const EXP_LIGHT_MOVE_TICK_MS = 150;
 const EXP_TICK_TRANSIT_MS = 1200;
 const EXP_TICK_PVP_MS = 250;
 const EXP_TICK_FAST_MS = 180;
@@ -28277,6 +28278,106 @@ function pokeExpAdjacentTarget(mob, reason = 'adjacent_target') {
 }
 window.pokeExpAdjacentTarget = pokeExpAdjacentTarget;
 
+function getLightweightExpMoveTargetSnapshot(lock = null, moveCommand = null) {
+    const focus = window.expFocusTarget || null;
+    const targetId = lock?.id ?? moveCommand?.targetId ?? window.expCurrentTargetId ?? focus?.id ?? focus?.npcId ?? null;
+    const id = typeof normalizeMargoneuroRuntimeId === 'function'
+        ? normalizeMargoneuroRuntimeId(targetId)
+        : parseInt(targetId, 10);
+    const rawNpcs = Engine?.npcs?.d || {};
+    let entry = null;
+    if (id !== null && Number.isFinite(id)) {
+        entry = rawNpcs[id] || rawNpcs[String(id)] || null;
+    }
+    if (!entry && id !== null && Number.isFinite(id)) {
+        for (const key in rawNpcs) {
+            const raw = rawNpcs[key];
+            const data = raw?.d || raw || {};
+            if (String(data.id ?? key) === String(id)) {
+                entry = raw;
+                break;
+            }
+        }
+    }
+    const data = entry?.d || entry || null;
+    const x = Number(data?.x ?? lock?.x ?? lock?.mobX ?? focus?.x);
+    const y = Number(data?.y ?? lock?.y ?? lock?.mobY ?? focus?.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    const live = !!(data && !data.dead && !data.del && !data.delete);
+    return {
+        id: id ?? data?.id ?? lock?.id ?? focus?.id ?? null,
+        key: lock?.key ?? null,
+        nick: data?.nick || data?.name || lock?.name || focus?.nick || focus?.name || 'cel',
+        name: data?.name || data?.nick || lock?.name || focus?.name || 'cel',
+        lvl: data?.lvl ?? data?.level ?? lock?.lvl ?? focus?.lvl ?? null,
+        type: data?.type ?? focus?.type ?? 1,
+        x,
+        y,
+        visible: live,
+        memoryOnly: !live,
+        live
+    };
+}
+window.getLightweightExpMoveTargetSnapshot = getLightweightExpMoveTargetSnapshot;
+
+function handleLightweightExpMoveTick(context = {}) {
+    const now = Date.now();
+    if (!window.isExping || window.__expStopRequested || !context?.isExpMap) return false;
+    if (Engine?.battle && (Engine.battle.show || Engine.battle.d)) return false;
+    const lock = typeof getExpTargetLock === 'function' ? getExpTargetLock() : null;
+    const move = window.expLastMoveCommand || null;
+    const hasTarget = !!(lock?.key || lock?.id != null || move?.targetId != null || window.expCurrentTargetId != null || window.expFocusTarget?.id != null);
+    if (!hasTarget || !move?.issuedAt) return false;
+    const hold = typeof getExpActiveMoveHoldReason === 'function' ? getExpActiveMoveHoldReason(now) : null;
+    const snap = hold?.snapshot || (typeof getHeroMovementSnapshot === 'function' ? getHeroMovementSnapshot() : null);
+    const moveAge = now - Number(move.issuedAt || 0);
+    const movementBusy = typeof isExpSnapshotActivelyMoving === 'function'
+        ? isExpSnapshotActivelyMoving(snap, { ageMs: moveAge, staleMinAgeMs: 650 })
+        : !!(snap?.movementBusy || Number(snap?.visualOffset || 0) > EXP_MOVE_VISUAL_OFFSET_WAIT);
+    const recentlyIssued = moveAge >= 0 && moveAge < 420;
+    if (!movementBusy && !recentlyIssued) return false;
+    const progressAge = now - Number(move.progressAt || move.issuedAt || 0);
+    const staleStepState = movementBusy &&
+        moveAge > 850 &&
+        progressAge > Math.max(650, EXP_MOVE_STALL_RETRY_MS) &&
+        Number(snap?.stepsToSendLen || 0) === 0 &&
+        Number(snap?.visualOffset || 0) <= 0.06 &&
+        !snap?.locked &&
+        !snap?.autoWalkLock;
+    if (staleStepState) return false;
+
+    const target = getLightweightExpMoveTargetSnapshot(lock, move);
+    if (!target) return false;
+    if (!target.live && typeof isExpLockedTargetProbablyGone === 'function' && isExpLockedTargetProbablyGone(lock || target, { closeDist: 2, attackGraceMs: 2800 })) {
+        if (typeof confirmExpKillSignal === 'function') confirmExpKillSignal('light_move_target_gone', { missing: true, target, mapName: context.currentMap });
+        if (typeof window.requestExpLogicSoon === 'function') window.requestExpLogicSoon(45, 'light_move_target_gone');
+        return true;
+    }
+
+    const hx = Number(Engine?.hero?.d?.x);
+    const hy = Number(Engine?.hero?.d?.y);
+    const dist = Number.isFinite(hx) && Number.isFinite(hy)
+        ? Math.max(Math.abs(hx - Number(target.x)), Math.abs(hy - Number(target.y)))
+        : Infinity;
+    if (dist <= EXP_EARLY_ATTACK_CHEB_DIST && typeof pokeExpAdjacentTarget === 'function') {
+        const attacked = pokeExpAdjacentTarget(target, dist <= 1 ? 'light_move_adjacent_target' : 'light_move_early_target');
+        if (attacked) {
+            if (lock && typeof isSameExpTarget === 'function' && isSameExpTarget(target, lock)) lock.lastAttackAt = now;
+            if (typeof window.requestExpLogicSoon === 'function') window.requestExpLogicSoon(70, 'light_move_attack_sent');
+        }
+    }
+
+    window.__targetSelectionThrottled = true;
+    window.expRuntimeDiagnostics = window.expRuntimeDiagnostics || {};
+    window.expRuntimeDiagnostics.skipReason = `light_move_to_target:${hold?.reason || 'active'}`;
+    window.expRuntimeDiagnostics.currentTargetId = target.id ?? move.targetId ?? lock?.id ?? null;
+    window.expRuntimeDiagnostics.lightMoveTargetDist = Number.isFinite(dist) ? dist : null;
+    setExpState(EXP_STATES.MOVING_TO_MOB, `light_move:${hold?.reason || 'active'}`);
+    expLastActionTime = now + (Number.isFinite(dist) && dist <= EXP_EARLY_ATTACK_CHEB_DIST ? 60 : EXP_LIGHT_MOVE_TICK_MS);
+    return true;
+}
+window.handleLightweightExpMoveTick = handleLightweightExpMoveTick;
+
 function isExpApproachPulseWalkableTile(x, y) {
     const tx = Number(x);
     const ty = Number(y);
@@ -30884,6 +30985,13 @@ function runExpLogic() {
             : null;
         if (transitResult?.handled) return;
     }
+    if (
+        isExpMapEarly &&
+        typeof handleLightweightExpMoveTick === 'function' &&
+        handleLightweightExpMoveTick({ currentMap: currMapEarly, mapsPool: mapsPoolEarly, isExpMap: isExpMapEarly })
+    ) {
+        return;
+    }
     setExpState(EXP_STATES.SCANNING_CURRENT_MAP,'tick');
     if (!isExpMapEarly && now < Number(window.__expStartRouteDecisionPendingUntil || 0)) {
         setExpState(EXP_STATES.ENTERING_EXP_ROUTE, 'start_route_decision_pending');
@@ -32579,7 +32687,7 @@ function getExpRuntimeTickIntervalMs() {
     );
     if (movementBusy && hasTargetMove) {
         if (pulseActive) return EXP_APPROACH_PULSE_MIN_MS;
-        return EXP_TICK_MOVING_MS;
+        return EXP_LIGHT_MOVE_TICK_MS;
     }
     if (visibleCount > 0 && (hasTargetMove || window.expCurrentTargetId || getExpTargetLock?.().key)) return EXP_TICK_FAST_MS;
     if (typeof isExpTransitActive === 'function' && isExpTransitActive()) return EXP_TICK_TRANSIT_MS;
