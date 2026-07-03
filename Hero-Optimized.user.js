@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         MargoNeuro - Optimized Edition
-// @version      64.8.20
+// @version      64.8.23
 // @description  Automatyczne wykrywanie, inteligentny zasięg, natywny auto-atak, poprawne limity poziomowe, naprawiony scroll.
 // @author       Ty & Gemini
 // @match        https://*.margonem.pl/*
@@ -16178,13 +16178,20 @@ bindChange('useTeleportsEq', (e) => { botSettings.exp.useTeleportsEq = e.target.
             if (Number(window.__margoneuroEngineBackUntil || 0) > now) return false;
             const dist = getMargoneuroNpcChebDistance(entry?.data);
             const snap = typeof getHeroMovementSnapshot === 'function' ? getHeroMovementSnapshot() : null;
+            const settledAdjacentForAttack = dist <= 1 &&
+                Number(snap?.stepsToSendLen || 0) === 0 &&
+                Number(snap?.autoPathCount || 0) === 0 &&
+                Number(snap?.pathLen || 0) === 0 &&
+                Number(snap?.roadLen || 0) === 0 &&
+                Number(snap?.roadNodesLen || 0) === 0 &&
+                Number(snap?.visualOffset || 0) <= 0.14;
             const hardMoveBusy = !!(
                 snap?.locked ||
                 snap?.autoWalkLock ||
                 Number(snap?.stepsToSendLen || 0) > 0 ||
                 Number(snap?.visualOffset || 0) > 0.08
             );
-            if (hardMoveBusy) return false;
+            if (hardMoveBusy && !settledAdjacentForAttack) return false;
             if (dist > 1 && (
                 Number(snap?.pathLen || 0) > 0 ||
                 Number(snap?.autoPathCount || 0) > 0 ||
@@ -16514,6 +16521,55 @@ bindChange('useTeleportsEq', (e) => { botSettings.exp.useTeleportsEq = e.target.
                 }
             } catch(e) {}
             syncBerserkToggleVisual();
+        };
+
+        function refreshServerBerserkNpcIndicators(force = false) {
+            try {
+                const now = Date.now();
+                if (!force && now - Number(window.__lastServerBerserkNpcIndicatorRefreshAt || 0) < 1200) return;
+                window.__lastServerBerserkNpcIndicatorRefreshAt = now;
+                const npcs = Engine?.npcs?.check ? Engine.npcs.check() : (Engine?.npcs?.d || {});
+                for (let id in (npcs || {})) {
+                    let npc = npcs[id];
+                    if (npc && npc.sprite && typeof npc.sprite.updateAutoFightIndicator === 'function') npc.sprite.updateAutoFightIndicator();
+                }
+            } catch(e) {}
+        }
+
+        function applyServerBerserkState(nextState, reason = 'sync') {
+            let b = botSettings.berserk || (botSettings.berserk = {});
+            const wasEnabled = !!b.enabled;
+            const enabled = !!nextState && !!b.userEnabled;
+            b.enabled = enabled;
+            try {
+                if (typeof Engine !== 'undefined' && Engine.settings && Engine.settings.d) {
+                    Engine.settings.d.fight_auto_level_min = Number(botSettings?.exp?.minLvl || 1);
+                    Engine.settings.d.fight_auto_level_max = Number(botSettings?.exp?.maxLvl || 300);
+                    Engine.settings.d.fight_auto_solo = enabled && b.common !== false ? 1 : 0;
+                    Engine.settings.d.fight_auto_elites = enabled && !!b.e1 ? 1 : 0;
+                    Engine.settings.d.fight_auto_elites2 = enabled && (!!b.e2 || !!b.hero) ? 1 : 0;
+                }
+            } catch(e) {}
+            refreshServerBerserkNpcIndicators(true);
+            if (typeof saveSettings === 'function' && wasEnabled !== enabled && !/refresh|poll/i.test(String(reason || ''))) saveSettings();
+            syncBerserkToggleVisual();
+            return enabled;
+        }
+        window.applyServerBerserkState = applyServerBerserkState;
+
+        window.updateServerBerserk = function(reason = 'manual') {
+            const b = botSettings.berserk || (botSettings.berserk = {});
+            const decision = typeof shouldBerserkBeActive === 'function'
+                ? shouldBerserkBeActive()
+                : { active: !!b.enabled, reason: 'no_decision_helper' };
+            const enabled = applyServerBerserkState(!!b.enabled && !!decision.active, reason);
+            console.log(`[BERSERK] server berserk ${enabled ? 'enabled' : 'disabled'} reason=${reason}`);
+            if (window._lastBerserkLogState !== enabled) {
+                window._lastBerserkLogState = enabled;
+                if (typeof window.logExp === 'function') {
+                    window.logExp(enabled ? "Serwerowy berserk wlaczony." : "Serwerowy berserk wylaczony.", enabled ? "#81c784" : "#ffb74d");
+                }
+            }
         };
 
         if (botSettings.autosell && typeof botSettings.autosell.onlyTunia === 'undefined') { botSettings.autosell.onlyTunia = false; saveSettings(); }
@@ -19899,6 +19955,9 @@ const EXP_MEMORY_TARGET_ACTIVE_LIMIT = 12;
 const EXP_RADAR_SNAPSHOT_TTL_MS = 700;
 const EXP_RADAR_SNAPSHOT_MOVING_TTL_MS = 1100;
 const EXP_TARGET_GROUP_CANDIDATE_LIMIT = 14;
+const EXP_MICRO_PLAN_MAX_GROUPS = 3;
+const EXP_MICRO_PLAN_CLUSTER_CHEB = 5;
+const EXP_MICRO_PLAN_TTL_MS = 650;
 const EXP_TARGET_SWITCH_LOCK_MS = 5200;
 const EXP_OPPORTUNISTIC_RETARGET_MIN_MS = 5000;
 const EXP_OPPORTUNISTIC_RETARGET_MAX_MS = 7000;
@@ -21909,23 +21968,21 @@ const RouteCombatFSM = {
         this.evaluate(reason);
     },
     shouldBerserkBeOn(ctx = this.state) {
-        return false;
+        if (typeof shouldBerserkBeActive === 'function') return !!shouldBerserkBeActive().active;
+        return !!(
+            ctx.running &&
+            ctx.currentTask === 'EXP' &&
+            ctx.inRouteMap &&
+            ctx.berserkCheckbox &&
+            !window.__expStopRequested &&
+            !window.autoSellState?.active &&
+            !window.autoPotState?.active &&
+            !window.expPvpEscapeActive &&
+            !window.__pvpEscapeActive &&
+            !(window.__captchaPhase && window.__captchaPhase !== 'none')
+        );
     },
     evaluate(reason = 'sync') {
-        if (botSettings?.berserk) botSettings.berserk.enabled = false;
-        try {
-            if (Engine?.settings?.d) {
-                Engine.settings.d.fight_auto_solo = 0;
-                Engine.settings.d.fight_auto_elites = 0;
-                Engine.settings.d.fight_auto_elites2 = 0;
-            }
-        } catch (e) {}
-        this.state.berserkActive = false;
-        this._disableRequestedAt = 0;
-        if (reason !== 'poll') {
-            HeroLogger.emit('DEBUG', 'QUICK_ATTACK_EVAL', `Quick attack mode reason=${reason}`, "#a99a75", { category: 'COMBAT', dedupeMs: 20000 });
-        }
-        return;
         const shouldEnable = this.shouldBerserkBeOn();
         const currentlyActive = !!(botSettings?.berserk?.enabled || Engine?.settings?.d?.fight_auto_solo);
         this.state.berserkActive = currentlyActive;
@@ -22065,18 +22122,15 @@ const BerserkController = {
     onSupplyRun(reason = 'supply_run') { this.disable(reason); },
     onPvPEscape(reason = 'pvp_escape') { this.disable(reason); },
     setBotBerserkState(nextState, reason = 'fsm') {
-        if (botSettings?.berserk) botSettings.berserk.enabled = false;
-        try {
-            if (Engine?.settings?.d) {
-                Engine.settings.d.fight_auto_solo = 0;
-                Engine.settings.d.fight_auto_elites = 0;
-                Engine.settings.d.fight_auto_elites2 = 0;
-            }
-        } catch (e) {}
-        if (typeof saveSettings === 'function') saveSettings();
+        const enabled = typeof window.applyServerBerserkState === 'function'
+            ? window.applyServerBerserkState(!!nextState, reason)
+            : false;
         this.syncUiFromState();
-        this._log('server berserk skipped; quick attack mode active', reason, "#00e5ff", 5000);
-        return false;
+        this._log(enabled ? 'server berserk enabled' : 'server berserk disabled', reason, enabled ? "#81c784" : "#ffb74d", 2200);
+        if (window.RouteCombatFSM) {
+            window.RouteCombatFSM.update({ berserkActive: enabled }, `${reason}_set`, { skipEvaluate: true });
+        }
+        return enabled;
     },
     syncObservedState(reason = 'observe') {
         const observedActive = !!Engine?.settings?.d?.fight_auto_solo;
@@ -23392,15 +23446,18 @@ async function prepareExpStartDeferred(runId) {
         }
 
         if (botSettings?.berserk) {
-            botSettings.berserk.enabled = false;
-            if (typeof saveSettings === 'function') runWhenBrowserIdle(() => saveSettings(), { timeout: 1500 });
             runWhenBrowserIdle(() => {
                 if (runId !== window.expRunId || !window.isExping || window.__expStopRequested) return;
                 if (window.RouteCombatFSM) {
                     window.RouteCombatFSM.syncFromSettings();
                     window.RouteCombatFSM.update({ running: true, currentTask: 'EXP', inRouteMap: startOnRoute }, 'exp_start_deferred', { skipEvaluate: true });
                 }
-                if (window.BerserkController?.setBotBerserkState) window.BerserkController.setBotBerserkState(false, 'exp_start_deferred');
+                const decision = typeof shouldBerserkBeActive === 'function'
+                    ? shouldBerserkBeActive()
+                    : { active: startOnRoute, reason: 'exp_start_deferred' };
+                if (window.BerserkController?.setBotBerserkState) {
+                    window.BerserkController.setBotBerserkState(!!decision.active, decision.reason || 'exp_start_deferred');
+                }
             }, { timeout: 1800 });
         }
 
@@ -23869,7 +23926,14 @@ window.logHero = function(msg, color="#a99a75") {
 
 
 
-                Engine.settings.d.fight_auto_solo = 0;
+                const serverBerserkWanted = typeof shouldBerserkBeActive === 'function'
+                    ? !!shouldBerserkBeActive().active
+                    : !!(botSettings?.berserk?.enabled || (window.isExping && botSettings?.berserk?.userEnabled));
+                if (serverBerserkWanted && typeof window.applyServerBerserkState === 'function') {
+                    window.applyServerBerserkState(true, 'smart_aggro_refresh');
+                } else {
+                    Engine.settings.d.fight_auto_solo = state ? 1 : 0;
+                }
 
 
 
@@ -23889,11 +23953,11 @@ window.logHero = function(msg, color="#a99a75") {
 
 
 
-                Engine.settings.d.fight_auto_elites = 0;
+                if (!serverBerserkWanted) Engine.settings.d.fight_auto_elites = state && botSettings?.exp?.elite ? 1 : 0;
 
 
 
-                Engine.settings.d.fight_auto_elites2 = 0;
+                if (!serverBerserkWanted) Engine.settings.d.fight_auto_elites2 = 0;
 
 
 
@@ -28176,12 +28240,30 @@ function resetExpMoveCommand(reason = 'reset') {
 }
 window.resetExpMoveCommand = resetExpMoveCommand;
 
+function isServerBerserkPrimaryActive() {
+    if (typeof shouldBerserkBeActive === 'function' && !shouldBerserkBeActive().active) return false;
+    return !!(
+        window.isExping &&
+        botSettings?.berserk?.userEnabled &&
+        (botSettings?.berserk?.enabled || Engine?.settings?.d?.fight_auto_solo)
+    );
+}
+window.isServerBerserkPrimaryActive = isServerBerserkPrimaryActive;
+
+function isBerserkQuickAttackFallbackAllowed(reason = '') {
+    if (!isServerBerserkPrimaryActive()) return true;
+    if (Date.now() < Number(window.__berserkQuickAttackFallbackUntil || 0)) return true;
+    return /fallback|stuck|melee_fail|berserk_stuck/i.test(String(reason || ''));
+}
+window.isBerserkQuickAttackFallbackAllowed = isBerserkQuickAttackFallbackAllowed;
+
 function pokeExpAdjacentTarget(mob, reason = 'adjacent_target') {
     const id = typeof normalizeMargoneuroRuntimeId === 'function'
         ? normalizeMargoneuroRuntimeId(mob?.id ?? mob?.npcId)
         : parseInt(mob?.id ?? mob?.npcId, 10);
     if (id === null || !Number.isFinite(id)) return false;
     if (Engine?.battle && (Engine.battle.show || Engine.battle.d)) return false;
+    if (typeof isBerserkQuickAttackFallbackAllowed === 'function' && !isBerserkQuickAttackFallbackAllowed(reason)) return false;
     const now = Date.now();
     window.__expAttackCommandThrottle = window.__expAttackCommandThrottle || { at: 0, targetId: null, byTarget: {} };
     const attackThrottle = window.__expAttackCommandThrottle;
@@ -28413,6 +28495,193 @@ function shouldAllowExpLightMoveTickBypass(now = Date.now()) {
     return !!(moving || age < 500 || nearTarget);
 }
 window.shouldAllowExpLightMoveTickBypass = shouldAllowExpLightMoveTickBypass;
+
+function tryExpCheapAdjacentAttack(reason = 'cheap_adjacent_attack') {
+    if (!window.isExping || window.__expStopRequested) return false;
+    if (Engine?.battle && (Engine.battle.show || Engine.battle.d)) return false;
+    if (typeof isBerserkQuickAttackFallbackAllowed === 'function' && !isBerserkQuickAttackFallbackAllowed(reason)) return false;
+    const now = Date.now();
+    if (now - Number(window.__lastExpCheapAdjacentAttackTryAt || 0) < 120) return false;
+    window.__lastExpCheapAdjacentAttackTryAt = now;
+    const sent = typeof window.tryMargoneuroQuickFight === 'function'
+        ? window.tryMargoneuroQuickFight(null, {
+            reason,
+            checkLevelRange: true,
+            allowNonAdjacent: false,
+            fallbackToAnyAdjacent: true
+        })
+        : false;
+    if (!sent) return false;
+    window.expRuntimeDiagnostics = window.expRuntimeDiagnostics || {};
+    window.expRuntimeDiagnostics.skipReason = reason;
+    if (typeof window.requestExpLogicSoon === 'function') window.requestExpLogicSoon(80, `${reason}_sent`);
+    return true;
+}
+window.tryExpCheapAdjacentAttack = tryExpCheapAdjacentAttack;
+
+function getExpCheapVisibleMobCandidates(options = {}) {
+    const hx = Number(Engine?.hero?.d?.x);
+    const hy = Number(Engine?.hero?.d?.y);
+    if (!Number.isFinite(hx) || !Number.isFinite(hy)) return [];
+    const rawNpcs = Engine?.npcs?.d || {};
+    const out = [];
+    for (const key in rawNpcs) {
+        const npc = rawNpcs[key];
+        const data = npc?.d || npc || {};
+        if (!data || data.dead || data.del || data.delete) continue;
+        if (![1, 2, 3, 11].includes(Number(data.type))) continue;
+        const id = typeof normalizeMargoneuroRuntimeId === 'function'
+            ? normalizeMargoneuroRuntimeId(data.id ?? key)
+            : parseInt(data.id ?? key, 10);
+        if (id === null || !Number.isFinite(id)) continue;
+        if (typeof isMargoneuroQuickFightCandidate === 'function' && !isMargoneuroQuickFightCandidate(data, { checkLevelRange: true })) continue;
+        const x = Number(data.x);
+        const y = Number(data.y);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+        const cheapDistance = Math.max(Math.abs(hx - x), Math.abs(hy - y));
+        out.push({
+            ...data,
+            id,
+            npcId: id,
+            x,
+            y,
+            nick: data.nick || data.name || 'mob',
+            name: data.name || data.nick || 'mob',
+            grp: data.grp ?? data.group ?? data.groupId ?? data.relation ?? null,
+            cheapDistance,
+            visible: true,
+            live: true
+        });
+    }
+    out.sort((a, b) => a.cheapDistance - b.cheapDistance || Math.abs(hx - a.x) + Math.abs(hy - a.y) - (Math.abs(hx - b.x) + Math.abs(hy - b.y)));
+    const limit = Number(options.limit || 18);
+    return out.slice(0, Math.max(1, limit));
+}
+window.getExpCheapVisibleMobCandidates = getExpCheapVisibleMobCandidates;
+
+function pickExpMicroPlanStandForMob(mob) {
+    const mx = Number(mob?.x);
+    const my = Number(mob?.y);
+    const hx = Number(Engine?.hero?.d?.x);
+    const hy = Number(Engine?.hero?.d?.y);
+    if (!Number.isFinite(mx) || !Number.isFinite(my) || !Number.isFinite(hx) || !Number.isFinite(hy)) return null;
+    if (Math.max(Math.abs(hx - mx), Math.abs(hy - my)) <= 1) return { x: hx, y: hy, dist: 0, alreadyAdjacent: true };
+    const offsets = [
+        [0, -1], [1, 0], [0, 1], [-1, 0],
+        [1, -1], [1, 1], [-1, 1], [-1, -1]
+    ];
+    const candidates = [];
+    for (const [ox, oy] of offsets) {
+        const x = mx + ox;
+        const y = my + oy;
+        if (typeof isExpApproachPulseWalkableTile === 'function' && !isExpApproachPulseWalkableTile(x, y)) continue;
+        candidates.push({
+            x,
+            y,
+            dist: Math.abs(hx - x) + Math.abs(hy - y),
+            cheb: Math.max(Math.abs(hx - x), Math.abs(hy - y)),
+            cardinal: Math.abs(ox) + Math.abs(oy) === 1
+        });
+    }
+    candidates.sort((a, b) => a.cheb - b.cheb || a.dist - b.dist || (a.cardinal === b.cardinal ? 0 : (a.cardinal ? -1 : 1)));
+    return candidates[0] || null;
+}
+window.pickExpMicroPlanStandForMob = pickExpMicroPlanStandForMob;
+
+function buildExpMobMicroPlan(context = {}) {
+    const now = Date.now();
+    const mapName = context.currentMap || Engine?.map?.d?.name || '';
+    const cache = window.__expMobMicroPlan;
+    if (cache?.mapName === mapName && now - Number(cache.at || 0) < EXP_MICRO_PLAN_TTL_MS) return cache;
+    const mobs = getExpCheapVisibleMobCandidates({ limit: 18 });
+    const used = new Set();
+    const stops = [];
+    for (const seed of mobs) {
+        if (used.has(String(seed.id))) continue;
+        const cluster = [];
+        for (const mob of mobs) {
+            if (used.has(String(mob.id))) continue;
+            const sameGroup = seed.grp != null && mob.grp != null && String(seed.grp) === String(mob.grp);
+            const close = Math.max(Math.abs(Number(seed.x) - Number(mob.x)), Math.abs(Number(seed.y) - Number(mob.y))) <= EXP_MICRO_PLAN_CLUSTER_CHEB;
+            if (sameGroup || close) cluster.push(mob);
+        }
+        cluster.sort((a, b) => a.cheapDistance - b.cheapDistance);
+        const target = cluster[0] || seed;
+        const stand = pickExpMicroPlanStandForMob(target);
+        if (!stand) continue;
+        cluster.forEach(mob => used.add(String(mob.id)));
+        stops.push({
+            x: stand.x,
+            y: stand.y,
+            alreadyAdjacent: !!stand.alreadyAdjacent,
+            target,
+            targetId: target.id,
+            mobs: cluster.slice(0, 5),
+            size: cluster.length,
+            groupKey: target.grp != null ? `grp:${target.grp}` : cluster.map(m => m.id).join('_')
+        });
+        if (stops.length >= EXP_MICRO_PLAN_MAX_GROUPS) break;
+    }
+    const plan = { mapName, at: now, stops, source: 'cheap_visible_micro_plan' };
+    window.__expMobMicroPlan = plan;
+    return plan;
+}
+window.buildExpMobMicroPlan = buildExpMobMicroPlan;
+
+function handleExpMobMicroPlan(context = {}) {
+    if (!window.isExping || window.__expStopRequested || !context?.isExpMap) return false;
+    if (Engine?.battle && (Engine.battle.show || Engine.battle.d)) return false;
+    const snap = typeof getHeroMovementSnapshot === 'function' ? getHeroMovementSnapshot() : null;
+    const moving = typeof isExpSnapshotActivelyMoving === 'function'
+        ? isExpSnapshotActivelyMoving(snap, { ageMs: Date.now() - Number(window.expLastMoveCommand?.issuedAt || 0), staleMinAgeMs: 650 })
+        : !!(snap?.movementBusy || Number(snap?.visualOffset || 0) > EXP_MOVE_VISUAL_OFFSET_WAIT);
+    if (moving) return false;
+    const plan = buildExpMobMicroPlan(context);
+    const stop = plan?.stops?.[0] || null;
+    if (!stop?.target) return false;
+    const hx = Number(Engine?.hero?.d?.x);
+    const hy = Number(Engine?.hero?.d?.y);
+    const targetDist = Number.isFinite(hx) && Number.isFinite(hy)
+        ? Math.max(Math.abs(hx - Number(stop.target.x)), Math.abs(hy - Number(stop.target.y)))
+        : Infinity;
+    if (targetDist <= 1) {
+        const attacked = typeof pokeExpAdjacentTarget === 'function'
+            ? pokeExpAdjacentTarget(stop.target, 'micro_plan_adjacent_attack')
+            : false;
+        if (attacked) return true;
+        return tryExpCheapAdjacentAttack('micro_plan_adjacent_fallback');
+    }
+    const moveTargetId = stop.targetId ?? (typeof getExpMobStableKey === 'function' ? getExpMobStableKey(stop.target) : stop.groupKey);
+    if (typeof updateExpTargetLock === 'function') {
+        updateExpTargetLock(stop.target, { stand: { x: stop.x, y: stop.y, dist: Math.max(1, stop.target.cheapDistance || 1), lockedStand: true } }, 'micro_group_plan');
+    }
+    const canMove = typeof shouldIssueExpMoveCommand === 'function'
+        ? shouldIssueExpMoveCommand(stop.x, stop.y, moveTargetId, {
+            minIntervalMs: 380,
+            movingSuppressMs: EXP_MOVE_LEASE_MS,
+            progressSuppressMs: EXP_MOVE_PROGRESS_LEASE_MS,
+            stallRetryMs: EXP_MOVE_STALL_RETRY_MS,
+            expectedTiles: Math.max(1, stop.target.cheapDistance || 1),
+            guardMinGapMs: 220,
+            guardRecalcGapMs: 420
+        })
+        : true;
+    if (!canMove) return false;
+    const moveResult = typeof issueSmoothExpAutoGoTo === 'function'
+        ? issueSmoothExpAutoGoTo(stop.x, stop.y, moveTargetId, 'micro_group_plan', { bypassThrottle: false, targetId: moveTargetId })
+        : { ok: window.safeGoTo?.(stop.x, stop.y, false, { bypassThrottle: false, reason: 'micro_group_plan', targetId: moveTargetId }), sent: true };
+    if (!moveResult?.ok && moveResult?.sent === false) return false;
+    if (moveResult?.sent !== false && typeof window.ExpMovementGuard?.notePathCommandSent === 'function') {
+        window.ExpMovementGuard.notePathCommandSent({ x: stop.x, y: stop.y, targetId: moveTargetId, reason: 'micro_group_plan' });
+    }
+    window.expRuntimeDiagnostics = window.expRuntimeDiagnostics || {};
+    window.expRuntimeDiagnostics.skipReason = 'micro_group_plan';
+    window.expRuntimeDiagnostics.microPlanStops = plan.stops.length;
+    setExpState(EXP_STATES.MOVING_TO_MOB, `micro_group_plan:${stop.size || 1}`);
+    expLastActionTime = Date.now() + EXP_LIGHT_MOVE_TICK_MS;
+    return true;
+}
+window.handleExpMobMicroPlan = handleExpMobMicroPlan;
 
 function isExpApproachPulseWalkableTile(x, y) {
     const tx = Number(x);
@@ -31023,6 +31292,22 @@ function runExpLogic() {
     }
     if (
         isExpMapEarly &&
+        typeof tryExpCheapAdjacentAttack === 'function' &&
+        tryExpCheapAdjacentAttack('pre_scan_adjacent_attack')
+    ) {
+        setExpState(EXP_STATES.MOVING_TO_MOB, 'pre_scan_adjacent_attack');
+        expLastActionTime = now + 80;
+        return;
+    }
+    if (
+        isExpMapEarly &&
+        typeof handleExpMobMicroPlan === 'function' &&
+        handleExpMobMicroPlan({ currentMap: currMapEarly, mapsPool: mapsPoolEarly, isExpMap: isExpMapEarly })
+    ) {
+        return;
+    }
+    if (
+        isExpMapEarly &&
         typeof handleLightweightExpMoveTick === 'function' &&
         handleLightweightExpMoveTick({ currentMap: currMapEarly, mapsPool: mapsPoolEarly, isExpMap: isExpMapEarly })
     ) {
@@ -32041,7 +32326,8 @@ function runExpLogic() {
         }
         let exactDist = Math.max(Math.abs(hx - target.x), Math.abs(hy - target.y));
 
-        if (exactDist > 1 && exactDist <= EXP_EARLY_ATTACK_CHEB_DIST) {
+        const serverBerserkPrimary = typeof isServerBerserkPrimaryActive === 'function' && isServerBerserkPrimaryActive();
+        if (!serverBerserkPrimary && exactDist > 1 && exactDist <= EXP_EARLY_ATTACK_CHEB_DIST) {
             const earlyAttacked = pokeExpAdjacentTarget(target, 'legacy_early_target');
             if (earlyAttacked) return;
         }
@@ -32061,10 +32347,25 @@ function runExpLogic() {
                 nextTarget = nextChoice?.mob || null;
                 nextPathData = nextTarget ? getPathToAdjacentTile(nextTarget.x, nextTarget.y, distMap) : null;
             }
-            const attackedCurrentTarget = pokeExpAdjacentTarget(target, 'legacy_adjacent_target');
-            if (!attackedCurrentTarget) return;
+            let attackedCurrentTarget = false;
+            if (serverBerserkPrimary) {
+                if (window.BerserkController?.setBotBerserkState) window.BerserkController.setBotBerserkState(true, 'exp_adjacent_target');
+                const standMs = now - Number(window.expStandStillStart || now);
+                const fallbackWaitMs = Number(window.__expBerserkFallbackWaitMs || 1800);
+                if (standMs < fallbackWaitMs) {
+                    HeroLogger.emit('DEBUG', 'ATTACK_WAIT_FOR_BERSERK', `Berserk przy celu ${target.nick || target.id}, czekam ${Math.max(0, fallbackWaitMs - standMs)}ms przed awaryjnym PPM.`, "#ffcc80", { category: 'COMBAT', dedupeMs: 1800 });
+                    setExpState(EXP_STATES.WAITING_AFTER_KILL, 'wait_for_server_berserk');
+                    expLastActionTime = now + 160;
+                    return;
+                }
+                window.__berserkQuickAttackFallbackUntil = now + 1000;
+                attackedCurrentTarget = pokeExpAdjacentTarget(target, 'berserk_stuck_adjacent_fallback');
+            } else {
+                attackedCurrentTarget = pokeExpAdjacentTarget(target, 'legacy_adjacent_target');
+                if (!attackedCurrentTarget) return;
+            }
 
-            if (EXP_PREMOVE_NEXT_TARGET && nextTarget && nextPathData?.stand && now - window.expStandStillStart > 1800 && now > nextAllowedClickTime && now > Number(getExpTargetLock().switchLockedUntil || 0)) {
+            if (attackedCurrentTarget && EXP_PREMOVE_NEXT_TARGET && nextTarget && nextPathData?.stand && now - window.expStandStillStart > 1800 && now > nextAllowedClickTime && now > Number(getExpTargetLock().switchLockedUntil || 0)) {
                 HeroLogger.emit('DEBUG', 'BERSERK_CHAIN_TARGET', `Berserk-chain: cel ${target.nick || target.id} jest w zasięgu, podchodzę już do następnego ${nextTarget.nick || nextTarget.id}.`, "#80deea", { category: 'COMBAT', dedupeMs: 4000 });
                 const nx = EXP_USE_DIRECT_MOB_AUTOGO ? Number(nextTarget.x) : nextPathData.stand.x;
                 const ny = EXP_USE_DIRECT_MOB_AUTOGO ? Number(nextTarget.y) : nextPathData.stand.y;
@@ -32094,6 +32395,7 @@ function runExpLogic() {
             }
 
             if (now - window.expStandStillStart > 2000) { // Berserk zaciął się
+                if (attackedCurrentTarget) return;
                 window.expMeleeFailByTarget = window.expMeleeFailByTarget || {};
                 window.expMeleeFailByTarget[targetKey] = (window.expMeleeFailByTarget[targetKey] || 0) + 1;
                 HeroLogger.emit('DEBUG', 'ATTACK_WAIT_FOR_BERSERK', `Jestem przy celu ${target.nick || target.id} — czekam na autoatak berserka (próba=${window.expMeleeFailByTarget[targetKey]}).`, "#ffcc80", { category: 'COMBAT', dedupeMs: 5000 });
