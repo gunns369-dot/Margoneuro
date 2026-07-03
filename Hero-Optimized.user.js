@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         MargoNeuro - Optimized Edition
-// @version      64.8.11
+// @version      64.8.12
 // @description  Automatyczne wykrywanie, inteligentny zasięg, natywny auto-atak, poprawne limity poziomowe, naprawiony scroll.
 // @author       Ty & Gemini
 // @match        https://*.margonem.pl/*
@@ -19826,7 +19826,8 @@ const EXP_CLEAN_GUARD_LOG_THROTTLE_MS = 30000;
 const EXP_TRANSIT_VISIBLE_SCAN_INTERVAL_MS = 2200;
 const EXP_TRANSIT_MOVING_SCAN_INTERVAL_MS = 4000;
 const EXP_TRANSIT_RUSH_REISSUE_MS = 2600;
-const EXP_ADJACENT_ATTACK_POKE_MS = 260;
+const EXP_ADJACENT_ATTACK_POKE_MS = 120;
+const EXP_EARLY_ATTACK_CHEB_DIST = 2;
 const EXP_FAST_DISTANCE_CACHE_TTL_MS = 1800;
 const EXP_FAST_PATH_CACHE_TTL_MS = 6000;
 const EXP_VISIBLE_MOB_HEAVY_FALLBACK_MS = 1300;
@@ -19848,10 +19849,10 @@ const EXP_APPROACH_PULSE_MAX_MS = 340;
 const EXP_APPROACH_PULSE_GUARD_NOTE_MS = 450;
 const EXP_APPROACH_PULSE_MAX_TARGET_DIST = 32;
 const EXP_TICK_IDLE_MS = 1000;
-const EXP_TICK_MOVING_MS = 260;
+const EXP_TICK_MOVING_MS = 180;
 const EXP_TICK_TRANSIT_MS = 1200;
 const EXP_TICK_PVP_MS = 250;
-const EXP_TICK_FAST_MS = 160;
+const EXP_TICK_FAST_MS = 95;
 const EXP_TICK_EMPTY_MS = 650;
 const EXP_TICK_LOADING_MS = 1600;
 const EXP_TICK_ENGINE_WAIT_MS = 2000;
@@ -19869,8 +19870,8 @@ const ONE_TILE_MS = 1000 / HERO_SPEED_TILES_PER_SEC;
 const EXP_MOVE_COMMAND_MIN_GAP_MS = 220;
 const EXP_PATH_RECALC_MIN_GAP_MS = 700;
 const EXP_POST_MOVE_MIN_GAP_MS = 110;
-const EXP_ATTACK_AFTER_ARRIVAL_BUFFER_MS = 80;
-const EXP_ATTACK_SAME_TARGET_COOLDOWN_MS = 280;
+const EXP_ATTACK_AFTER_ARRIVAL_BUFFER_MS = 25;
+const EXP_ATTACK_SAME_TARGET_COOLDOWN_MS = 140;
 const EXP_MOVE_VISUAL_OFFSET_WAIT = 0.10;
 const EXP_MOVE_DESYNC_OFFSET = 0.35;
 const EXP_MOVE_DESYNC_HOLD_MS = 420;
@@ -19878,8 +19879,8 @@ const EXP_MOVE_ETA_BUFFER_MS = 650;
 const EXP_MOVE_ETA_MAX_MS = 8500;
 const EXP_KILL_RETARGET_DELAY_MS = 35;
 const EXP_KILL_SIGNAL_WATCH_MS = 4200;
-const EXP_KILL_SIGNAL_MIN_CHECK_MS = 70;
-const EXP_KILL_SIGNAL_MAX_CHECK_MS = 125;
+const EXP_KILL_SIGNAL_MIN_CHECK_MS = 35;
+const EXP_KILL_SIGNAL_MAX_CHECK_MS = 70;
 const EXP_TARGET_SWITCH_COOLDOWN_MS = 900;
 const EXP_ANTI_STUCK_SOFT_MS = 2400;
 const EXP_ANTI_STUCK_HARD_MS = 5200;
@@ -20117,8 +20118,8 @@ const ExpMovementGuard = (() => {
         const stableSince = ready
             ? (state.arrivedStableSince || (state.arrivedStableSince = now))
             : (state.immediateStableSinceByTarget[key] || (state.immediateStableSinceByTarget[key] = now));
-        if (now - stableSince < Number(options.arrivalBufferMs || EXP_ATTACK_AFTER_ARRIVAL_BUFFER_MS)) return wait('arrival_buffer', base.snapshot, { action: 'attack' });
-        if (now - Number(state.lastAttackAtByTarget[key] || 0) < Number(options.cooldownMs || EXP_ATTACK_SAME_TARGET_COOLDOWN_MS)) return wait('attack_cooldown', base.snapshot, { action: 'attack' });
+        if (now - stableSince < Number(options.arrivalBufferMs ?? EXP_ATTACK_AFTER_ARRIVAL_BUFFER_MS)) return wait('arrival_buffer', base.snapshot, { action: 'attack' });
+        if (now - Number(state.lastAttackAtByTarget[key] || 0) < Number(options.cooldownMs ?? EXP_ATTACK_SAME_TARGET_COOLDOWN_MS)) return wait('attack_cooldown', base.snapshot, { action: 'attack' });
         debugLog('ATTACK_ALLOWED', 'attack allowed', 700);
         return { ok: true, snapshot: base.snapshot };
     };
@@ -27487,6 +27488,7 @@ function resetExpMoveCommand(reason = 'reset') {
     window.expLastMoveHeroY = null;
     window.__safeGoToLast = { x: null, y: null, at: 0, heroXAtIssue: null, heroYAtIssue: null };
     if (typeof resetExpSmoothAutoWalkState === 'function') resetExpSmoothAutoWalkState(reason);
+    if (typeof resetGlobalSmoothAutoWalkState === 'function') resetGlobalSmoothAutoWalkState(reason);
     window.__lastRejectedMoveCommandReason = null;
     return true;
 }
@@ -27516,11 +27518,12 @@ function pokeExpAdjacentTarget(mob, reason = 'adjacent_target') {
     const hx = Number(Engine?.hero?.d?.x);
     const hy = Number(Engine?.hero?.d?.y);
     const targetDist = Math.max(Math.abs(hx - Number(mob?.x ?? liveTarget?.x)), Math.abs(hy - Number(mob?.y ?? liveTarget?.y)));
-    if (!Number.isFinite(targetDist) || targetDist > 1) return false;
+    const earlyAttackDist = Math.max(1, Number(EXP_EARLY_ATTACK_CHEB_DIST || 2));
+    if (!Number.isFinite(targetDist) || targetDist > earlyAttackDist) return false;
     const attackGuard = typeof window.ExpMovementGuard?.canAttack === 'function'
         ? window.ExpMovementGuard.canAttack(id, {
-            immediateRangeStable: targetDist <= 1 && typeof isHeroVisuallyArrived === 'function' && isHeroVisuallyArrived(0.06),
-            arrivalBufferMs: EXP_ATTACK_AFTER_ARRIVAL_BUFFER_MS,
+            immediateRangeStable: targetDist <= earlyAttackDist && (targetDist > 1 || (typeof isHeroVisuallyArrived !== 'function' || isHeroVisuallyArrived(0.08))),
+            arrivalBufferMs: targetDist > 1 ? 1 : EXP_ATTACK_AFTER_ARRIVAL_BUFFER_MS,
             cooldownMs: EXP_ATTACK_SAME_TARGET_COOLDOWN_MS
         })
         : { ok: true };
@@ -27528,7 +27531,7 @@ function pokeExpAdjacentTarget(mob, reason = 'adjacent_target') {
         const guardReason = String(attackGuard.reason || '');
         const lastPathAt = Number(window.ExpMovementGuard?.state?.lastPathCommandAt || 0);
         const residueWait = /arrival_buffer|autoPath|stepsToSend|visualOffset|not_ready_for_attack/.test(guardReason);
-        const forceAdjacentAttack = targetDist <= 1 && residueWait && now - lastPathAt > 250;
+        const forceAdjacentAttack = targetDist <= earlyAttackDist && residueWait && now - lastPathAt > (targetDist > 1 ? 80 : 180);
         if (!forceAdjacentAttack) return false;
     }
     window.__expLastAdjacentAttackPoke = window.__expLastAdjacentAttackPoke || { id: null, at: 0 };
@@ -27539,7 +27542,7 @@ function pokeExpAdjacentTarget(mob, reason = 'adjacent_target') {
     let sent = false;
     try {
         sent = typeof window.tryMargoneuroQuickFight === 'function'
-            ? window.tryMargoneuroQuickFight(id, { reason, checkLevelRange: true, fallbackToAnyAdjacent: true })
+            ? window.tryMargoneuroQuickFight(id, { reason, checkLevelRange: true, fallbackToAnyAdjacent: targetDist <= 1, allowNonAdjacent: targetDist <= earlyAttackDist })
             : false;
     } catch (e) {}
     try {
@@ -27556,7 +27559,7 @@ function pokeExpAdjacentTarget(mob, reason = 'adjacent_target') {
         startExpKillSignalWatcher(mob, { reason, baselineSnapshot: expBeforeAttack });
     }
     if (sent && typeof window.ExpMovementGuard?.noteAttack === 'function') window.ExpMovementGuard.noteAttack(id, { reason });
-    if (sent && typeof window.requestExpLogicSoon === 'function') window.requestExpLogicSoon(90, `${reason}_quick_fight`);
+    if (sent && typeof window.requestExpLogicSoon === 'function') window.requestExpLogicSoon(35, `${reason}_quick_fight`);
     return sent;
 }
 window.pokeExpAdjacentTarget = pokeExpAdjacentTarget;
@@ -27674,6 +27677,8 @@ function tryExpApproachPulse(mob, moveDest, pathData = null, reason = 'approach_
     if (Engine?.battle && (Engine.battle.show || Engine.battle.d)) return false;
     if (window.expPvpEscapeActive || window.__pvpEscapeActive || window.__pvpFleeActive) return false;
     if ((window.autoSellState && window.autoSellState.active) || (window.autoPotState && window.autoPotState.active)) return false;
+    const smoothPulseDisabled = botSettings?.performance?.smoothAutowalk !== false && botSettings?.performance?.disableApproachPulseOnSmooth !== false;
+    if (smoothPulseDisabled && !options.forcePulse) return false;
     const now = Date.now();
     const mapName = options.currentMap || Engine?.map?.d?.name || '';
     const mx = Number(mob.x);
@@ -28116,13 +28121,18 @@ function handleFastExpMobTarget(fast, context = {}) {
     const hx = Number(Engine.hero.d.x);
     const hy = Number(Engine.hero.d.y);
     const exactDist = Math.max(Math.abs(hx - mob.x), Math.abs(hy - mob.y));
-    if (exactDist <= 1) {
+    if (exactDist <= EXP_EARLY_ATTACK_CHEB_DIST) {
         const lock = getExpTargetLock();
         if (isSameExpTarget(mob, lock)) lock.lastAttackAt = now;
-        const attacked = pokeExpAdjacentTarget(mob, 'fast_adjacent_target');
-        if (!attacked) return true;
-        // Do not stop the client path here. Stopping while rx/ry still settles is a common cause of server "back".
-        return true;
+        const attacked = pokeExpAdjacentTarget(mob, exactDist <= 1 ? 'fast_adjacent_target' : 'fast_early_target');
+        if (!attacked && exactDist <= 1) return true;
+        if (!attacked && exactDist > 1) {
+            // Early attack is opportunistic only. If the game rejects it from distance 2,
+            // keep walking to the planned adjacent tile instead of freezing next to the mob.
+        } else {
+            // Do not stop the client path here. Stopping while rx/ry still settles is a common cause of server "back".
+            return true;
+        }
     }
 
     const stand = fast.pathData.stand;
@@ -30905,6 +30915,11 @@ function runExpLogic() {
         }
         let exactDist = Math.max(Math.abs(hx - target.x), Math.abs(hy - target.y));
 
+        if (exactDist > 1 && exactDist <= EXP_EARLY_ATTACK_CHEB_DIST) {
+            const earlyAttacked = pokeExpAdjacentTarget(target, 'legacy_early_target');
+            if (earlyAttacked) return;
+        }
+
         if (exactDist <= 1) { // Jesteśmy przy celu
             const targetKey = getStableExpTargetKey(target);
             if (window.expStandStillTargetKey !== targetKey) {
@@ -31592,7 +31607,7 @@ function getExpRuntimeTickIntervalMs() {
     );
     if (movementBusy && hasTargetMove) {
         if (pulseActive) return EXP_APPROACH_PULSE_MIN_MS;
-        return fullVisMap ? Math.max(EXP_TICK_MOVING_MS, 420) : EXP_TICK_MOVING_MS;
+        return EXP_TICK_MOVING_MS;
     }
     if (visibleCount > 0 && (hasTargetMove || window.expCurrentTargetId || getExpTargetLock?.().key)) return EXP_TICK_FAST_MS;
     if (typeof isExpTransitActive === 'function' && isExpTransitActive()) return EXP_TICK_TRANSIT_MS;
@@ -31692,7 +31707,9 @@ if (!window.__expSchedulerInstalled) {
         if (window.__expSchedulerTimer && window.__expSchedulerTimer !== state.timer) clearTimeout(window.__expSchedulerTimer);
         const computedDelay = Number.isFinite(Number(delay)) ? Number(delay) : (typeof getExpRuntimeTickIntervalMs === 'function' ? getExpRuntimeTickIntervalMs() : EXP_TICK_IDLE_MS);
         const transitionWait = typeof getMargoneuroMapTransitionWaitMs === 'function' ? getMargoneuroMapTransitionWaitMs() : 0;
-        const nextDelay = Math.max(220, computedDelay, transitionWait > 0 ? transitionWait + 80 : 0);
+        const fastRetargetActive = window.isExping && Date.now() < Number(window.__expForceFastRetargetUntil || 0);
+        const minSchedulerDelay = fastRetargetActive ? 35 : (window.isExping ? 120 : 220);
+        const nextDelay = Math.max(minSchedulerDelay, computedDelay, transitionWait > 0 ? transitionWait + 80 : 0);
         state.runId = runId || window.expRunId || null;
         state.lastDelay = nextDelay;
         state.scheduledAt = Date.now();
