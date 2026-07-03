@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         MargoNeuro - Optimized Edition
-// @version      64.8.19
+// @version      64.8.20
 // @description  Automatyczne wykrywanie, inteligentny zasięg, natywny auto-atak, poprawne limity poziomowe, naprawiony scroll.
 // @author       Ty & Gemini
 // @match        https://*.margonem.pl/*
@@ -28191,10 +28191,15 @@ function pokeExpAdjacentTarget(mob, reason = 'adjacent_target') {
     const sameTargetGap = Number(EXP_ATTACK_SAME_TARGET_RETRY_MS || 1400);
     if (now - Number(attackThrottle.byTarget[id] || 0) < sameTargetGap) return false;
     const expBeforeAttack = typeof getHeroExpKillSnapshot === 'function' ? getHeroExpKillSnapshot() : null;
-    const localNpcs = typeof getMargoneuroNpcMap === 'function'
-        ? getMargoneuroNpcMap()
-        : (Engine?.npcs?.d || {});
-    const liveTarget = (localNpcs[id]?.d || localNpcs[id]) || Object.values(localNpcs).map(v => v?.d || v || {}).find(n => String(n.id) === String(id));
+    const directLiveTarget = mob?.live && Number.isFinite(Number(mob.x)) && Number.isFinite(Number(mob.y))
+        ? mob
+        : null;
+    const localNpcs = directLiveTarget
+        ? null
+        : (typeof getMargoneuroNpcMap === 'function'
+            ? getMargoneuroNpcMap()
+            : (Engine?.npcs?.d || {}));
+    const liveTarget = directLiveTarget || (localNpcs[id]?.d || localNpcs[id]) || Object.values(localNpcs || {}).map(v => v?.d || v || {}).find(n => String(n.id) === String(id));
     if ((!liveTarget || liveTarget.dead || liveTarget.del || liveTarget.delete) && !mob?.memoryOnly) {
         const fallbackSent = typeof window.tryMargoneuroQuickFight === 'function'
             ? window.tryMargoneuroQuickFight(null, { reason: `${reason}_live_scan`, checkLevelRange: true })
@@ -28211,13 +28216,20 @@ function pokeExpAdjacentTarget(mob, reason = 'adjacent_target') {
     const hy = Number(Engine?.hero?.d?.y);
     const targetDist = Math.max(Math.abs(hx - Number(mob?.x ?? liveTarget?.x)), Math.abs(hy - Number(mob?.y ?? liveTarget?.y)));
     const moveSnapBeforeAttack = typeof getHeroMovementSnapshot === 'function' ? getHeroMovementSnapshot() : null;
+    const settledAdjacentForAttack = targetDist <= 1 &&
+        Number(moveSnapBeforeAttack?.stepsToSendLen || 0) === 0 &&
+        Number(moveSnapBeforeAttack?.autoPathCount || 0) === 0 &&
+        Number(moveSnapBeforeAttack?.pathLen || 0) === 0 &&
+        Number(moveSnapBeforeAttack?.roadLen || 0) === 0 &&
+        Number(moveSnapBeforeAttack?.roadNodesLen || 0) === 0 &&
+        Number(moveSnapBeforeAttack?.visualOffset || 0) <= 0.14;
     const hardMoveBusyBeforeAttack = !!(
         moveSnapBeforeAttack?.locked ||
         moveSnapBeforeAttack?.autoWalkLock ||
         Number(moveSnapBeforeAttack?.stepsToSendLen || 0) > 0 ||
         Number(moveSnapBeforeAttack?.visualOffset || 0) > 0.08
     );
-    if (hardMoveBusyBeforeAttack) return false;
+    if (hardMoveBusyBeforeAttack && !settledAdjacentForAttack) return false;
     const passByAttack = /pass_by/i.test(String(reason || ''));
     const earlyAttackDist = passByAttack
         ? Math.max(1, Number(EXP_PASS_BY_ATTACK_CHEB_DIST || 1))
@@ -28377,6 +28389,30 @@ function handleLightweightExpMoveTick(context = {}) {
     return true;
 }
 window.handleLightweightExpMoveTick = handleLightweightExpMoveTick;
+
+function shouldAllowExpLightMoveTickBypass(now = Date.now()) {
+    if (!window.isExping || window.__expStopRequested) return false;
+    const move = window.expLastMoveCommand || null;
+    if (!move?.issuedAt) return false;
+    const lock = typeof getExpTargetLock === 'function' ? getExpTargetLock() : null;
+    const hasTarget = !!(lock?.key || lock?.id != null || move.targetId != null || window.expCurrentTargetId != null || window.expFocusTarget?.id != null);
+    if (!hasTarget) return false;
+    const age = now - Number(move.issuedAt || 0);
+    if (!Number.isFinite(age) || age < 0 || age > Math.max(EXP_MOVE_LEASE_MS, 9000)) return false;
+    const snap = typeof getHeroMovementSnapshot === 'function' ? getHeroMovementSnapshot() : null;
+    const moving = typeof isExpSnapshotActivelyMoving === 'function'
+        ? isExpSnapshotActivelyMoving(snap, { ageMs: age, staleMinAgeMs: 650 })
+        : !!(snap?.movementBusy || Number(snap?.visualOffset || 0) > EXP_MOVE_VISUAL_OFFSET_WAIT);
+    const hx = Number(Engine?.hero?.d?.x);
+    const hy = Number(Engine?.hero?.d?.y);
+    const tx = Number(lock?.x ?? lock?.mobX ?? window.expFocusTarget?.x);
+    const ty = Number(lock?.y ?? lock?.mobY ?? window.expFocusTarget?.y);
+    const nearTarget = Number.isFinite(hx) && Number.isFinite(hy) && Number.isFinite(tx) && Number.isFinite(ty)
+        ? Math.max(Math.abs(hx - tx), Math.abs(hy - ty)) <= EXP_EARLY_ATTACK_CHEB_DIST
+        : false;
+    return !!(moving || age < 500 || nearTarget);
+}
+window.shouldAllowExpLightMoveTickBypass = shouldAllowExpLightMoveTickBypass;
 
 function isExpApproachPulseWalkableTile(x, y) {
     const tx = Number(x);
@@ -30992,6 +31028,16 @@ function runExpLogic() {
     ) {
         return;
     }
+    const expCtlEarly = typeof getExpControlState === 'function' ? getExpControlState() : null;
+    if (expCtlEarly?.lightMoveBypass) {
+        window.__targetSelectionThrottled = true;
+        if (window.expRuntimeDiagnostics) {
+            window.expRuntimeDiagnostics.skipReason = 'light_move_bypass_no_heavy_scan';
+        }
+        setExpState(EXP_STATES.MOVING_TO_MOB, 'light_move_bypass_no_heavy_scan');
+        expLastActionTime = now + EXP_LIGHT_MOVE_TICK_MS;
+        return;
+    }
     setExpState(EXP_STATES.SCANNING_CURRENT_MAP,'tick');
     if (!isExpMapEarly && now < Number(window.__expStartRouteDecisionPendingUntil || 0)) {
         setExpState(EXP_STATES.ENTERING_EXP_ROUTE, 'start_route_decision_pending');
@@ -32721,7 +32767,11 @@ runExpLogic = function runExpLogicMeasured() {
         diag.lastSkipReason = 'reentry_guard';
         return;
     }
-    if (window.__nextExpLogicAllowedAt && nowWall < Number(window.__nextExpLogicAllowedAt || 0)) {
+    const lightMoveBypass = typeof shouldAllowExpLightMoveTickBypass === 'function'
+        ? shouldAllowExpLightMoveTickBypass(nowWall)
+        : false;
+    ctl.lightMoveBypass = !!lightMoveBypass;
+    if (window.__nextExpLogicAllowedAt && nowWall < Number(window.__nextExpLogicAllowedAt || 0) && !lightMoveBypass) {
         const perf = typeof getMargoneuroPerformanceStore === 'function' ? getMargoneuroPerformanceStore() : null;
         if (perf) {
             perf.expTick = perf.expTick || {};
@@ -32732,7 +32782,7 @@ runExpLogic = function runExpLogicMeasured() {
     }
     const minInterval = typeof getExpRuntimeTickIntervalMs === 'function' ? getExpRuntimeTickIntervalMs() : 500;
     diag.tickDelayMs = minInterval;
-    if (window.__lastExpLogicRunAt && nowWall - Number(window.__lastExpLogicRunAt || 0) < minInterval) {
+    if (window.__lastExpLogicRunAt && nowWall - Number(window.__lastExpLogicRunAt || 0) < minInterval && !lightMoveBypass) {
         const perf = typeof getMargoneuroPerformanceStore === 'function' ? getMargoneuroPerformanceStore() : null;
         if (perf) {
             perf.expTick = perf.expTick || {};
@@ -32759,7 +32809,10 @@ runExpLogic = function runExpLogicMeasured() {
         const elapsed = ((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) - started;
         diag.lastTickMs = Math.round(elapsed * 10) / 10;
         if (window.isExping && elapsed > 180) {
-            const coolDownMs = Math.min(950, Math.max(220, Math.round(elapsed * 1.25)));
+            const severe = elapsed > 350;
+            const coolDownMs = severe
+                ? Math.min(2600, Math.max(900, Math.round(elapsed * 2.15)))
+                : Math.min(1300, Math.max(280, Math.round(elapsed * 1.45)));
             window.__nextExpLogicAllowedAt = Math.max(Number(window.__nextExpLogicAllowedAt || 0), Date.now() + coolDownMs);
             diag.lastHeavyTickCooldownMs = coolDownMs;
         }
@@ -32767,6 +32820,7 @@ runExpLogic = function runExpLogicMeasured() {
         if (typeof logMargoneuroLongTask === 'function') {
             logMargoneuroLongTask('runExpLogic', elapsed, { mapName: Engine?.map?.d?.name || null, runId: activeRunId, delay: minInterval }, 50);
         }
+        ctl.lightMoveBypass = false;
     }
 };
 if (!window.__expSchedulerInstalled) {
