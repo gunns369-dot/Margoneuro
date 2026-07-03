@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         MargoNeuro - Optimized Edition
-// @version      64.8.14
+// @version      64.8.15
 // @description  Automatyczne wykrywanie, inteligentny zasięg, natywny auto-atak, poprawne limity poziomowe, naprawiony scroll.
 // @author       Ty & Gemini
 // @match        https://*.margonem.pl/*
@@ -15041,6 +15041,21 @@ function initGUI() {
             h.innerText = `${isHidden ? 'v' : '>'} ${sectionName}`;
         };
 
+        function bindSettingsAccordionClicks() {
+            const settingsRoot = document.getElementById('heroSettingsGUI');
+            if (!settingsRoot || settingsRoot.dataset.accordionsBound === '1') return;
+            settingsRoot.dataset.accordionsBound = '1';
+            settingsRoot.querySelectorAll('.accordion-header[id]').forEach(header => {
+                header.removeAttribute('onclick');
+                header.addEventListener('click', (event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    window.toggleSettingsAcc(header.id);
+                }, false);
+            });
+        }
+        bindSettingsAccordionClicks();
+
         if (!window.margoneuroExpDelegationInstalled) {
             window.margoneuroExpDelegationInstalled = true;
             document.addEventListener('click', function(event) {
@@ -19831,8 +19846,11 @@ const EXP_CLEAN_GUARD_LOG_THROTTLE_MS = 30000;
 const EXP_TRANSIT_VISIBLE_SCAN_INTERVAL_MS = 2200;
 const EXP_TRANSIT_MOVING_SCAN_INTERVAL_MS = 4000;
 const EXP_TRANSIT_RUSH_REISSUE_MS = 2600;
-const EXP_ADJACENT_ATTACK_POKE_MS = 120;
+const EXP_ADJACENT_ATTACK_POKE_MS = 650;
 const EXP_EARLY_ATTACK_CHEB_DIST = 2;
+const EXP_PASS_BY_ATTACK_CHEB_DIST = 1;
+const EXP_GLOBAL_ATTACK_COMMAND_GAP_MS = 520;
+const EXP_ATTACK_SAME_TARGET_RETRY_MS = 1400;
 const EXP_FAST_DISTANCE_CACHE_TTL_MS = 1800;
 const EXP_FAST_PATH_CACHE_TTL_MS = 6000;
 const EXP_VISIBLE_MOB_HEAVY_FALLBACK_MS = 1300;
@@ -19876,7 +19894,7 @@ const EXP_MOVE_COMMAND_MIN_GAP_MS = 220;
 const EXP_PATH_RECALC_MIN_GAP_MS = 700;
 const EXP_POST_MOVE_MIN_GAP_MS = 110;
 const EXP_ATTACK_AFTER_ARRIVAL_BUFFER_MS = 25;
-const EXP_ATTACK_SAME_TARGET_COOLDOWN_MS = 140;
+const EXP_ATTACK_SAME_TARGET_COOLDOWN_MS = 720;
 const EXP_MOVE_VISUAL_OFFSET_WAIT = 0.10;
 const EXP_MOVE_DESYNC_OFFSET = 0.35;
 const EXP_MOVE_DESYNC_HOLD_MS = 420;
@@ -27743,6 +27761,13 @@ function pokeExpAdjacentTarget(mob, reason = 'adjacent_target') {
     if (id === null || !Number.isFinite(id)) return false;
     if (Engine?.battle && (Engine.battle.show || Engine.battle.d)) return false;
     const now = Date.now();
+    window.__expAttackCommandThrottle = window.__expAttackCommandThrottle || { at: 0, targetId: null, byTarget: {} };
+    const attackThrottle = window.__expAttackCommandThrottle;
+    attackThrottle.byTarget = attackThrottle.byTarget || {};
+    const globalGap = Number(EXP_GLOBAL_ATTACK_COMMAND_GAP_MS || 520);
+    if (now - Number(attackThrottle.at || 0) < globalGap) return false;
+    const sameTargetGap = Number(EXP_ATTACK_SAME_TARGET_RETRY_MS || 1400);
+    if (now - Number(attackThrottle.byTarget[id] || 0) < sameTargetGap) return false;
     const expBeforeAttack = typeof getHeroExpKillSnapshot === 'function' ? getHeroExpKillSnapshot() : null;
     const localNpcs = typeof getMargoneuroNpcMap === 'function'
         ? getMargoneuroNpcMap()
@@ -27753,6 +27778,9 @@ function pokeExpAdjacentTarget(mob, reason = 'adjacent_target') {
             ? window.tryMargoneuroQuickFight(null, { reason: `${reason}_live_scan`, checkLevelRange: true })
             : false;
         if (!fallbackSent) return false;
+        attackThrottle.at = now;
+        attackThrottle.targetId = id;
+        attackThrottle.byTarget[id] = now;
         if (typeof window.ExpMovementGuard?.noteAttack === 'function') window.ExpMovementGuard.noteAttack(id, { reason: `${reason}_live_scan` });
         if (typeof window.requestExpLogicSoon === 'function') window.requestExpLogicSoon(90, `${reason}_live_scan_quick_fight`);
         return true;
@@ -27760,7 +27788,10 @@ function pokeExpAdjacentTarget(mob, reason = 'adjacent_target') {
     const hx = Number(Engine?.hero?.d?.x);
     const hy = Number(Engine?.hero?.d?.y);
     const targetDist = Math.max(Math.abs(hx - Number(mob?.x ?? liveTarget?.x)), Math.abs(hy - Number(mob?.y ?? liveTarget?.y)));
-    const earlyAttackDist = Math.max(1, Number(EXP_EARLY_ATTACK_CHEB_DIST || 2));
+    const passByAttack = /pass_by/i.test(String(reason || ''));
+    const earlyAttackDist = passByAttack
+        ? Math.max(1, Number(EXP_PASS_BY_ATTACK_CHEB_DIST || 1))
+        : Math.max(1, Number(EXP_EARLY_ATTACK_CHEB_DIST || 2));
     if (!Number.isFinite(targetDist) || targetDist > earlyAttackDist) return false;
     const attackGuard = typeof window.ExpMovementGuard?.canAttack === 'function'
         ? window.ExpMovementGuard.canAttack(id, {
@@ -27800,11 +27831,19 @@ function pokeExpAdjacentTarget(mob, reason = 'adjacent_target') {
     if (sent && typeof startExpKillSignalWatcher === 'function') {
         startExpKillSignalWatcher(mob, { reason, baselineSnapshot: expBeforeAttack });
     }
+    if (sent) {
+        attackThrottle.at = now;
+        attackThrottle.targetId = id;
+        attackThrottle.byTarget[id] = now;
+        for (const [key, ts] of Object.entries(attackThrottle.byTarget)) {
+            if (now - Number(ts || 0) > 10000) delete attackThrottle.byTarget[key];
+        }
+    }
     if (sent && typeof window.ExpMovementGuard?.noteAttack === 'function') window.ExpMovementGuard.noteAttack(id, { reason });
     if (sent && typeof primeExpNextTargetPipeline === 'function') {
         try { primeExpNextTargetPipeline(mob, `${reason}_attack_prime`); } catch (e) {}
     }
-    if (sent && typeof window.requestExpLogicSoon === 'function') window.requestExpLogicSoon(35, `${reason}_quick_fight`);
+    if (sent && typeof window.requestExpLogicSoon === 'function') window.requestExpLogicSoon(120, `${reason}_quick_fight`);
     return sent;
 }
 window.pokeExpAdjacentTarget = pokeExpAdjacentTarget;
@@ -28479,7 +28518,7 @@ function tryExpPassByMobAttack(mapName, reason = 'pass_by_attack', options = {})
     if (Engine?.battle && (Engine.battle.show || Engine.battle.d)) return false;
     if ((window.autoSellState && window.autoSellState.active) || (window.autoPotState && window.autoPotState.active)) return false;
     const now = Date.now();
-    if (now - Number(window.__expLastPassByAttackProbeAt || 0) < Number(options.throttleMs || 70)) return false;
+    if (now - Number(window.__expLastPassByAttackProbeAt || 0) < Number(options.throttleMs || 260)) return false;
     window.__expLastPassByAttackProbeAt = now;
     const currentMap = mapName || Engine?.map?.d?.name || '';
     const hx = Number(Engine?.hero?.d?.x);
@@ -28491,7 +28530,7 @@ function tryExpPassByMobAttack(mapName, reason = 'pass_by_attack', options = {})
             ? getCurrentVisibleExpMobs({ mapName: currentMap, includeTemporarilyIgnored: false, cacheTtlMs: Number(options.cacheTtlMs || 80), recordSeen: false })
             : []);
     if (!Array.isArray(visible) || !visible.length) return false;
-    const maxDist = Math.max(1, Number(options.maxDist || EXP_EARLY_ATTACK_CHEB_DIST || 2));
+    const maxDist = Math.max(1, Number(options.maxDist || EXP_PASS_BY_ATTACK_CHEB_DIST || 1));
     const candidates = [];
     for (const raw of visible) {
         if (!raw) continue;
@@ -28524,7 +28563,7 @@ function tryExpPassByMobAttack(mapName, reason = 'pass_by_attack', options = {})
             if (typeof primeExpNextTargetPipeline === 'function') primeExpNextTargetPipeline(mob, `${reason}_prime`);
             expLastActionTime = 0;
             window.__lastExpLogicRunAt = 0;
-            if (typeof window.requestExpLogicSoon === 'function') window.requestExpLogicSoon(0, `${reason}_sent`);
+            if (typeof window.requestExpLogicSoon === 'function') window.requestExpLogicSoon(140, `${reason}_sent`);
             return true;
         }
     }
