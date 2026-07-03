@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         MargoNeuro - Optimized Edition
-// @version      64.8.15
+// @version      64.8.16
 // @description  Automatyczne wykrywanie, inteligentny zasięg, natywny auto-atak, poprawne limity poziomowe, naprawiony scroll.
 // @author       Ty & Gemini
 // @match        https://*.margonem.pl/*
@@ -22916,19 +22916,27 @@ function requestImmediateExpRetargetTick(reason = 'kill_confirmed') {
     try { nextAllowedClickTime = Math.min(Number(nextAllowedClickTime || 0) || now, now + 35); } catch (e) {}
 
     if (typeof window.requestExpLogicSoon === 'function') window.requestExpLogicSoon(0, reason);
+    const runNow = () => {
+        if (!window.isExping || window.__expStopRequested) return false;
+        const ctl = typeof getExpControlState === 'function' ? getExpControlState() : null;
+        if (ctl?.expLogicRunning) return false;
+        window.__lastExpLogicRunAt = 0;
+        window.__nextExpLogicAllowedAt = 0;
+        try { runExpLogic(); return true; } catch (e) { try { console.warn('[Margoneuro][EXP-RETARGET]', e); } catch (_) {} }
+        return false;
+    };
+    try { runNow(); } catch (e) {}
     if (window.__expImmediateRetargetTimer) clearTimeout(window.__expImmediateRetargetTimer);
     window.__expImmediateRetargetTimer = setTimeout(() => {
         window.__expImmediateRetargetTimer = null;
         if (!window.isExping || window.__expStopRequested) return;
         const ctl = typeof getExpControlState === 'function' ? getExpControlState() : null;
         if (ctl?.expLogicRunning) {
-            if (typeof window.requestExpLogicSoon === 'function') window.requestExpLogicSoon(80, `${reason}_retry`);
+            if (typeof window.requestExpLogicSoon === 'function') window.requestExpLogicSoon(35, `${reason}_retry`);
             return;
         }
-        window.__lastExpLogicRunAt = 0;
-        window.__nextExpLogicAllowedAt = 0;
-        try { runExpLogic(); } catch (e) { try { console.warn('[Margoneuro][EXP-RETARGET]', e); } catch (_) {} }
-    }, 25);
+        runNow();
+    }, 0);
     return true;
 }
 window.requestImmediateExpRetargetTick = requestImmediateExpRetargetTick;
@@ -26603,6 +26611,7 @@ function getStablePathToExpTarget(mob, distMap) {
 window.getStablePathToExpTarget = getStablePathToExpTarget;
 
 const MARGONEURO_ROUTE_OVERLAY_ID = 'margoneuroRouteOverlayCanvas';
+const MARGONEURO_ROUTE_TILE_OVERLAY_ID = 'margoneuroRouteTileOverlay';
 
 function isMargoneuroRouteOverlayEnabled() {
     return !!botSettings?.performance?.showRouteOverlay;
@@ -26610,10 +26619,16 @@ function isMargoneuroRouteOverlayEnabled() {
 
 function clearMargoneuroRouteOverlay() {
     const canvas = document.getElementById(MARGONEURO_ROUTE_OVERLAY_ID);
-    if (!canvas) return false;
-    const ctx = canvas.getContext('2d');
-    if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
-    canvas.style.display = 'none';
+    if (canvas) {
+        const ctx = canvas.getContext('2d');
+        if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+        canvas.style.display = 'none';
+    }
+    const tileOverlay = document.getElementById(MARGONEURO_ROUTE_TILE_OVERLAY_ID);
+    if (tileOverlay) {
+        tileOverlay.style.display = 'none';
+        tileOverlay.innerHTML = '';
+    }
     return true;
 }
 window.clearMargoneuroRouteOverlay = clearMargoneuroRouteOverlay;
@@ -26645,6 +26660,114 @@ function ensureMargoneuroRouteOverlayCanvas() {
     canvas.dataset.dpr = String(dpr);
     return canvas;
 }
+
+function getMargoneuroMapPlaneElement() {
+    if (typeof Engine === 'undefined' || !Engine?.map?.d) return null;
+    const now = Date.now();
+    const cached = window.__margoneuroMapPlaneCache;
+    if (cached?.el?.isConnected && cached.mapName === (Engine.map.d.name || '') && now - Number(cached.at || 0) < 2000) {
+        return cached.el;
+    }
+    const mapW = Number(Engine.map.d.x || Engine.map.d.width || 0);
+    const mapH = Number(Engine.map.d.y || Engine.map.d.height || 0);
+    const selectors = [
+        '#ground',
+        '#mapGround',
+        '#groundMap',
+        '#margoGround',
+        '#terrain',
+        '#map-layer',
+        '[id*="ground"]',
+        '[class*="ground"]'
+    ];
+    const candidates = [];
+    for (const selector of selectors) {
+        try {
+            document.querySelectorAll(selector).forEach(el => {
+                if (!el || el.closest?.('.hero-window') || el.closest?.('#margoRadarWindow')) return;
+                const rect = el.getBoundingClientRect?.();
+                if (!rect || rect.width < 280 || rect.height < 180) return;
+                const cs = getComputedStyle(el);
+                if (cs.display === 'none' || cs.visibility === 'hidden') return;
+                const scrollW = Number(el.scrollWidth || rect.width);
+                const scrollH = Number(el.scrollHeight || rect.height);
+                const expectedW = mapW > 0 ? mapW * 32 : 0;
+                const expectedH = mapH > 0 ? mapH * 32 : 0;
+                const worldLike = !expectedW || scrollW >= Math.min(expectedW, 900) || rect.width >= Math.min(expectedW, 900);
+                const tallEnough = !expectedH || scrollH >= Math.min(expectedH, 700) || rect.height >= Math.min(expectedH, 700);
+                if (!worldLike || !tallEnough) return;
+                const exactBonus = /ground/i.test(el.id || el.className || '') ? -500 : 0;
+                candidates.push({
+                    el,
+                    score: exactBonus + Math.abs(scrollW - (expectedW || scrollW)) * 0.001 + Math.abs(scrollH - (expectedH || scrollH)) * 0.001
+                });
+            });
+        } catch (e) {}
+    }
+    if (!candidates.length) return null;
+    candidates.sort((a, b) => a.score - b.score);
+    window.__margoneuroMapPlaneCache = { el: candidates[0].el, mapName: Engine.map.d.name || '', at: now };
+    return candidates[0].el;
+}
+window.getMargoneuroMapPlaneElement = getMargoneuroMapPlaneElement;
+
+function drawMargoneuroRouteOnMapPlane(route) {
+    const plane = getMargoneuroMapPlaneElement();
+    if (!plane || !route?.path?.length) return false;
+    let overlay = document.getElementById(MARGONEURO_ROUTE_TILE_OVERLAY_ID);
+    if (!overlay || overlay.parentElement !== plane) {
+        if (overlay) overlay.remove();
+        overlay = document.createElement('div');
+        overlay.id = MARGONEURO_ROUTE_TILE_OVERLAY_ID;
+        overlay.style.cssText = [
+            'position:absolute',
+            'left:0',
+            'top:0',
+            'width:100%',
+            'height:100%',
+            'pointer-events:none',
+            'z-index:60',
+            'display:block'
+        ].join(';');
+        const cs = getComputedStyle(plane);
+        if (cs.position === 'static') plane.style.position = 'relative';
+        plane.appendChild(overlay);
+    }
+    overlay.style.display = 'block';
+    const tile = 32;
+    const path = route.path.slice(0, 180);
+    while (overlay.children.length < path.length) {
+        const cell = document.createElement('div');
+        cell.style.cssText = [
+            'position:absolute',
+            'width:32px',
+            'height:32px',
+            'box-sizing:border-box',
+            'background:rgba(0,188,224,0.58)',
+            'border:1px solid rgba(0,88,122,0.25)',
+            'pointer-events:none'
+        ].join(';');
+        overlay.appendChild(cell);
+    }
+    for (let i = 0; i < overlay.children.length; i++) {
+        const cell = overlay.children[i];
+        if (i >= path.length) {
+            cell.style.display = 'none';
+            continue;
+        }
+        const step = path[i];
+        const x = Array.isArray(step) ? Number(step[0]) : Number(step?.x);
+        const y = Array.isArray(step) ? Number(step[1]) : Number(step?.y);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) {
+            cell.style.display = 'none';
+            continue;
+        }
+        cell.style.display = 'block';
+        cell.style.transform = `translate(${Math.round(x * tile)}px, ${Math.round(y * tile)}px)`;
+    }
+    return true;
+}
+window.drawMargoneuroRouteOnMapPlane = drawMargoneuroRouteOnMapPlane;
 
 function getMargoneuroRouteViewportRect() {
     const selectors = [
@@ -26779,6 +26902,17 @@ function getMargoneuroRouteOverlayPath() {
 function drawMargoneuroRouteOverlay() {
     if (!isMargoneuroRouteOverlayEnabled()) return clearMargoneuroRouteOverlay();
     const route = getMargoneuroRouteOverlayPath();
+    if (route?.path?.length && drawMargoneuroRouteOnMapPlane(route)) {
+        const canvas = document.getElementById(MARGONEURO_ROUTE_OVERLAY_ID);
+        if (canvas) {
+            const ctx = canvas.getContext('2d');
+            if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+            canvas.style.display = 'none';
+        }
+        return true;
+    }
+    const tileOverlay = document.getElementById(MARGONEURO_ROUTE_TILE_OVERLAY_ID);
+    if (tileOverlay) tileOverlay.style.display = 'none';
     const canvas = ensureMargoneuroRouteOverlayCanvas();
     const ctx = canvas.getContext('2d');
     if (!ctx) return false;
@@ -28443,8 +28577,7 @@ function getExpPipelineNextTarget(currentMob = null, options = {}) {
 window.getExpPipelineNextTarget = getExpPipelineNextTarget;
 
 function primeExpNextTargetPipeline(currentMob = null, reason = 'prime_next_target') {
-    const battleActive = typeof Engine !== 'undefined' && Engine?.battle && (Engine.battle.show || Engine.battle.d);
-    if (!window.isExping || window.__expStopRequested || battleActive) return false;
+    if (!window.isExping || window.__expStopRequested) return false;
     const now = Date.now();
     if (now - Number(window.__expNextTargetPipelinePrimedAt || 0) < 45) return false;
     const currentMap = Engine?.map?.d?.name || '';
@@ -40531,6 +40664,7 @@ if (
     if (!window.autoCloseLostFightInstalled) {
         window.autoCloseLostFightInstalled = true;
         let lastLostCloseTime = 0;
+        let lastWonRetargetTime = 0;
 
         setInterval(() => {
             // 1. Sprawdzamy, czy w ogóle jesteśmy w trakcie wyświetlanej walki
@@ -40553,9 +40687,6 @@ if (
 
             if (lostOrEnded) {
                 const now = Date.now();
-                if (now - lastLostCloseTime < 4500) return; // Cooldown na klikniecie
-
-                lastLostCloseTime = now;
                 const lostFight = (
                     battleText.includes('przegrales walke') ||
                     battleText.includes('porazka') ||
@@ -40568,10 +40699,17 @@ if (
                     (battleText.includes('walka zakonczona') && !lostFight)
                 );
                 if (wonFight && window.isExping && typeof forgetCurrentExpTargetAfterBattle === 'function') {
-                    forgetCurrentExpTargetAfterBattle('battle_won', { retargetDelayMs: 0 });
-                    if (typeof resetExpMoveCommand === 'function') resetExpMoveCommand('battle_won');
-                    if (typeof requestImmediateExpRetargetTick === 'function') requestImmediateExpRetargetTick('battle_won');
+                    if (now - lastWonRetargetTime > 120) {
+                        lastWonRetargetTime = now;
+                        forgetCurrentExpTargetAfterBattle('battle_won', { retargetDelayMs: 0 });
+                        if (typeof resetExpMoveCommand === 'function') resetExpMoveCommand('battle_won');
+                        if (typeof requestImmediateExpRetargetTick === 'function') requestImmediateExpRetargetTick('battle_won');
+                    }
+                    closeBattleEndScreen('battle_won');
                 }
+                if (wonFight && !lostFight) return;
+                if (now - lastLostCloseTime < 4500) return; // Cooldown na klikniecie
+                lastLostCloseTime = now;
                 if (window.isExping || window.isRushing || (typeof isRushing !== 'undefined' && isRushing)) {
                     ensureDeathRecoverySnapshot('lost_fight_screen');
                 }
@@ -40579,7 +40717,7 @@ if (
                 if (closed && window.logExp) window.logExp("Przegrana walka. Automatycznie opuszczam pole bitwy.", "#e53935");
                 else if (closed && window.logHero) window.logHero("Przegrana walka. Zamykam ekran walki.", "#e53935");
             }
-        }, 500);
+        }, 120);
     }
 // ==========================================
 // PŁYWAJĄCY RADAR TAKTYCZNY (DRAG & RESIZE)
